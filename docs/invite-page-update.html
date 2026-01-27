@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOS - Accept Invite</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f7;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .logo-container {
+            margin: 40px 0 30px;
+            text-align: center;
+        }
+        
+        .logo {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
+        }
+        
+        .app-title {
+            font-size: 36px;
+            font-weight: 700;
+            background: linear-gradient(90deg, #000 0%, #D9A600 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-top: 10px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 450px;
+            width: 100%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            gap: 8px;
+        }
+        
+        .step-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #e0e0e0;
+            transition: all 0.3s ease;
+        }
+        
+        .step-dot.active {
+            background: #D9A600;
+            width: 24px;
+            border-radius: 4px;
+        }
+        
+        h2 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #000;
+        }
+        
+        .subtitle {
+            color: rgba(0, 0, 0, 0.6);
+            font-size: 14px;
+            margin-bottom: 25px;
+            line-height: 1.4;
+        }
+        
+        .info-box {
+            background: #f8f8f8;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 25px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+        }
+        
+        .info-row:not(:last-child) {
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        }
+        
+        .info-label {
+            color: rgba(0, 0, 0, 0.5);
+            font-size: 14px;
+        }
+        
+        .info-value {
+            font-weight: 600;
+            color: #000;
+            font-size: 15px;
+        }
+        
+        .payer-name {
+            color: #D9A600;
+        }
+        
+        .form-section {
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .input-label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: rgba(0, 0, 0, 0.8);
+        }
+        
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        
+        .input-icon {
+            position: absolute;
+            left: 12px;
+            color: rgba(0, 0, 0, 0.4);
+            font-size: 16px;
+            pointer-events: none;
+        }
+        
+        input[type="text"],
+        input[type="email"],
+        input[type="tel"] {
+            width: 100%;
+            padding: 12px 12px 12px 40px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: #fff;
+        }
+        
+        input::placeholder {
+            color: rgba(0, 0, 0, 0.35);
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #D9A600;
+            background: #fff;
+        }
+        
+        .card-preview {
+            background: linear-gradient(135deg, #D9A600 0%, #F5C842 100%);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 30px;
+            height: 200px;
+            position: relative;
+            box-shadow: 0 8px 24px rgba(217, 166, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        
+        .card-chip {
+            font-size: 40px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+        }
+        
+        .card-number-preview {
+            font-size: 22px;
+            font-weight: 600;
+            color: white;
+            letter-spacing: 2px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            margin: 20px 0;
+        }
+        
+        .card-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        
+        .card-name-preview {
+            font-size: 14px;
+            font-weight: 600;
+            color: white;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        
+        .card-expiry-preview {
+            font-size: 14px;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        
+        .payment-fields {
+            background: #f8f8f8;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .full-width {
+            width: 100%;
+        }
+        
+        .split-row {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr 0.8fr;
+            gap: 12px;
+        }
+        
+        .card-number-wrapper {
+            position: relative;
+        }
+        
+        .card-brand {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 24px;
+        }
+        
+        @media (max-width: 480px) {
+            .split-row {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+        }
+        
+        .payout-options {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .payout-option {
+            flex: 1;
+            padding: 16px;
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            background: white;
+        }
+        
+        .payout-option.selected {
+            border-color: #D9A600;
+            background: #D9A600;
+            color: white;
+        }
+        
+        .payout-option.selected .option-title,
+        .payout-option.selected .option-subtitle {
+            color: white;
+        }
+        
+        .option-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        
+        .option-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #000;
+            margin-bottom: 4px;
+        }
+        
+        .option-subtitle {
+            font-size: 12px;
+            color: rgba(0, 0, 0, 0.5);
+        }
+        
+        .btn-primary {
+            width: 100%;
+            padding: 14px;
+            background: #D9A600;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #c49600;
+            transform: translateY(-1px);
+        }
+        
+        .btn-primary:disabled {
+            background: rgba(217, 166, 0, 0.4);
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            width: 100%;
+            padding: 14px;
+            background: transparent;
+            color: #000;
+            border: 2px solid #000;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+        
+        .error-message {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .success-message {
+            background: #efe;
+            border: 1px solid #cfc;
+            color: #060;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .terms-text {
+            font-size: 12px;
+            color: rgba(0, 0, 0, 0.5);
+            text-align: center;
+            margin-top: 20px;
+            line-height: 1.4;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-container">
+        <img src="eos-logo.png" alt="EOS Logo" class="logo">
+        <div class="app-title">EOS</div>
+    </div>
+    
+    <div class="container">
+        <!-- Step Indicators -->
+        <div class="step-indicator">
+            <div class="step-dot active" id="step1Dot"></div>
+            <div class="step-dot" id="step2Dot"></div>
+            <div class="step-dot" id="step3Dot"></div>
+        </div>
+        
+        <!-- Step 1: Verify Invite -->
+        <div id="step1" class="step">
+            <h2>Accept Invite</h2>
+            <p class="subtitle">Enter your invite code to get started</p>
+            
+            <div class="form-group">
+                <div class="input-wrapper">
+                    <span class="input-icon">🔑</span>
+                    <input type="text" id="inviteCode" placeholder="Enter invite code" autocomplete="off">
+                </div>
+            </div>
+            
+            <div id="verifyError" class="error-message hidden"></div>
+            
+            <button class="btn-primary" onclick="verifyInvite()">Verify Code</button>
+        </div>
+        
+        <!-- Step 2: Confirm Payer -->
+        <div id="step2" class="step hidden">
+            <h2>Confirm Details</h2>
+            <p class="subtitle">You've been invited to receive cash payouts</p>
+            
+            <div class="info-box">
+                <div class="info-row">
+                    <span class="info-label">From</span>
+                    <span class="info-value payer-name" id="payerName">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Your Phone</span>
+                    <span class="info-value" id="recipientPhone">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Payout Type</span>
+                    <span class="info-value">Missed Goal Payout</span>
+                </div>
+            </div>
+            
+            <p class="subtitle">You'll receive payouts when they miss their daily fitness goals</p>
+            
+            <button class="btn-primary" onclick="showPayoutSetup()">Set Up Payouts</button>
+            <button class="btn-secondary" onclick="goToStep(1)">Back</button>
+        </div>
+        
+        <!-- Step 3: Payout Setup -->
+        <div id="step3" class="step hidden">
+            <h2>Payout Method</h2>
+            <p class="subtitle">Choose how you'd like to receive payouts</p>
+            
+            <div class="payout-options">
+                <div class="payout-option selected" onclick="selectPayoutMethod('card')" id="cardOption">
+                    <div class="option-icon">💳</div>
+                    <div class="option-title">Debit Card</div>
+                    <div class="option-subtitle">Instant payouts</div>
+                </div>
+                <div class="payout-option" onclick="selectPayoutMethod('bank')" id="bankOption">
+                    <div class="option-icon">🏦</div>
+                    <div class="option-title">Bank Account</div>
+                    <div class="option-subtitle">1-2 business days</div>
+                </div>
+            </div>
+            
+            <!-- Card Input Form -->
+            <div id="cardForm" class="form-section">
+                <!-- Card Visual Preview -->
+                <div class="card-preview">
+                    <div class="card-chip">💳</div>
+                    <div class="card-number-preview" id="cardNumberPreview">•••• •••• •••• ••••</div>
+                    <div class="card-bottom">
+                        <div class="card-name-preview" id="cardNamePreview">CARDHOLDER NAME</div>
+                        <div class="card-expiry-preview" id="cardExpiryPreview">MM/YY</div>
+                    </div>
+                </div>
+                
+                <!-- Card Input Fields -->
+                <div class="payment-fields">
+                    <div class="form-group full-width">
+                        <label class="input-label">Email Address</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">✉️</span>
+                            <input type="email" id="recipientEmail" placeholder="your@email.com" autocomplete="email">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label class="input-label">Cardholder Name</label>
+                        <div class="input-wrapper">
+                            <span class="input-icon">👤</span>
+                            <input type="text" id="cardholderName" placeholder="John Doe" autocomplete="name">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label class="input-label">Card Number</label>
+                        <div class="input-wrapper card-number-wrapper">
+                            <span class="input-icon">💳</span>
+                            <input type="text" 
+                                   id="cardNumber" 
+                                   placeholder="1234 5678 9012 3456" 
+                                   maxlength="19" 
+                                   autocomplete="cc-number"
+                                   inputmode="numeric">
+                            <div class="card-brand" id="cardBrand"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="split-row">
+                        <div class="form-group">
+                            <label class="input-label">Expiry Date</label>
+                            <div class="input-wrapper">
+                                <span class="input-icon">📅</span>
+                                <input type="text" 
+                                       id="cardExpiry" 
+                                       placeholder="MM/YY" 
+                                       maxlength="5" 
+                                       autocomplete="cc-exp"
+                                       inputmode="numeric">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="input-label">Security Code</label>
+                            <div class="input-wrapper">
+                                <span class="input-icon">🔒</span>
+                                <input type="text" 
+                                       id="cardCVV" 
+                                       placeholder="CVV" 
+                                       maxlength="4" 
+                                       autocomplete="cc-csc"
+                                       inputmode="numeric">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="input-label">ZIP Code</label>
+                            <div class="input-wrapper">
+                                <span class="input-icon">📍</span>
+                                <input type="text" 
+                                       id="zipCode" 
+                                       placeholder="12345" 
+                                       maxlength="10" 
+                                       autocomplete="postal-code"
+                                       inputmode="numeric">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Bank Form (Hidden by default) -->
+            <div id="bankForm" class="form-section hidden">
+                <p class="subtitle">You'll be redirected to securely connect your bank account</p>
+            </div>
+            
+            <div id="setupError" class="error-message hidden"></div>
+            <div id="setupSuccess" class="success-message hidden"></div>
+            
+            <button class="btn-primary" onclick="submitPayoutSetup()" id="submitBtn">
+                <span id="submitBtnText">Complete Setup</span>
+                <span id="submitSpinner" class="loading-spinner hidden"></span>
+            </button>
+            
+            <button class="btn-secondary" onclick="goToStep(2)">Back</button>
+            
+            <p class="terms-text">
+                By continuing, you agree to receive payouts according to the terms set by the inviter. 
+                Your payment information is securely processed by Stripe.
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        let currentInvite = null;
+        let selectedMethod = 'card';
+        
+        // Card preview updates
+        document.getElementById('cardholderName').addEventListener('input', function(e) {
+            const preview = document.getElementById('cardNamePreview');
+            preview.textContent = e.target.value.toUpperCase() || 'CARDHOLDER NAME';
+        });
+        
+        // Format and preview card number
+        document.getElementById('cardNumber').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\s/g, '');
+            let formattedValue = value.match(/.{1,4}/g)?.join(' ') || value;
+            e.target.value = formattedValue;
+            
+            // Update preview
+            const preview = document.getElementById('cardNumberPreview');
+            if (value.length > 0) {
+                let maskedNumber = value.slice(0, 4) + ' ';
+                if (value.length > 4) {
+                    maskedNumber += '•'.repeat(Math.min(value.length - 4, 8)).match(/.{1,4}/g)?.join(' ') || '';
+                    if (value.length > 12) {
+                        maskedNumber += ' ' + value.slice(12);
+                    }
+                }
+                preview.textContent = maskedNumber.padEnd(19, '•').replace(/•/g, (match, offset) => {
+                    return offset > 13 ? '•' : match;
+                });
+            } else {
+                preview.textContent = '•••• •••• •••• ••••';
+            }
+            
+            // Detect card brand
+            const brandIcon = document.getElementById('cardBrand');
+            if (value.startsWith('4')) {
+                brandIcon.textContent = '💳'; // Visa
+            } else if (value.startsWith('5')) {
+                brandIcon.textContent = '💳'; // Mastercard
+            } else if (value.startsWith('3')) {
+                brandIcon.textContent = '💳'; // Amex
+            } else {
+                brandIcon.textContent = '';
+            }
+        });
+        
+        // Format and preview expiry
+        document.getElementById('cardExpiry').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\D/g, '');
+            if (value.length >= 2) {
+                value = value.slice(0, 2) + '/' + value.slice(2, 4);
+            }
+            e.target.value = value;
+            
+            // Update preview
+            const preview = document.getElementById('cardExpiryPreview');
+            preview.textContent = value || 'MM/YY';
+        });
+        
+        // Only allow numbers for CVV
+        document.getElementById('cardCVV').addEventListener('input', function(e) {
+            e.target.value = e.target.value.replace(/\D/g, '');
+        });
+        
+        // Only allow numbers/letters for ZIP
+        document.getElementById('zipCode').addEventListener('input', function(e) {
+            e.target.value = e.target.value.replace(/[^0-9A-Za-z]/g, '');
+        });
+        
+        function goToStep(step) {
+            // Hide all steps
+            document.querySelectorAll('.step').forEach(s => s.classList.add('hidden'));
+            document.querySelectorAll('.step-dot').forEach(d => d.classList.remove('active'));
+            
+            // Show selected step
+            document.getElementById('step' + step).classList.remove('hidden');
+            document.getElementById('step' + step + 'Dot').classList.add('active');
+        }
+        
+        function selectPayoutMethod(method) {
+            selectedMethod = method;
+            
+            // Update UI
+            document.querySelectorAll('.payout-option').forEach(opt => opt.classList.remove('selected'));
+            document.getElementById(method + 'Option').classList.add('selected');
+            
+            // Show/hide forms
+            if (method === 'card') {
+                document.getElementById('cardForm').classList.remove('hidden');
+                document.getElementById('bankForm').classList.add('hidden');
+                document.getElementById('submitBtnText').textContent = 'Complete Setup';
+            } else {
+                document.getElementById('cardForm').classList.add('hidden');
+                document.getElementById('bankForm').classList.remove('hidden');
+                document.getElementById('submitBtnText').textContent = 'Connect Bank Account';
+            }
+        }
+        
+        async function verifyInvite() {
+            const code = document.getElementById('inviteCode').value.trim();
+            const errorDiv = document.getElementById('verifyError');
+            
+            if (!code) {
+                errorDiv.textContent = 'Please enter your invite code';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            errorDiv.classList.add('hidden');
+            
+            try {
+                const response = await fetch(`https://api.live-eos.com/verify-invite/${code}`);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Invalid invite code');
+                }
+                
+                currentInvite = data;
+                
+                // Update step 2 with payer info
+                document.getElementById('payerName').textContent = data.payerName || 'EOS User';
+                document.getElementById('recipientPhone').textContent = formatPhone(data.phone);
+                
+                goToStep(2);
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.classList.remove('hidden');
+            }
+        }
+        
+        function formatPhone(phone) {
+            const cleaned = phone.replace(/\D/g, '');
+            if (cleaned.length === 11 && cleaned[0] === '1') {
+                return `+1 (${cleaned.slice(1, 4)}) ${cleaned.slice(4, 7)}-${cleaned.slice(7)}`;
+            } else if (cleaned.length === 10) {
+                return `(${cleaned.slice(0, 3)}) ${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+            }
+            return phone;
+        }
+        
+        function showPayoutSetup() {
+            goToStep(3);
+        }
+        
+        async function submitPayoutSetup() {
+            const errorDiv = document.getElementById('setupError');
+            const successDiv = document.getElementById('setupSuccess');
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('submitBtnText');
+            const spinner = document.getElementById('submitSpinner');
+            
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
+            
+            if (selectedMethod === 'bank') {
+                // Redirect to Stripe Connect for bank account
+                try {
+                    submitBtn.disabled = true;
+                    spinner.classList.remove('hidden');
+                    
+                    const response = await fetch('https://api.live-eos.com/recipient-onboarding', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            inviteCode: currentInvite.inviteCode,
+                            email: document.getElementById('recipientEmail').value || null
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(data.detail || 'Failed to create onboarding link');
+                    }
+                    
+                    // Redirect to Stripe Connect
+                    window.location.href = data.onboardingUrl;
+                } catch (error) {
+                    errorDiv.textContent = error.message;
+                    errorDiv.classList.remove('hidden');
+                    submitBtn.disabled = false;
+                    spinner.classList.add('hidden');
+                }
+                return;
+            }
+            
+            // Card setup
+            const cardholderName = document.getElementById('cardholderName').value.trim();
+            const cardNumber = document.getElementById('cardNumber').value.replace(/\s/g, '');
+            const cardExpiry = document.getElementById('cardExpiry').value.trim();
+            const cardCVV = document.getElementById('cardCVV').value.trim();
+            const zipCode = document.getElementById('zipCode').value.trim();
+            const email = document.getElementById('recipientEmail').value.trim();
+            
+            // Validate inputs
+            if (!email || !email.includes('@')) {
+                errorDiv.textContent = 'Please enter a valid email address';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            if (!cardholderName) {
+                errorDiv.textContent = 'Please enter the cardholder name';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            if (cardNumber.length < 13 || cardNumber.length > 19) {
+                errorDiv.textContent = 'Please enter a valid card number';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            const expiryParts = cardExpiry.split('/');
+            if (expiryParts.length !== 2 || !expiryParts[0] || !expiryParts[1]) {
+                errorDiv.textContent = 'Please enter expiry in MM/YY format';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            if (cardCVV.length < 3 || cardCVV.length > 4) {
+                errorDiv.textContent = 'Please enter a valid security code (CVV)';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            if (!zipCode || zipCode.length < 5) {
+                errorDiv.textContent = 'Please enter your billing ZIP code';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            try {
+                submitBtn.disabled = true;
+                spinner.classList.remove('hidden');
+                
+                // Submit to backend
+                const response = await fetch('https://api.live-eos.com/recipient-onboarding-custom', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        inviteCode: currentInvite.inviteCode,
+                        email: email,
+                        cardDetails: {
+                            name: cardholderName,
+                            number: cardNumber,
+                            exp_month: parseInt(expiryParts[0]),
+                            exp_year: 2000 + parseInt(expiryParts[1]),
+                            cvc: cardCVV,
+                            address_zip: zipCode
+                        }
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to set up payout method');
+                }
+                
+                successDiv.textContent = '✅ Payout method successfully added! You can now receive payouts.';
+                successDiv.classList.remove('hidden');
+                
+                // Clear form
+                document.getElementById('cardholderName').value = '';
+                document.getElementById('cardNumber').value = '';
+                document.getElementById('cardExpiry').value = '';
+                document.getElementById('cardCVV').value = '';
+                document.getElementById('zipCode').value = '';
+                document.getElementById('recipientEmail').value = '';
+                
+                // Reset card preview
+                document.getElementById('cardNamePreview').textContent = 'CARDHOLDER NAME';
+                document.getElementById('cardNumberPreview').textContent = '•••• •••• •••• ••••';
+                document.getElementById('cardExpiryPreview').textContent = 'MM/YY';
+                
+                // Redirect after 3 seconds
+                setTimeout(() => {
+                    window.location.href = 'https://live-eos.com';
+                }, 3000);
+                
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.classList.remove('hidden');
+                submitBtn.disabled = false;
+                spinner.classList.add('hidden');
+            }
+        }
+        
+        // Check for invite code in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const codeFromUrl = urlParams.get('code');
+        if (codeFromUrl) {
+            document.getElementById('inviteCode').value = codeFromUrl;
+            verifyInvite();
+        }
+    </script>
+</body>
+</html>

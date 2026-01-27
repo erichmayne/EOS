@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" width="600" height="200">
+  <defs>
+    <!-- Define the gradient -->
+    <linearGradient id="eosGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#000000" />
+      <stop offset="100%" style="stop-color:#D9A600" />
+    </linearGradient>
+  </defs>
+  
+  <!-- White background (can be removed for transparent) -->
+  <rect width="600" height="200" fill="white"/>
+  
+  <!-- EOS text with gradient fill -->
+  <text x="300" y="140" 
+        font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" 
+        font-size="150" 
+        font-weight="900" 
+        text-anchor="middle" 
+        fill="url(#eosGradient)"
+        letter-spacing="-0.05em">EOS</text>
+</svg>

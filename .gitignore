@@ -1,0 +1,28 @@
+.env
+.env.*
+node_modules/
+npm-debug.log
+
+# macOS
+.DS_Store
+
+# Xcode
+DerivedData/
+*.xcworkspace
+xcuserdata/
+*.xcbkptlist
+*.xcuserstate
+
+# SwiftPM
+.swiftpm/
+Package.resolved
+
+# IDEs
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Local secrets (never commit)
+docs/SECRETS-LOCAL.md

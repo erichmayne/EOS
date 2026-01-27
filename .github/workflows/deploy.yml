@@ -1,0 +1,32 @@
+name: Deploy to server (SSH)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          script: |
+            set -e
+            cd /home/user/EOS
+            git fetch --all
+            git reset --hard origin/main
+            if [ -f docker-compose.yml ]; then
+              docker compose up -d --build
+            elif [ -f backend/docker-compose.yml ]; then
+              docker compose -f backend/docker-compose.yml up -d --build
+            else
+              cd backend
+              npm ci --omit=dev
+              pm2 restart server.js || pm2 start server.js --name eos-backend
+            fi

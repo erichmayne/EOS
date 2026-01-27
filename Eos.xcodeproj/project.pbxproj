@@ -1,0 +1,672 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		51463B132F0D725300AB4AC7 /* Stripe in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B122F0D725300AB4AC7 /* Stripe */; };
+		51463B152F0D725300AB4AC7 /* StripeApplePay in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B142F0D725300AB4AC7 /* StripeApplePay */; };
+		51463B172F0D725300AB4AC7 /* StripeCardScan in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B162F0D725300AB4AC7 /* StripeCardScan */; };
+		51463B192F0D725300AB4AC7 /* StripeConnect in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B182F0D725300AB4AC7 /* StripeConnect */; };
+		51463B1B2F0D725300AB4AC7 /* StripeFinancialConnections in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B1A2F0D725300AB4AC7 /* StripeFinancialConnections */; };
+		51463B1D2F0D725300AB4AC7 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B1C2F0D725300AB4AC7 /* StripePaymentSheet */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		51463A9E2F0B8FF400AB4AC7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 51463A832F0B8FF300AB4AC7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 51463A8A2F0B8FF300AB4AC7;
+			remoteInfo = "morning-would";
+		};
+		51463AA82F0B8FF400AB4AC7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 51463A832F0B8FF300AB4AC7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 51463A8A2F0B8FF300AB4AC7;
+			remoteInfo = "morning-would";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		51463A8B2F0B8FF300AB4AC7 /* EOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		51463A9D2F0B8FF400AB4AC7 /* morning-wouldTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "morning-wouldTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		51463AA72F0B8FF400AB4AC7 /* morning-wouldUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "morning-wouldUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		51463B1F2F0D737500AB4AC7 /* Exceptions for "morning-would" folder in "morning-would" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 51463A8A2F0B8FF300AB4AC7 /* morning-would */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		51463A8D2F0B8FF300AB4AC7 /* morning-would */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				51463B1F2F0D737500AB4AC7 /* Exceptions for "morning-would" folder in "morning-would" target */,
+			);
+			path = "morning-would";
+			sourceTree = "<group>";
+		};
+		51463AA02F0B8FF400AB4AC7 /* morning-wouldTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "morning-wouldTests";
+			sourceTree = "<group>";
+		};
+		51463AAA2F0B8FF400AB4AC7 /* morning-wouldUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "morning-wouldUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		51463A882F0B8FF300AB4AC7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51463B1B2F0D725300AB4AC7 /* StripeFinancialConnections in Frameworks */,
+				51463B172F0D725300AB4AC7 /* StripeCardScan in Frameworks */,
+				51463B132F0D725300AB4AC7 /* Stripe in Frameworks */,
+				51463B192F0D725300AB4AC7 /* StripeConnect in Frameworks */,
+				51463B1D2F0D725300AB4AC7 /* StripePaymentSheet in Frameworks */,
+				51463B152F0D725300AB4AC7 /* StripeApplePay in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		51463A9A2F0B8FF400AB4AC7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		51463AA42F0B8FF400AB4AC7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		51463A822F0B8FF300AB4AC7 = {
+			isa = PBXGroup;
+			children = (
+				51463A8D2F0B8FF300AB4AC7 /* morning-would */,
+				51463AA02F0B8FF400AB4AC7 /* morning-wouldTests */,
+				51463AAA2F0B8FF400AB4AC7 /* morning-wouldUITests */,
+				51463A8C2F0B8FF300AB4AC7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		51463A8C2F0B8FF300AB4AC7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				51463A8B2F0B8FF300AB4AC7 /* EOS.app */,
+				51463A9D2F0B8FF400AB4AC7 /* morning-wouldTests.xctest */,
+				51463AA72F0B8FF400AB4AC7 /* morning-wouldUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		51463A8A2F0B8FF300AB4AC7 /* morning-would */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 51463AB12F0B8FF400AB4AC7 /* Build configuration list for PBXNativeTarget "morning-would" */;
+			buildPhases = (
+				51463A872F0B8FF300AB4AC7 /* Sources */,
+				51463A882F0B8FF300AB4AC7 /* Frameworks */,
+				51463A892F0B8FF300AB4AC7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				51463A8D2F0B8FF300AB4AC7 /* morning-would */,
+			);
+			name = "morning-would";
+			packageProductDependencies = (
+				51463B122F0D725300AB4AC7 /* Stripe */,
+				51463B142F0D725300AB4AC7 /* StripeApplePay */,
+				51463B162F0D725300AB4AC7 /* StripeCardScan */,
+				51463B182F0D725300AB4AC7 /* StripeConnect */,
+				51463B1A2F0D725300AB4AC7 /* StripeFinancialConnections */,
+				51463B1C2F0D725300AB4AC7 /* StripePaymentSheet */,
+			);
+			productName = "morning-would";
+			productReference = 51463A8B2F0B8FF300AB4AC7 /* EOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		51463A9C2F0B8FF400AB4AC7 /* morning-wouldTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 51463AB42F0B8FF400AB4AC7 /* Build configuration list for PBXNativeTarget "morning-wouldTests" */;
+			buildPhases = (
+				51463A992F0B8FF400AB4AC7 /* Sources */,
+				51463A9A2F0B8FF400AB4AC7 /* Frameworks */,
+				51463A9B2F0B8FF400AB4AC7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				51463A9F2F0B8FF400AB4AC7 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				51463AA02F0B8FF400AB4AC7 /* morning-wouldTests */,
+			);
+			name = "morning-wouldTests";
+			packageProductDependencies = (
+			);
+			productName = "morning-wouldTests";
+			productReference = 51463A9D2F0B8FF400AB4AC7 /* morning-wouldTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		51463AA62F0B8FF400AB4AC7 /* morning-wouldUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 51463AB72F0B8FF400AB4AC7 /* Build configuration list for PBXNativeTarget "morning-wouldUITests" */;
+			buildPhases = (
+				51463AA32F0B8FF400AB4AC7 /* Sources */,
+				51463AA42F0B8FF400AB4AC7 /* Frameworks */,
+				51463AA52F0B8FF400AB4AC7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				51463AA92F0B8FF400AB4AC7 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				51463AAA2F0B8FF400AB4AC7 /* morning-wouldUITests */,
+			);
+			name = "morning-wouldUITests";
+			packageProductDependencies = (
+			);
+			productName = "morning-wouldUITests";
+			productReference = 51463AA72F0B8FF400AB4AC7 /* morning-wouldUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		51463A832F0B8FF300AB4AC7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					51463A8A2F0B8FF300AB4AC7 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					51463A9C2F0B8FF400AB4AC7 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 51463A8A2F0B8FF300AB4AC7;
+					};
+					51463AA62F0B8FF400AB4AC7 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 51463A8A2F0B8FF300AB4AC7;
+					};
+				};
+			};
+			buildConfigurationList = 51463A862F0B8FF300AB4AC7 /* Build configuration list for PBXProject "Eos" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 51463A822F0B8FF300AB4AC7;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 51463A8C2F0B8FF300AB4AC7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				51463A8A2F0B8FF300AB4AC7 /* morning-would */,
+				51463A9C2F0B8FF400AB4AC7 /* morning-wouldTests */,
+				51463AA62F0B8FF400AB4AC7 /* morning-wouldUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		51463A892F0B8FF300AB4AC7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		51463A9B2F0B8FF400AB4AC7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		51463AA52F0B8FF400AB4AC7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		51463A872F0B8FF300AB4AC7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		51463A992F0B8FF400AB4AC7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		51463AA32F0B8FF400AB4AC7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		51463A9F2F0B8FF400AB4AC7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 51463A8A2F0B8FF300AB4AC7 /* morning-would */;
+			targetProxy = 51463A9E2F0B8FF400AB4AC7 /* PBXContainerItemProxy */;
+		};
+		51463AA92F0B8FF400AB4AC7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 51463A8A2F0B8FF300AB4AC7 /* morning-would */;
+			targetProxy = 51463AA82F0B8FF400AB4AC7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		51463AAF2F0B8FF400AB4AC7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		51463AB02F0B8FF400AB4AC7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		51463AB22F0B8FF400AB4AC7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "morning-would/Entitlements.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "morning-would/Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to track your push-ups using on-device AI.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We use your contacts only so you can pick a recipient's phone number to invite.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eos;
+				PRODUCT_NAME = EOS;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		51463AB32F0B8FF400AB4AC7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "morning-would/Entitlements.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "morning-would/Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to track your push-ups using on-device AI.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "We use your contacts only so you can pick a recipient's phone number to invite.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eos;
+				PRODUCT_NAME = EOS;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		51463AB52F0B8FF400AB4AC7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/morning-would.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/morning-would";
+			};
+			name = Debug;
+		};
+		51463AB62F0B8FF400AB4AC7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/morning-would.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/morning-would";
+			};
+			name = Release;
+		};
+		51463AB82F0B8FF400AB4AC7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "morning-would";
+			};
+			name = Debug;
+		};
+		51463AB92F0B8FF400AB4AC7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3W9Q24UY7J;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "morning-would";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		51463A862F0B8FF300AB4AC7 /* Build configuration list for PBXProject "Eos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				51463AAF2F0B8FF400AB4AC7 /* Debug */,
+				51463AB02F0B8FF400AB4AC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		51463AB12F0B8FF400AB4AC7 /* Build configuration list for PBXNativeTarget "morning-would" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				51463AB22F0B8FF400AB4AC7 /* Debug */,
+				51463AB32F0B8FF400AB4AC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		51463AB42F0B8FF400AB4AC7 /* Build configuration list for PBXNativeTarget "morning-wouldTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				51463AB52F0B8FF400AB4AC7 /* Debug */,
+				51463AB62F0B8FF400AB4AC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		51463AB72F0B8FF400AB4AC7 /* Build configuration list for PBXNativeTarget "morning-wouldUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				51463AB82F0B8FF400AB4AC7 /* Debug */,
+				51463AB92F0B8FF400AB4AC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 25.3.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		51463B122F0D725300AB4AC7 /* Stripe */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = Stripe;
+		};
+		51463B142F0D725300AB4AC7 /* StripeApplePay */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeApplePay;
+		};
+		51463B162F0D725300AB4AC7 /* StripeCardScan */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeCardScan;
+		};
+		51463B182F0D725300AB4AC7 /* StripeConnect */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeConnect;
+		};
+		51463B1A2F0D725300AB4AC7 /* StripeFinancialConnections */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeFinancialConnections;
+		};
+		51463B1C2F0D725300AB4AC7 /* StripePaymentSheet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePaymentSheet;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 51463A832F0B8FF300AB4AC7 /* Project object */;
+}
