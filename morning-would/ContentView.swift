@@ -753,8 +753,7 @@ final class DepositPaymentService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
-        let payload: [String: Any] = ["amount": cents, "userId": userId]
+        let payload: [String: Any] = ["amount": cents]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload, options: [])
 
         URLSession.shared.dataTask(with: request) { data, _, error in
@@ -778,12 +777,11 @@ final class DepositPaymentService: ObservableObject {
             configuration.merchantDisplayName = "EOS"
             configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKeySecret)
             
-            // Apple Pay disabled temporarily until account approval
-            configuration.applePay = nil
-            // configuration.applePay = .init(
-            //     merchantId: "merchant.com.emayne.eos",
-            //     merchantCountryCode: "US"
-            // )
+            // Apple Pay ENABLED
+            configuration.applePay = .init(
+                merchantId: "merchant.com.emayne.eos",
+                merchantCountryCode: "US"
+            )
             
             // Allow delayed payment methods if available
             configuration.allowsDelayedPaymentMethods = true
@@ -842,6 +840,13 @@ struct CustomRecipient: Codable, Identifiable {
         self.phone = phone
         self.status = "pending"
     }
+    
+    init(id: String, name: String, phone: String, status: String) {
+        self.id = id
+        self.name = name
+        self.phone = phone
+        self.status = status
+    }
 }
 
 // MARK: - UI Components
@@ -890,7 +895,7 @@ struct RecipientRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(recipient.name)
                         .font(.system(.body, design: .rounded, weight: isSelected ? .medium : .regular))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                     Text(recipient.phone)
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(Color.black.opacity(0.6))
@@ -959,6 +964,12 @@ struct ProfileView: View {
     @AppStorage("payoutCommitted") private var payoutCommitted: Bool = false
     @AppStorage("committedPayoutAmount") private var committedPayoutAmount: Double = 0.0
 
+    @AppStorage("destinationCommitted") private var destinationCommitted: Bool = false
+    @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
+    @AppStorage("committedDestination") private var committedDestination: String = "charity"
+    @State private var showDestinationSelector: Bool = false
+    @State private var activeRecipientName: String = ""
+    @State private var activeRecipientId: String = ""
     @State private var depositAmount: String = ""
     @State private var showPayoutSelector: Bool = false
     @StateObject private var depositPaymentService = DepositPaymentService()
@@ -1112,6 +1123,12 @@ struct ProfileView: View {
                                             TextField("Phone", text: $profilePhone)
                                                 .font(.system(.subheadline, design: .rounded))
                                                 .keyboardType(.phonePad)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.gray.opacity(0.2))
+                                )
+                                .foregroundStyle(Color.black)
                                                 .foregroundStyle(Color.black)
                                         }
                                         Divider()
@@ -1281,6 +1298,25 @@ struct ProfileView: View {
                                         }
                                     }
                                     .padding(.vertical, 4)
+
+                        // Commit Destination Button
+                        Button(action: commitDestination) {
+                            HStack {
+                                Image(systemName: destinationCommitted ? "checkmark.circle.fill" : "lock.fill")
+                                    .font(.body)
+                                Text(lockButtonText)
+                                    .font(.system(.body, design: .rounded, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                            )
+                            .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 8)
                                 }
                             }
                         }
@@ -1291,14 +1327,45 @@ struct ProfileView: View {
                     Text("Payout Destination")
                         .foregroundStyle(Color.white.opacity(0.95))
                 } footer: {
-                    Text("Select where missed goal payouts will be sent.")
+                    Text(destinationCommitted ? "Destination locked: \(payoutType == "charity" ? "Charity" : "Custom recipient")." : "Select where missed goal payouts will be sent.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.8))
                 }
                 
                 // Missed Goal Payout Amount - Separate prominent section
+                // Missed Goal Payout Amount - Separate prominent section
                 Section {
                     VStack(spacing: 16) {
+                        // Show minimized committed bar OR full selector
+                        if payoutCommitted && !showPayoutSelector {
+                            // Minimized committed bar - tap to expand
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    showPayoutSelector = true
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.title2)
+                                        .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("$\(committedPayoutAmount, specifier: "%.0f") committed for payout")
+                                            .font(.system(.body, design: .rounded, weight: .semibold))
+                                            .foregroundStyle(Color.black)
+                                        Text("Tap to change amount")
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(Color.black.opacity(0.5))
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.black.opacity(0.4))
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            // Full payout selector
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Payout Amount")
@@ -1319,16 +1386,6 @@ struct ProfileView: View {
                                     .frame(width: 80)
                                     .multilineTextAlignment(.trailing)
                                     .focused($isPayoutAmountFocused)
-                                    .toolbar {
-                                        ToolbarItemGroup(placement: .keyboard) {
-                                            Spacer()
-                                            Button("Done") {
-                                                isPayoutAmountFocused = false
-                                            }
-                                            .font(.system(.body, design: .rounded, weight: .medium))
-                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                        }
-                                    }
                             }
                         }
                         
@@ -1338,7 +1395,7 @@ struct ProfileView: View {
                                 ForEach([10.0, 50.0, 100.0], id: \.self) { amount in
                                     Button(action: { 
                                         missedGoalPayout = amount
-                                        isPayoutAmountFocused = false // Dismiss keyboard
+                                            isPayoutAmountFocused = false
                                     }) {
                                         Text("$\(Int(amount))")
                                             .font(.system(.body, design: .rounded, weight: .semibold))
@@ -1357,11 +1414,10 @@ struct ProfileView: View {
                             }
                             
                             Button(action: { 
-                                // Focus on the text field and clear if it's a preset amount
                                 if missedGoalPayout == 10 || missedGoalPayout == 50 || missedGoalPayout == 100 {
-                                    missedGoalPayout = 0 // Clear for new custom input
+                                        missedGoalPayout = 0
                                 }
-                                isPayoutAmountFocused = true // Show keyboard
+                                    isPayoutAmountFocused = true
                             }) {
                                 HStack {
                                     Image(systemName: "pencil.circle.fill")
@@ -1380,6 +1436,29 @@ struct ProfileView: View {
                                 .foregroundStyle(Color.black)
                             }
                             .buttonStyle(.plain)
+                            }
+                            
+                            // Commit Payout Button
+                            Button(action: commitPayout) {
+                                HStack {
+                                    Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
+                                        .font(.body)
+                                    Text(payoutCommitted ? "Update Commitment" : "Commit Payout")
+                                        .font(.system(.body, design: .rounded, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(missedGoalPayout > 0 ? 
+                                            Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : 
+                                            Color.gray.opacity(0.3))
+                                )
+                                .foregroundStyle(missedGoalPayout > 0 ? Color.white : Color.black.opacity(0.4))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(missedGoalPayout <= 0)
+                            .padding(.top, 4)
                         }
                     }
                     .listRowBackground(Color.white)
@@ -1387,7 +1466,7 @@ struct ProfileView: View {
                     Text("Missed Goal Payout")
                         .foregroundStyle(Color.white.opacity(0.95))
                 } footer: {
-                    Text("This amount will be deducted from your balance and sent to your selected destination each time you miss your daily goal.")
+                    Text(payoutCommitted ? "Your payout is committed. Miss your goal and $\(Int(committedPayoutAmount)) goes to your selected destination." : "This amount will be deducted from your balance and sent to your selected destination each time you miss your daily goal.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.8))
                 }
@@ -1497,8 +1576,14 @@ struct ProfileView: View {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") {
+                        // Dismiss all focused states
+                        isDepositAmountFocused = false
+                        isPayoutAmountFocused = false
+                        // Dismiss keyboard for all other text fields
                         UIApplication.shared.eos_dismissKeyboard()
                     }
+                    .font(.system(.body, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                 }
             }
             .sheet(isPresented: $showingAddRecipient) {
@@ -1514,19 +1599,8 @@ struct ProfileView: View {
                     }
                 )
             }
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isDepositAmountFocused = false
-                        isPayoutAmountFocused = false
-                    }
-                    .font(.system(.body, design: .rounded, weight: .medium))
-                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                }
-            }
             .sheet(isPresented: $showSignInView) {
-                SignInView(isSignedIn: $isSignedIn, profileEmail: $profileEmail)
+                SignInView(isSignedIn: $isSignedIn, profileUsername: $profileUsername, profileEmail: $profileEmail, profilePhone: $profilePhone, profileCompleted: $profileCompleted)
             }
             .sheet(isPresented: $showCreateAccountView) {
                 CreateAccountView(
@@ -1539,12 +1613,116 @@ struct ProfileView: View {
             }
             .onAppear {
                 loadCustomRecipients()
+                refreshBalance()
+                syncInviteStatuses()
             }
         }
     
     private var isProfileValid: Bool {
-        !profileUsername.isEmpty && !profileEmail.isEmpty && 
-        !profilePhone.isEmpty && !profilePassword.isEmpty
+        // Password only required for new accounts, not updates
+        let baseValid = !profileUsername.isEmpty && !profileEmail.isEmpty && !profilePhone.isEmpty
+        return isSignedIn ? baseValid : (baseValid && !profilePassword.isEmpty)
+    }
+
+    private var lockButtonText: String {
+        if !destinationCommitted {
+            return "Lock Destination"
+        }
+        // Check if user changed destination type or recipient
+        let destChanged = payoutType.lowercased() != committedDestination.lowercased()
+        let recipientChanged = payoutType == "custom" && selectedRecipientId != committedRecipientId && !selectedRecipientId.isEmpty
+        if destChanged || recipientChanged {
+            return "Change Payout Lock"
+        }
+        return "Destination Locked"
+    }
+
+    
+
+    private func commitPayout() {
+        guard missedGoalPayout > 0 else { return }
+        
+        // Update committed values
+        committedPayoutAmount = missedGoalPayout
+        payoutCommitted = true
+        showPayoutSelector = false
+        
+        // Save to backend
+        saveProfile()
+    }
+
+    private func commitDestination() {
+        guard !payoutType.isEmpty else { return }
+        committedDestination = payoutType
+        // Save recipient ID if custom payout type
+        if payoutType.lowercased() == "custom" {
+            committedRecipientId = selectedRecipientId
+        } else {
+            committedRecipientId = ""
+        }
+        destinationCommitted = true
+        showDestinationSelector = false
+        saveProfile()
+    }
+
+    private func fetchRecipientStatus() {
+        guard let userId = UserDefaults.standard.string(forKey: "userId"), !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "/users/\(userId)/recipient", relativeTo: StripeConfig.backendURL) else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            
+            DispatchQueue.main.async {
+                if let hasRecipient = json["hasRecipient"] as? Bool, hasRecipient,
+                   let recipient = json["recipient"] as? [String: Any] {
+                    self.activeRecipientName = recipient["full_name"] as? String ?? ""
+                    self.activeRecipientId = recipient["id"] as? String ?? ""
+                }
+                if let dest = json["destination"] as? String {
+                    self.payoutType = dest == "charity" ? "Charity" : "Custom"
+                }
+            }
+        }.resume()
+    }
+    
+    private func syncInviteStatuses() {
+        guard let userId = UserDefaults.standard.string(forKey: "userId"), !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "/users/\(userId)/invites", relativeTo: StripeConfig.backendURL) else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let invites = json["invites"] as? [[String: Any]] else { return }
+            
+            DispatchQueue.main.async {
+                // Update customRecipients status based on invites
+                for invite in invites {
+                    guard let phone = invite["phone"] as? String,
+                          let status = invite["status"] as? String else { continue }
+                    
+                    // Find matching recipient by phone
+                    if let index = self.customRecipients.firstIndex(where: { $0.phone == phone }) {
+                        // Create updated recipient with new status
+                        let old = self.customRecipients[index]
+                        let newStatus = status == "completed" ? "active" : status
+                        
+                        // Get recipient name from invite if available
+                        var recipientName = old.name
+                        if let recipient = invite["recipient"] as? [String: Any],
+                           let fullName = recipient["full_name"] as? String {
+                            recipientName = fullName
+                        }
+                        
+                        let updated = CustomRecipient(id: old.id, name: recipientName, phone: old.phone, status: newStatus)
+                        self.customRecipients[index] = updated
+                    }
+                }
+                self.saveCustomRecipients()
+            }
+        }.resume()
     }
     
     private func loadCustomRecipients() {
@@ -1618,8 +1796,6 @@ struct ProfileView: View {
                         self.profileCashHoldings += amount
                         self.depositAmount = ""
                         self.depositErrorMessage = nil
-                        // SYNC BALANCE TO SERVER
-                        self.syncBalanceToServer(newBalance: self.profileCashHoldings)
                     case .canceled, .failed:
                         break
                     }
@@ -1668,7 +1844,10 @@ struct ProfileView: View {
             "missed_goal_payout": committedPayoutAmount > 0 ? committedPayoutAmount : missedGoalPayout,
             "payout_destination": payoutType.lowercased(),
             "committedPayoutAmount": committedPayoutAmount,
-            "payoutCommitted": payoutCommitted
+            "payoutCommitted": payoutCommitted,
+            "destinationCommitted": destinationCommitted,
+            "committedDestination": committedDestination,
+            "committedRecipientId": committedRecipientId
         ]
 
         guard let url = URL(string: "/users/profile", relativeTo: StripeConfig.backendURL) else {
@@ -1720,6 +1899,47 @@ struct ProfileView: View {
             }
         }.resume()
     }
+    
+    // MARK: - Balance & Payout Functions
+    
+    private func refreshBalance() {
+        guard let userId = UserDefaults.standard.string(forKey: "userId") else { return }
+        
+        guard let url = URL(string: "/users/\(userId)/balance", relativeTo: StripeConfig.backendURL) else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let balanceCents = json["balanceCents"] as? Int else { return }
+            
+            DispatchQueue.main.async {
+                self.profileCashHoldings = Double(balanceCents) / 100.0
+            }
+        }.resume()
+    }
+    
+    private func triggerMissedObjectivePayout() {
+        guard let userId = UserDefaults.standard.string(forKey: "userId") else { return }
+        guard payoutCommitted && missedGoalPayout > 0 else { return }
+        guard profileCashHoldings > 0 else { return }
+        
+        guard let url = URL(string: "/users/\(userId)/trigger-payout", relativeTo: StripeConfig.backendURL) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            
+            DispatchQueue.main.async {
+                if let newBalanceCents = json["newBalanceCents"] as? Int {
+                    self.profileCashHoldings = Double(newBalanceCents) / 100.0
+                }
+            }
+        }.resume()
+    }
 }
 
 // MARK: - Add Recipient Sheet
@@ -1732,15 +1952,78 @@ struct AddRecipientSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("missedGoalPayout") private var missedGoalPayout: Double = 0.0
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
-    @State private var recipientName: String = ""
-    @State private var recipientPhone: String = ""
-    @State private var isSending = false
+    @State private var generatedInviteCode: String?
+    @State private var isGenerating = false
     @State private var errorMessage: String?
-    @State private var isContactPickerPresented = false
+    
+    // ## SMS INVITE FLOW - DISABLED FOR NOW ##
+    // @State private var recipientName: String = ""
+    // @State private var recipientPhone: String = ""
+    // @State private var isSending = false
+    // @State private var isContactPickerPresented = false
 
     var body: some View {
         NavigationView {
             Form {
+                // MARK: - Generate Code UI (Active)
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button(action: {
+                            generateInviteCode()
+                        }) {
+                            HStack {
+                                Image(systemName: "qrcode")
+                                    .font(.title3)
+                                Text(isGenerating ? "Generating..." : "Generate a Code")
+                                    .font(.system(.body, design: .rounded, weight: .semibold))
+                                Spacer()
+                            }
+                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isGenerating)
+
+                        if let code = generatedInviteCode {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Tap to copy & share:")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                
+                                Button(action: {
+                                    let shareText = "Want to get paid when I miss my goals? 💰\n\nSign up here: app.live-eos.com/invite\nUse code: \(code)"
+                                    UIPasteboard.general.string = shareText
+                                    errorMessage = "✅ Copied!"
+                                }) {
+                                    Text("Want to get paid when I miss my goals? 💰\n\nSign up here: app.live-eos.com/invite\nUse code: \(code)")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .multilineTextAlignment(.leading)
+                                        .foregroundStyle(.white)
+                                        .padding(12)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color.blue)
+                                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Recipient Invite")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Send manually for now:")
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                        Text("• Share the invite link + code above")
+                            .font(.system(.caption2, design: .rounded))
+                        Text("• They will receive your committed missed goal payout")
+                            .font(.system(.caption2, design: .rounded))
+                    }
+                    .padding(.top, 4)
+                }
+                
+                // ## SMS INVITE UI - DISABLED FOR NOW ##
+                /*
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         Button(action: {
@@ -1787,6 +2070,7 @@ struct AddRecipientSheet: View {
                     }
                     .padding(.top, 4)
                 }
+                */
 
                 if let error = errorMessage {
                     Section {
@@ -1813,29 +2097,84 @@ struct AddRecipientSheet: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isSending ? "Sending…" : "Send Invite") {
-                        sendInvite()
-                    }
-                    .disabled(isSending || recipientName.isEmpty || recipientPhone.isEmpty)
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
                     Button("Done") {
-                        UIApplication.shared.eos_dismissKeyboard()
+                        dismiss()
                     }
                 }
             }
-            .sheet(isPresented: $isContactPickerPresented) {
-                ContactPickerView { selectedPhone, selectedName in
-                    recipientPhone = selectedPhone
-                    if recipientName.isEmpty {
-                        recipientName = selectedName
-                    }
-                }
-            }
+            // ## CONTACT PICKER - DISABLED FOR NOW ##
+            // .sheet(isPresented: $isContactPickerPresented) {
+            //     ContactPickerView { selectedPhone, selectedName in
+            //         recipientPhone = selectedPhone
+            //         if recipientName.isEmpty {
+            //             recipientName = selectedName
+            //         }
+            //     }
+            // }
         }
     }
+    
+    // MARK: - Generate Code (calls backend to register in database)
+    private func generateInviteCode() {
+        errorMessage = nil
+        isGenerating = true
+        
+        guard let url = URL(string: "/recipient-invites/code-only", relativeTo: StripeConfig.backendURL) else {
+            errorMessage = "Invalid backend URL."
+            isGenerating = false
+            return
+        }
+        
+        let body: [String: Any] = [
+            "payerEmail": payerEmail,
+            "payerName": payerName.isEmpty ? "EOS user" : payerName
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isGenerating = false
+                
+                if let error = error {
+                    self.errorMessage = "Failed to generate code: \(error.localizedDescription)"
+                    return
+                }
+                
+                guard let http = response as? HTTPURLResponse else {
+                    self.errorMessage = "No response from server."
+                    return
+                }
+                
+                if !(200..<300).contains(http.statusCode) {
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let detail = json["detail"] as? String {
+                        self.errorMessage = detail
+                    } else {
+                        self.errorMessage = "Failed to generate code (status \(http.statusCode))."
+                    }
+                    return
+                }
+                
+                // Parse invite code from response
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let code = json["inviteCode"] as? String {
+                    self.generatedInviteCode = code
+                    self.errorMessage = "✅ Code generated and registered!"
+                } else {
+                    self.errorMessage = "Failed to parse invite code."
+                }
+            }
+        }.resume()
+    }
 
+    // ## SMS INVITE FUNCTION - DISABLED FOR NOW ##
+    /*
     private func sendInvite() {
         errorMessage = nil
         
@@ -1942,6 +2281,7 @@ struct AddRecipientSheet: View {
             }
         }.resume()
     }
+    */
 }
 
 // MARK: - Contact picker view
@@ -1990,10 +2330,23 @@ struct ContactPickerView: UIViewControllerRepresentable {
 struct SignInView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var isSignedIn: Bool
+    @Binding var profileUsername: String
     @Binding var profileEmail: String
+    @Binding var profilePhone: String
+    @Binding var profileCompleted: Bool
     @State private var email = ""
     @State private var password = ""
     @State private var errorMessage: String?
+    // AppStorage for payout settings (populated from server on sign in)
+    @AppStorage("profileCashHoldings") private var profileCashHoldings: Double = 0
+    @AppStorage("missedGoalPayout") private var missedGoalPayout: Double = 0.0
+    @AppStorage("payoutCommitted") private var payoutCommitted: Bool = false
+    @AppStorage("committedPayoutAmount") private var committedPayoutAmount: Double = 0.0
+    @AppStorage("payoutType") private var payoutType: String = "charity"
+    @AppStorage("destinationCommitted") private var destinationCommitted: Bool = false
+    @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
+    @AppStorage("committedDestination") private var committedDestination: String = "charity"
+    @AppStorage("userId") private var userId: String = ""
     @State private var isLoading = false
     
     var body: some View {
@@ -2073,6 +2426,16 @@ struct SignInView: View {
                 leading: Button("Cancel") { dismiss() }
                     .foregroundStyle(Color.black)
             )
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.eos_dismissKeyboard()
+                    }
+                    .font(.system(.body, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                }
+            }
         }
     }
     
@@ -2081,7 +2444,7 @@ struct SignInView: View {
         errorMessage = nil
         
         let body: [String: Any] = [
-            "email": email.trimmingCharacters(in: .whitespaces),
+            "email": email.trimmingCharacters(in: .whitespaces).lowercased(),
             "password": password.trimmingCharacters(in: .whitespaces)
         ]
         
@@ -2130,32 +2493,60 @@ struct SignInView: View {
                     return
                 }
                 
-                // Parse user data from response
+                                // Parse user data from response and populate all profile fields
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let user = json["user"] as? [String: Any] {
-                    // Populate profile fields from database
-                    if let fullName = user["full_name"] as? String {
+                    // Basic profile fields
+                    if let fullName = user["full_name"] as? String, !fullName.isEmpty {
                         self.profileUsername = fullName
                     }
-                    if let phone = user["phone"] as? String {
+                    if let phone = user["phone"] as? String, !phone.isEmpty {
                         self.profilePhone = phone
                     }
-                }
-                
-                self.profileEmail = self.email
-                self.isSignedIn = true
-                self.profileCompleted = true
-                self.dismiss()
+                    if let userEmail = user["email"] as? String {
+                        self.profileEmail = userEmail
+                    } else {
+            self.profileEmail = self.email
+                    }
+                    
+                    // User ID
+                    if let id = user["id"] as? String {
+                        self.userId = id
+                    }
+                    
+                    // Balance
+                    if let balanceCents = user["balance_cents"] as? Int {
+                        self.profileCashHoldings = Double(balanceCents) / 100.0
+                    }
+                    
+                    // Payout settings
+                    if let missedPayout = user["missed_goal_payout"] as? Double {
+                        self.missedGoalPayout = missedPayout
+                        self.committedPayoutAmount = missedPayout
+                    }
+                    if let payoutCommit = user["payout_committed"] as? Bool {
+                        self.payoutCommitted = payoutCommit
+                    }
+                    if let destination = user["payout_destination"] as? String {
+                        self.payoutType = destination == "charity" ? "Charity" : "Custom"
+                    }
+                    if let destCommit = user["destination_committed"] as? Bool {
+                        self.destinationCommitted = destCommit
+                    }
+                    if let commitDest = user["committed_destination"] as? String {
+                        self.committedDestination = commitDest
+                    }
+                    
+            self.isSignedIn = true
+                    self.profileCompleted = true
+            self.dismiss()
+                } else {
+                    self.errorMessage = "Failed to parse user data"
+        }
+
             }
         }.resume()
     }
-}
-
-// Bindings extension for SignInView
-extension SignInView {
-    @Binding var profileUsername: String { get { _profileUsername } }
-    @Binding var profilePhone: String { get { _profilePhone } }
-    @Binding var profileCompleted: Bool { get { _profileCompleted } }
 }
 
 struct CreateAccountView: View {
@@ -2274,6 +2665,16 @@ struct CreateAccountView: View {
                 leading: Button("Cancel") { dismiss() }
                     .foregroundStyle(Color.black)
             )
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.eos_dismissKeyboard()
+                    }
+                    .font(.system(.body, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                }
+            }
         }
     }
     
@@ -2333,7 +2734,9 @@ struct CreateAccountView: View {
     }
 }
 
-// MARK: - Previewstruct ContentView_Previews: PreviewProvider {
+// MARK: - Preview
+
+struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
     }

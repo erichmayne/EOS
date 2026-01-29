@@ -1,6 +1,6 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: January 15, 2026
-> Version: 2.3 - Objective Sync + Sign Out Fixes
+> Last Updated: January 28, 2026
+> Version: 2.4 - PM2 Process Manager + Code-Only Invites
 
 ---
 
@@ -773,14 +773,18 @@ ps aux | grep node
 
 # Server runs on port 4242
 # Nginx proxies api.live-eos.com → localhost:4242
+# PM2 manages process (auto-restart, auto-boot) - configured Jan 28, 2026
 
-# Start/restart server
+# PM2 Commands (RECOMMENDED)
+pm2 status                # Check server status  
+pm2 restart eos-backend   # Restart after code changes
+pm2 logs eos-backend      # View logs (Ctrl+C to exit)
+pm2 monit                 # Real-time monitoring dashboard
+
+# Manual fallback (if PM2 not working)
 cd /home/user/morning-would-payments
 pkill node
 nohup node server.js > server.log 2>&1 &
-
-# Or with PM2 (if installed)
-pm2 restart server
 ```
 
 ---
@@ -1083,6 +1087,44 @@ await supabase.from('recipient_invites').insert({
 Set up your payout details at: https://app.live-eos.com/invite/${inviteCode}"
 ```
 **Success Response**: `{"inviteCode": "ABC123", "message": "Invite sent successfully"}`
+
+---
+
+#### `POST /recipient-invites/code-only` *(Added Jan 28, 2026)*
+**Purpose**: Generate invite code WITHOUT sending SMS - for manual sharing  
+**Request Body**:
+```json
+{
+  "payerEmail": "payer@example.com",
+  "payerName": "John Doe"
+}
+```
+**Database Operations**:
+```javascript
+// 1. Look up payer by email
+const { data: payerUser } = await supabase
+    .from('users')
+    .select('id, full_name')
+    .eq('email', payerEmail)
+    .single();
+
+// 2. Generate 8-char code (no ambiguous chars)
+const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+let inviteCode = '';
+for (let i = 0; i < 8; i++) {
+    inviteCode += chars.charAt(Math.floor(Math.random() * chars.length));
+}
+
+// 3. Insert invite with phone = null
+await supabase.from('recipient_invites').insert({
+    payer_user_id: payerUser.id,
+    phone: null,
+    invite_code: inviteCode,
+    status: 'pending'
+});
+```
+**Success Response**: `{"inviteCode": "ABC123XY", "message": "Invite code generated successfully. Share it manually."}`  
+**iOS Usage**: Called by `AddRecipientSheet.generateInviteCode()` in `ContentView.swift`
 
 ---
 
@@ -2063,7 +2105,8 @@ scp /Users/emayne/morning-would/backend/complete-server-update.js \
     user@159.26.94.94:/home/user/morning-would-payments/server.js
 
 # 3. Restart server
-ssh user@159.26.94.94 "cd /home/user/morning-would-payments && pkill node && nohup node server.js > server.log 2>&1 &"
+# 3. Restart server with PM2
+ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 restart eos-backend"
 
 # 4. Verify
 curl https://api.live-eos.com/health
@@ -2099,6 +2142,40 @@ open /Users/emayne/morning-would/Eos.xcodeproj
 ---
 
 ## 🔄 Update Log
+
+### January 28, 2026 - v2.4 (PM2 + Code-Only Invites)
+
+#### PM2 Process Manager - Installed & Configured ✅
+- **Installed PM2** for production process management
+- Server now auto-restarts on crash
+- Server auto-starts on reboot via systemd
+- PM2 Commands:
+  ```bash
+  pm2 status          # Check server status
+  pm2 logs eos-backend   # View logs
+  pm2 restart eos-backend # Restart after code changes
+  pm2 monit           # Real-time monitoring
+  ```
+
+#### New Endpoint: `/recipient-invites/code-only`
+- **Added**: `POST /recipient-invites/code-only`
+- Generates invite codes WITHOUT sending SMS (Twilio)
+- For manual sharing via text/email
+- Request: `{ "payerEmail": "user@example.com", "payerName": "John" }`
+- Response: `{ "inviteCode": "ABC123XY", "message": "..." }`
+- iOS app uses this in `AddRecipientSheet.generateInviteCode()`
+
+#### Server Process Fix
+- Killed stale server process (running since Jan 17)
+- Server now managed exclusively by PM2 (name: `eos-backend`)
+
+#### Key Files Changed
+| File | Change |
+|------|--------|
+| `server.js` (remote) | Added `/recipient-invites/code-only` endpoint |
+| PM2 config | Created systemd service for auto-restart |
+
+---
 
 ### January 15, 2026 - v2.3 (Payout System Verified ✅)
 
@@ -2238,11 +2315,14 @@ ssh user@159.26.94.94
 # Check server status
 curl https://api.live-eos.com/health
 
-# View server logs
-ssh user@159.26.94.94 "tail -50 /home/user/morning-would-payments/server.log"
+# View server logs (PM2)
+ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 logs eos-backend --lines 50"
 
-# Restart server
-ssh user@159.26.94.94 "cd /home/user/morning-would-payments && pkill node && nohup node server.js > server.log 2>&1 &"
+# Restart server (PM2)
+ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 restart eos-backend"
+
+# Check PM2 status
+ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 status"
 
 # Check nginx status
 ssh user@159.26.94.94 "sudo systemctl status nginx"

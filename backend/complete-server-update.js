@@ -162,6 +162,70 @@ app.post('/recipient-invites', async (req, res) => {
     }
 });
 
+// Generate invite code only (no SMS) - for manual sharing
+app.post('/recipient-invites/code-only', async (req, res) => {
+    try {
+        const { payerEmail, payerName } = req.body;
+        
+        if (!payerEmail) {
+            return res.status(400).json({ 
+                detail: 'Missing required field: payerEmail' 
+            });
+        }
+        
+        // Look up payer user by email
+        const { data: payerUser, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', payerEmail)
+            .single();
+        
+        if (userError || !payerUser) {
+            console.error('User lookup error:', userError);
+            return res.status(404).json({ 
+                detail: 'Payer user not found. Please save your profile first.' 
+            });
+        }
+        
+        // Generate new invite code (8 chars, no ambiguous chars)
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let inviteCode = '';
+        for (let i = 0; i < 8; i++) {
+            inviteCode += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        
+        // Create new invite (phone is null for code-only invites)
+        const { data: newInvite, error: insertError } = await supabase
+            .from('recipient_invites')
+            .insert({
+                payer_user_id: payerUser.id,
+                phone: null,
+                invite_code: inviteCode,
+                status: 'pending'
+            })
+            .select()
+            .single();
+        
+        if (insertError) {
+            console.error('Insert error:', insertError);
+            return res.status(500).json({ 
+                detail: 'Failed to create invite: ' + insertError.message 
+            });
+        }
+        
+        res.json({ 
+            inviteCode: inviteCode,
+            message: 'Invite code generated successfully. Share it manually.' 
+        });
+        
+    } catch (error) {
+        console.error('Code-only invite error:', error);
+        res.status(500).json({ 
+            detail: error.message || 'Internal server error' 
+        });
+    }
+});
+
 // Verify invite code
 app.post('/verify-invite', async (req, res) => {
     try {
