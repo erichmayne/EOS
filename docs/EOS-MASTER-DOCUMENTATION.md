@@ -1,6 +1,23 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: January 28, 2026
-> Version: 2.4 - PM2 Process Manager + Code-Only Invites
+> Last Updated: January 29, 2026
+> Version: 2.5 - Stripe CLI, Live Keys, Sync Fixes
+
+---
+
+## 🆕 Latest Updates (Jan 29, 2026)
+
+### Stripe CLI Setup
+- Installed via `brew install stripe/stripe-cli/stripe`
+- Login: `stripe login` (opens browser)
+- Publishable key added to `StripeConfig.swift`
+
+### Sync Fixes Applied
+- **payoutType casing bug**: Fixed server returning "Charity" vs UI expecting "charity"
+- **Live Stripe key**: Added `pk_live_...` to iOS app
+
+### Known Issues Being Fixed
+- Deposit balance not syncing to database after payment
+- Payout destination selection not reflecting in database
 
 ---
 

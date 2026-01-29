@@ -1007,6 +1007,7 @@ struct ProfileView: View {
     @AppStorage("destinationCommitted") private var destinationCommitted: Bool = false
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
     @AppStorage("committedDestination") private var committedDestination: String = "charity"
+    @AppStorage("userId") private var userId: String = ""
     
     // Objective settings (synced with SettingsView via @AppStorage)
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
@@ -1347,8 +1348,11 @@ struct ProfileView: View {
                                         }
                                     }
                                     .padding(.vertical, 4)
-
-                        // Commit Destination Button
+                                }
+                            }
+                        }
+                        
+                        // Commit Destination Button - ALWAYS visible
                         Button(action: commitDestination) {
                             HStack {
                                 Image(systemName: destinationCommitted ? "checkmark.circle.fill" : "lock.fill")
@@ -1366,10 +1370,6 @@ struct ProfileView: View {
                         }
                         .buttonStyle(.plain)
                         .padding(.top, 8)
-                                }
-                            }
-                        }
-                        
                     }
                     .listRowBackground(Color.white)
                 } header: {
@@ -1696,8 +1696,8 @@ struct ProfileView: View {
         payoutCommitted = true
         showPayoutSelector = false
         
-        // Save to backend
-        saveProfile()
+        // Save to backend (using dedicated sync that doesn't require password)
+        syncPayoutSettings()
     }
 
     private func commitDestination() {
@@ -1711,7 +1711,51 @@ struct ProfileView: View {
         }
         destinationCommitted = true
         showDestinationSelector = false
-        saveProfile()
+        syncPayoutSettings()
+    }
+    
+    /// Sync payout settings to backend without requiring password
+    private func syncPayoutSettings() {
+        guard !userId.isEmpty else {
+            print("⚠️ No userId, skipping payout sync")
+            return
+        }
+        
+        let body: [String: Any] = [
+            "email": profileEmail,
+            "missed_goal_payout": committedPayoutAmount > 0 ? committedPayoutAmount : missedGoalPayout,
+            "payout_destination": payoutType.lowercased(),
+            "committedPayoutAmount": committedPayoutAmount,
+            "payoutCommitted": payoutCommitted,
+            "destinationCommitted": destinationCommitted,
+            "committedDestination": committedDestination.lowercased(),
+            "committedRecipientId": committedRecipientId,
+            "balanceCents": Int((profileCashHoldings * 100).rounded())
+        ]
+        
+        guard let url = URL(string: "/users/profile", relativeTo: StripeConfig.backendURL) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ Payout sync error: \(error)")
+                return
+            }
+            if let http = response as? HTTPURLResponse {
+                if (200..<300).contains(http.statusCode) {
+                    print("✅ Payout settings synced to backend")
+                } else {
+                    print("❌ Payout sync failed with status: \(http.statusCode)")
+                    if let data = data, let body = String(data: data, encoding: .utf8) {
+                        print("Response: \(body)")
+                    }
+                }
+            }
+        }.resume()
     }
 
     private func fetchRecipientStatus() {
@@ -1845,6 +1889,8 @@ struct ProfileView: View {
                         self.profileCashHoldings += amount
                         self.depositAmount = ""
                         self.depositErrorMessage = nil
+                        // Sync new balance to backend
+                        self.syncPayoutSettings()
                     case .canceled, .failed:
                         break
                     }

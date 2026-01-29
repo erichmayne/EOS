@@ -108,15 +108,12 @@ app.post("/users/profile", async (req, res) => {
     } = req.body || {};
     console.log("DEBUG /users/profile:", { payout_destination, committedDestination, destinationCommitted, email, createOnly });
 
-    if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
-      return res.status(400).json({ error: "Full name is required." });
-    }
+    // Email is always required
     if (!email || typeof email !== "string" || !email.trim()) {
       return res.status(400).json({ error: "Email is required." });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    const normalizedName = fullName.trim();
     const activeBalanceCents = typeof balanceCents === "number" && balanceCents >= 0 ? Math.floor(balanceCents) : 0;
 
     // Check for existing user
@@ -135,6 +132,13 @@ app.post("/users/profile", async (req, res) => {
     if (createOnly && existingUser) {
       return res.status(409).json({ error: "An account with this email already exists. Please sign in instead." });
     }
+    
+    // Full name only required for NEW users
+    if (!existingUser && (!fullName || typeof fullName !== "string" || !fullName.trim())) {
+      return res.status(400).json({ error: "Full name is required for new accounts." });
+    }
+    
+    const normalizedName = fullName ? fullName.trim() : (existingUser?.full_name || "");
 
     let stripeCustomerId = existingUser?.stripe_customer_id ?? null;
 
