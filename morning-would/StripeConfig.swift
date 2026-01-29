@@ -1,11 +1,12 @@
 import Foundation
 
 enum StripeConfig {
-    /// Stripe publishable key (LIVE mode)
-    // Set locally only. Do not commit real keys.
-    static let publishableKey = "YOUR_STRIPE_PUBLISHABLE_KEY"
+    // MARK: - Stripe LIVE Key
+    // Get from: https://dashboard.stripe.com/apikeys
+    // ⚠️ Set this locally - do not commit real key to git
+    static let publishableKey = "pk_live_YOUR_KEY_HERE"
 
-    /// Backend base URL hosting the create-payment-intent endpoint (HTTPS via nginx/certbot)
+    /// Backend base URL
     static let backendURL = URL(string: "https://api.live-eos.com")!
 }
 

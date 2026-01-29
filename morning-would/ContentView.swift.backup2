@@ -1891,18 +1891,6 @@ struct ProfileView: View {
                     return
                 }
 
-                // Save userId from response (could be String or Int)
-                if let data = data,
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let id = json["id"] as? String {
-                        UserDefaults.standard.set(id, forKey: "userId")
-                        print("✅ userId saved: \(id)")
-                    } else if let id = json["id"] as? Int {
-                        UserDefaults.standard.set(String(id), forKey: "userId")
-                        print("✅ userId saved: \(id)")
-                    }
-                }
-                
                 self.profileCompleted = true
                 self.isSignedIn = true
                 self.profilePassword = ""
@@ -1964,78 +1952,15 @@ struct AddRecipientSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("missedGoalPayout") private var missedGoalPayout: Double = 0.0
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
-    @State private var generatedInviteCode: String?
-    @State private var isGenerating = false
+    @State private var recipientName: String = ""
+    @State private var recipientPhone: String = ""
+    @State private var isSending = false
     @State private var errorMessage: String?
-    
-    // ## SMS INVITE FLOW - DISABLED FOR NOW ##
-    // @State private var recipientName: String = ""
-    // @State private var recipientPhone: String = ""
-    // @State private var isSending = false
-    // @State private var isContactPickerPresented = false
+    @State private var isContactPickerPresented = false
 
     var body: some View {
         NavigationView {
             Form {
-                // MARK: - Generate Code UI (Active)
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Button(action: {
-                            generateInviteCode()
-                        }) {
-                            HStack {
-                                Image(systemName: "qrcode")
-                                    .font(.title3)
-                                Text(isGenerating ? "Generating..." : "Generate a Code")
-                                    .font(.system(.body, design: .rounded, weight: .semibold))
-                                Spacer()
-                            }
-                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                            .padding(.vertical, 6)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isGenerating)
-
-                        if let code = generatedInviteCode {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Tap to copy & share:")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(.secondary)
-                                
-                                Button(action: {
-                                    let shareText = "Want to get paid when I miss my goals? 💰\n\nSign up here: app.live-eos.com/invite\nUse code: \(code)"
-                                    UIPasteboard.general.string = shareText
-                                    errorMessage = "✅ Copied!"
-                                }) {
-                                    Text("Want to get paid when I miss my goals? 💰\n\nSign up here: app.live-eos.com/invite\nUse code: \(code)")
-                                        .font(.system(.subheadline, design: .rounded))
-                                        .multilineTextAlignment(.leading)
-                                        .foregroundStyle(.white)
-                                        .padding(12)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(Color.blue)
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Recipient Invite")
-                } footer: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Send manually for now:")
-                            .font(.system(.caption, design: .rounded, weight: .medium))
-                        Text("• Share the invite link + code above")
-                            .font(.system(.caption2, design: .rounded))
-                        Text("• They will receive your committed missed goal payout")
-                            .font(.system(.caption2, design: .rounded))
-                    }
-                    .padding(.top, 4)
-                }
-                
-                // ## SMS INVITE UI - DISABLED FOR NOW ##
-                /*
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         Button(action: {
@@ -2066,6 +1991,12 @@ struct AddRecipientSheet: View {
                         TextField("Recipient Name", text: $recipientName)
                         TextField("Phone Number", text: $recipientPhone)
                             .keyboardType(.phonePad)
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.gray.opacity(0.2))
+                                )
+                                .foregroundStyle(Color.black)
                     }
                 } header: {
                     Text("Recipient Information")
@@ -2082,7 +2013,6 @@ struct AddRecipientSheet: View {
                     }
                     .padding(.top, 4)
                 }
-                */
 
                 if let error = errorMessage {
                     Section {
@@ -2109,84 +2039,31 @@ struct AddRecipientSheet: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
+                    Button(isSending ? "Sending…" : "Send Invite") {
+                        sendInvite()
+                    }
+                    .disabled(isSending || recipientName.isEmpty || recipientPhone.isEmpty)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
                     Button("Done") {
-                        dismiss()
+                        UIApplication.shared.eos_dismissKeyboard()
+                    }
+                    .font(.system(.body, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                }
+            }
+            .sheet(isPresented: $isContactPickerPresented) {
+                ContactPickerView { selectedPhone, selectedName in
+                    recipientPhone = selectedPhone
+                    if recipientName.isEmpty {
+                        recipientName = selectedName
                     }
                 }
             }
-            // ## CONTACT PICKER - DISABLED FOR NOW ##
-            // .sheet(isPresented: $isContactPickerPresented) {
-            //     ContactPickerView { selectedPhone, selectedName in
-            //         recipientPhone = selectedPhone
-            //         if recipientName.isEmpty {
-            //             recipientName = selectedName
-            //         }
-            //     }
-            // }
         }
-    }
-    
-    // MARK: - Generate Code (calls backend to register in database)
-    private func generateInviteCode() {
-        errorMessage = nil
-        isGenerating = true
-        
-        guard let url = URL(string: "/recipient-invites/code-only", relativeTo: StripeConfig.backendURL) else {
-            errorMessage = "Invalid backend URL."
-            isGenerating = false
-            return
-        }
-        
-        let body: [String: Any] = [
-            "payerEmail": payerEmail,
-            "payerName": payerName.isEmpty ? "EOS user" : payerName
-        ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            DispatchQueue.main.async {
-                self.isGenerating = false
-                
-                if let error = error {
-                    self.errorMessage = "Failed to generate code: \(error.localizedDescription)"
-                    return
-                }
-                
-                guard let http = response as? HTTPURLResponse else {
-                    self.errorMessage = "No response from server."
-                    return
-                }
-                
-                if !(200..<300).contains(http.statusCode) {
-                    if let data = data,
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let detail = json["detail"] as? String {
-                        self.errorMessage = detail
-                    } else {
-                        self.errorMessage = "Failed to generate code (status \(http.statusCode))."
-                    }
-                    return
-                }
-                
-                // Parse invite code from response
-                if let data = data,
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let code = json["inviteCode"] as? String {
-                    self.generatedInviteCode = code
-                    self.errorMessage = "✅ Code generated and registered!"
-                } else {
-                    self.errorMessage = "Failed to parse invite code."
-                }
-            }
-        }.resume()
     }
 
-    // ## SMS INVITE FUNCTION - DISABLED FOR NOW ##
-    /*
     private func sendInvite() {
         errorMessage = nil
         
@@ -2293,7 +2170,6 @@ struct AddRecipientSheet: View {
             }
         }.resume()
     }
-    */
 }
 
 // MARK: - Contact picker view
@@ -2521,13 +2397,9 @@ struct SignInView: View {
             self.profileEmail = self.email
                     }
                     
-                    // User ID (can be String or Int from backend)
+                    // User ID
                     if let id = user["id"] as? String {
                         self.userId = id
-                        UserDefaults.standard.set(id, forKey: "userId")
-                    } else if let id = user["id"] as? Int {
-                        self.userId = String(id)
-                        UserDefaults.standard.set(String(id), forKey: "userId")
                     }
                     
                     // Balance
@@ -2544,7 +2416,7 @@ struct SignInView: View {
                         self.payoutCommitted = payoutCommit
                     }
                     if let destination = user["payout_destination"] as? String {
-                        self.payoutType = destination.lowercased()
+                        self.payoutType = destination == "charity" ? "Charity" : "Custom"
                     }
                     if let destCommit = user["destination_committed"] as? Bool {
                         self.destinationCommitted = destCommit
