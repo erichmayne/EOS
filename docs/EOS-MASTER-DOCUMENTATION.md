@@ -599,16 +599,24 @@ The `/create-payment-intent` endpoint MUST return these 3 fields for Apple Pay:
 
 ---
 
-### 9. GITHUB (Code Repository) - IF APPLICABLE
+### 9. GITHUB (Code Repository)
 
 **Dashboard**: https://github.com  
-**Account Username**: `[PLACEHOLDER - YOUR GITHUB USERNAME]`  
-**Account Email**: `[PLACEHOLDER - YOUR GITHUB EMAIL]`  
-**Account Password**: `[PLACEHOLDER - YOUR GITHUB PASSWORD]`  
-**Personal Access Token**: `[PLACEHOLDER - FOR CLI/API ACCESS]`
+**Account Username**: `erichmayne`  
+**Repo URL**: https://github.com/erichmayne/EOS  
+**SSH Clone**: `git@github.com:erichmayne/EOS.git`  
+**Branch**: `main`
 
-**Repositories**:
-- `[PLACEHOLDER - e.g., github.com/username/eos-app]`
+**Repo Structure**:
+```
+EOS/
+├── morning-would/        # iOS app (SwiftUI)
+├── backend/
+│   └── server.js         # Live production backend
+├── docs/                  # Documentation
+├── sql/                   # Database schemas
+└── deployment/            # Deploy scripts
+```
 
 ---
 
@@ -624,7 +632,7 @@ The `/create-payment-intent` endpoint MUST return these 3 fields for Apple Pay:
 | Apple Developer | developer.apple.com | `erich.maynefamily@gmail.com` | `[PLACEHOLDER]` |
 | Vercel | vercel.com | `[PLACEHOLDER]` | `[PLACEHOLDER]` |
 | VPS Provider | `[PLACEHOLDER]` | `[PLACEHOLDER]` | `[PLACEHOLDER]` |
-| GitHub | github.com | `[PLACEHOLDER]` | `[PLACEHOLDER]` |
+| GitHub | github.com/erichmayne/EOS | `erichmayne` | SSH key auth |
 | Server SSH | `ssh user@159.26.94.94` | N/A | SSH Key / `[PLACEHOLDER]` |
 
 ---
