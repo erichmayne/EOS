@@ -19,6 +19,7 @@ struct ContentView: View {
     @AppStorage("profileUsername") private var profileUsername: String = ""
     @AppStorage("profileEmail") private var profileEmail: String = ""
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
+    @AppStorage("userId") private var userId: String = ""
 
     @State private var showObjectiveSettings = false
     @State private var showProfileView = false
@@ -239,7 +240,10 @@ struct ContentView: View {
                 ObjectiveSettingsView(
                     objective: $pushupObjective,
                     deadline: $objectiveDeadline,
-                    scheduleType: $scheduleType
+                    scheduleType: $scheduleType,
+                    onSave: {
+                        syncObjectivesToBackend()
+                    }
                 )
             }
             .sheet(isPresented: $showProfileView) {
@@ -272,6 +276,40 @@ struct ContentView: View {
             todayPushUpCount = 0
             UserDefaults.standard.set(Date(), forKey: lastResetKey)
         }
+    }
+    
+    private func syncObjectivesToBackend() {
+        guard !userId.isEmpty else {
+            print("⚠️ No userId, skipping objective sync")
+            return
+        }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let deadlineString = formatter.string(from: objectiveDeadline)
+        
+        let body: [String: Any] = [
+            "objective_count": pushupObjective,
+            "objective_schedule": scheduleType.lowercased(),
+            "objective_deadline": deadlineString
+        ]
+        
+        guard let url = URL(string: "/objectives/settings/\(userId)", relativeTo: URL(string: "https://api.live-eos.com")!) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ Objective sync error: \(error)")
+                return
+            }
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                print("✅ Objectives synced to backend")
+            }
+        }.resume()
     }
 }
 
@@ -433,6 +471,7 @@ struct ObjectiveSettingsView: View {
     @Binding var objective: Int
     @Binding var deadline: Date
     @Binding var scheduleType: String
+    var onSave: (() -> Void)? = nil  // Callback to sync to backend
     @Environment(\.dismiss) private var dismiss
     @State private var tempObjective: Int = 10
     @State private var tempDeadline: Date = Date()
@@ -520,6 +559,7 @@ struct ObjectiveSettingsView: View {
                             objective: objective,
                             scheduleType: scheduleType
                         )
+                        onSave?()  // Sync to backend
                         dismiss()
                     }
                     .font(.system(.body, design: .rounded, weight: .medium))
@@ -967,6 +1007,15 @@ struct ProfileView: View {
     @AppStorage("destinationCommitted") private var destinationCommitted: Bool = false
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
     @AppStorage("committedDestination") private var committedDestination: String = "charity"
+    
+    // Objective settings (synced with SettingsView via @AppStorage)
+    @AppStorage("pushupObjective") private var pushupObjective: Int = 10
+    @AppStorage("objectiveDeadline") private var objectiveDeadline: Date = {
+        let components = DateComponents(hour: 22, minute: 0)
+        return Calendar.current.date(from: components) ?? Date()
+    }()
+    @AppStorage("scheduleType") private var scheduleType: String = "Daily"
+    
     @State private var showDestinationSelector: Bool = false
     @State private var activeRecipientName: String = ""
     @State private var activeRecipientId: String = ""
@@ -1681,7 +1730,7 @@ struct ProfileView: View {
                     self.activeRecipientId = recipient["id"] as? String ?? ""
                 }
                 if let dest = json["destination"] as? String {
-                    self.payoutType = dest == "charity" ? "Charity" : "Custom"
+                    self.payoutType = dest == "charity" ? "charity" : "custom"
                 }
             }
         }.resume()
@@ -1805,6 +1854,12 @@ struct ProfileView: View {
         }
     }
 
+    private func formatDeadlineForBackend(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+    
     private func saveProfile() {
         profileErrorMessage = nil
         let trimmedName = profileUsername.trimmingCharacters(in: .whitespaces)
@@ -1838,9 +1893,9 @@ struct ProfileView: View {
             "password": trimmedPassword,
             "balanceCents": Int((profileCashHoldings * 100).rounded()),
             "objective_type": "pushups",
-            "objective_count": 50,
-            "objective_schedule": "daily",
-            "objective_deadline": "09:00",
+            "objective_count": pushupObjective,
+            "objective_schedule": scheduleType.lowercased(),
+            "objective_deadline": formatDeadlineForBackend(objectiveDeadline),
             "missed_goal_payout": committedPayoutAmount > 0 ? committedPayoutAmount : missedGoalPayout,
             "payout_destination": payoutType.lowercased(),
             "committedPayoutAmount": committedPayoutAmount,
@@ -2359,6 +2414,13 @@ struct SignInView: View {
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
     @AppStorage("committedDestination") private var committedDestination: String = "charity"
     @AppStorage("userId") private var userId: String = ""
+    // Objective settings (populated from server on sign in)
+    @AppStorage("pushupObjective") private var pushupObjective: Int = 10
+    @AppStorage("scheduleType") private var scheduleType: String = "Daily"
+    @AppStorage("objectiveDeadline") private var objectiveDeadline: Date = {
+        let components = DateComponents(hour: 22, minute: 0)
+        return Calendar.current.date(from: components) ?? Date()
+    }()
     @State private var isLoading = false
     
     var body: some View {
@@ -2553,6 +2615,22 @@ struct SignInView: View {
                         self.committedDestination = commitDest
                     }
                     
+                    // Objective settings
+                    if let objCount = user["objective_count"] as? Int {
+                        self.pushupObjective = objCount
+                    }
+                    if let objSchedule = user["objective_schedule"] as? String {
+                        self.scheduleType = objSchedule.capitalized
+                    }
+                    if let objDeadline = user["objective_deadline"] as? String {
+                        // Parse "HH:mm" format to Date
+                        let formatter = DateFormatter()
+                        formatter.dateFormat = "HH:mm"
+                        if let time = formatter.date(from: objDeadline) {
+                            self.objectiveDeadline = time
+                        }
+                    }
+                    
             self.isSignedIn = true
                     self.profileCompleted = true
             self.dismiss()
@@ -2698,13 +2776,14 @@ struct CreateAccountView: View {
         isLoading = true
         errorMessage = nil
         
-        // Save to backend
+        // Save to backend (createOnly blocks duplicate emails)
         let body: [String: Any] = [
             "fullName": name.trimmingCharacters(in: .whitespaces),
             "email": email.trimmingCharacters(in: .whitespaces),
             "phone": phone.trimmingCharacters(in: .whitespaces),
             "password": password.trimmingCharacters(in: .whitespaces),
-            "balanceCents": 0
+            "balanceCents": 0,
+            "createOnly": true
         ]
         
         guard let url = URL(string: "/users/profile", relativeTo: StripeConfig.backendURL) else {

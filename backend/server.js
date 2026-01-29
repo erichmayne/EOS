@@ -103,9 +103,10 @@ app.post("/users/profile", async (req, res) => {
       committedDestination,
       custom_recipient_id,
       committedRecipientId,
-      committedCharity
+      committedCharity,
+      createOnly  // If true, reject if email already exists
     } = req.body || {};
-    console.log("DEBUG /users/profile:", { payout_destination, committedDestination, destinationCommitted, email });
+    console.log("DEBUG /users/profile:", { payout_destination, committedDestination, destinationCommitted, email, createOnly });
 
     if (!fullName || typeof fullName !== "string" || !fullName.trim()) {
       return res.status(400).json({ error: "Full name is required." });
@@ -128,6 +129,11 @@ app.post("/users/profile", async (req, res) => {
     if (fetchError) {
       console.error("Supabase fetch user error:", fetchError);
       return res.status(500).json({ error: "Failed to load user.", detail: String(fetchError.message ?? fetchError) });
+    }
+    
+    // Block duplicate emails on account creation
+    if (createOnly && existingUser) {
+      return res.status(409).json({ error: "An account with this email already exists. Please sign in instead." });
     }
 
     let stripeCustomerId = existingUser?.stripe_customer_id ?? null;
