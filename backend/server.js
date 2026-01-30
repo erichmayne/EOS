@@ -106,7 +106,16 @@ app.post("/users/profile", async (req, res) => {
       committedCharity,
       createOnly  // If true, reject if email already exists
     } = req.body || {};
-    console.log("DEBUG /users/profile:", { payout_destination, committedDestination, destinationCommitted, email, createOnly });
+    
+    console.log("📥 /users/profile request:", JSON.stringify({ 
+      email, 
+      balanceCents, 
+      payout_destination, 
+      committedDestination, 
+      destinationCommitted,
+      payoutCommitted,
+      missed_goal_payout
+    }, null, 2));
 
     // Email is always required
     if (!email || typeof email !== "string" || !email.trim()) {
@@ -169,20 +178,20 @@ app.post("/users/profile", async (req, res) => {
       full_name: normalizedName,
       phone: phone || null,
       stripe_customer_id: stripeCustomerId,
-      // Only update balance if provided
-      ...(typeof balanceCents === "number" && { balance_cents: activeBalanceCents }),
+      // Only update balance if provided as a number (update both columns for consistency)
+      ...(typeof balanceCents === "number" && { balance_cents: activeBalanceCents, active_balance_cents: activeBalanceCents }),
       // Objective fields
       ...(objective_type && { objective_type }),
       ...(typeof objective_count === "number" && { objective_count }),
       ...(objective_schedule && { objective_schedule }),
       ...(objective_deadline && { objective_deadline }),
-      // Payout fields
+      // Payout fields - use explicit checks for strings
       ...(typeof missed_goal_payout === "number" && { missed_goal_payout }),
-      ...(payout_destination && { payout_destination }),
+      ...(typeof payout_destination === "string" && payout_destination && { payout_destination }),
       ...(typeof payoutCommitted === "boolean" && { payout_committed: payoutCommitted }),
       // Destination commit fields
       ...(typeof destinationCommitted === "boolean" && { destination_committed: destinationCommitted }),
-      ...(committedDestination && { committed_destination: committedDestination }),
+      ...(typeof committedDestination === "string" && committedDestination && { committed_destination: committedDestination }),
       ...(committedCharity && { committed_charity: committedCharity }),
       ...(validCustomRecipientId && { custom_recipient_id: validCustomRecipientId }),
       ...(validCommittedRecipientId && { committed_recipient_id: validCommittedRecipientId }),
@@ -228,6 +237,12 @@ app.post("/users/profile", async (req, res) => {
         return res.status(500).json({ error: "Failed to update user.", detail: String(updateError.message ?? updateError) });
       }
       userRow = data;
+      console.log("✅ User updated:", { 
+        id: userRow.id, 
+        balance_cents: userRow.balance_cents,
+        payout_destination: userRow.payout_destination,
+        committed_destination: userRow.committed_destination 
+      });
     }
 
     // Store userId for reference
@@ -706,9 +721,9 @@ app.post("/objectives/check-missed", async (req, res) => {
                 .select()
                 .single();
             
-            // Deduct balance and mark session
+            // Deduct balance and mark session (update both columns)
             const newBalance = Math.max(0, userBalance - payoutAmountCents);
-            await supabase.from("users").update({ balance_cents: newBalance }).eq("id", session.user_id);
+            await supabase.from("users").update({ balance_cents: newBalance, active_balance_cents: newBalance }).eq("id", session.user_id);
             await supabase.from("objective_sessions").update({ 
                 status: "missed", 
                 payout_triggered: true,
@@ -1461,7 +1476,7 @@ app.post("/users/:userId/trigger-payout", async (req, res) => {
         const newBalance = Math.max(0, (user.balance_cents || 0) - payoutAmountCents);
         await supabase
             .from("users")
-            .update({ balance_cents: newBalance })
+            .update({ balance_cents: newBalance, active_balance_cents: newBalance })
             .eq("id", userId);
         
         res.json({
