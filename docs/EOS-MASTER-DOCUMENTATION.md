@@ -1,23 +1,27 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: January 29, 2026
-> Version: 2.5 - Stripe CLI, Live Keys, Sync Fixes
+> Last Updated: January 30, 2026
+> Version: 2.6 - Recipient Linking Fixed
 
 ---
 
-## 🆕 Latest Updates (Jan 29, 2026)
+## 🆕 Latest Updates (Jan 30, 2026)
 
-### Stripe CLI Setup
-- Installed via `brew install stripe/stripe-cli/stripe`
-- Login: `stripe login` (opens browser)
-- Publishable key added to `StripeConfig.swift`
+### Recipient Linking Architecture Fix
+- **Root cause identified**: iOS was expecting `Int` for invite IDs, but database uses UUID strings
+- **Backend bug**: `/users/:userId/invites` was querying wrong table (`users` instead of `recipients`)
+- **Status check bug**: Duplicate detection checked for `status === 'active'` but we set `'accepted'`
+- **Added**: Detailed recipient linking architecture docs (see Database Schema section)
 
-### Sync Fixes Applied
+### Key Fixes Applied
+1. iOS `syncInviteStatuses()` now handles UUID strings for invite IDs
+2. Backend `/users/:userId/invites` now correctly queries `recipients` table
+3. Backend `/recipient-signup` status check fixed (`'accepted'` not `'active'`)
+4. Added extensive logging to recipient signup flow
+
+### Previous Fixes (Jan 29)
 - **payoutType casing bug**: Fixed server returning "Charity" vs UI expecting "charity"
 - **Live Stripe key**: Added `pk_live_...` to iOS app
-
-### Known Issues Being Fixed
-- Deposit balance not syncing to database after payment
-- Payout destination selection not reflecting in database
+- Stripe CLI installed for testing
 
 ---
 
@@ -908,6 +912,82 @@ CREATE TABLE transactions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ```
+
+### 🔗 Recipient Linking Architecture (IMPORTANT)
+
+Understanding how recipients are linked is critical for debugging. There are **TWO separate IDs** for each recipient:
+
+#### ID Structure Diagram
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         USERS TABLE                             │
+│  (Main accounts - both payers AND recipients log in here)       │
+├─────────────────────────────────────────────────────────────────┤
+│  id (UUID)              │ 0bff145b... (Test03 - PAYER)          │
+│  email                  │ 0@gmail.com                           │
+│  custom_recipient_id    │ bf1020c7... → points to RECIPIENTS    │
+│  payout_destination     │ "custom"                              │
+├─────────────────────────────────────────────────────────────────┤
+│  id (UUID)              │ 4d89a3db... (Payout5 - RECIPIENT)     │
+│  email                  │ 05@gmail.com                          │
+│  custom_recipient_id    │ null (they're a recipient, not payer) │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ FK constraint requires
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       RECIPIENTS TABLE                          │
+│  (Payout destination records - required for FK)                 │
+├─────────────────────────────────────────────────────────────────┤
+│  id (UUID)              │ bf1020c7... (Payout5's PAYOUT DEST)   │
+│  name                   │ "Payout 5"                            │
+│  email                  │ 05@gmail.com                          │
+│  stripe_connect_id      │ null (set during withdrawal)          │
+└─────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ recipient_id links here
+                              │
+┌─────────────────────────────────────────────────────────────────┐
+│                    RECIPIENT_INVITES TABLE                      │
+│  (Tracks invite codes and their status)                         │
+├─────────────────────────────────────────────────────────────────┤
+│  id (UUID)              │ 27846b64... (invite record)           │
+│  payer_user_id          │ 0bff145b... → Test03 in users         │
+│  invite_code            │ "HS2ZAWUY"                            │
+│  status                 │ "accepted"                            │
+│  recipient_id           │ bf1020c7... → recipients table        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Why Two IDs?
+1. **User ID** (`users.id`): The recipient's login account. They use this to sign in to the web portal.
+2. **Recipient ID** (`recipients.id`): The payout destination record. This is what the payer's `custom_recipient_id` points to.
+
+**The FK constraint on `users.custom_recipient_id` references `recipients` table, NOT `users` table.** This is a legacy design that requires creating entries in both tables when a recipient signs up.
+
+#### Recipient Signup Flow (via invite code)
+```
+1. Payer generates invite code
+   └── Creates row in recipient_invites (status: 'pending')
+
+2. Recipient visits invite link and signs up
+   └── Creates row in users table (their login account)
+   └── Creates row in recipients table (payout destination)
+   └── Updates recipient_invites (status: 'accepted', recipient_id set)
+   └── Updates payer's custom_recipient_id → points to recipients entry
+
+3. iOS app syncs via /users/:userId/invites
+   └── Returns invites with recipient info from recipients table
+   └── iOS displays recipient name/email with status "active"
+```
+
+#### Key Points
+- `users.custom_recipient_id` → references `recipients.id` (NOT `users.id`)
+- When querying recipient info, always query `recipients` table
+- Recipient has login via `users` table, payout destination via `recipients` table
+- Status values: `pending` (waiting), `accepted` (signed up), `expired`
+
+---
 
 ### Database Functions (PostgreSQL/Supabase)
 

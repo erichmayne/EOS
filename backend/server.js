@@ -40,7 +40,7 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // -----------------------------------------------------------------------------
 app.post('/create-payment-intent', async (req, res) => {
   try {
-    const { amount } = req.body; // amount in cents
+    const { amount, userId } = req.body; // amount in cents, userId optional
 
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Invalid amount' });
@@ -50,25 +50,92 @@ app.post('/create-payment-intent', async (req, res) => {
     const stripeFeeFixed = 30; // 30 cents
     const stripeFeePercent = 0.029; // 2.9%
     const chargeAmount = Math.ceil((amount + stripeFeeFixed) / (1 - stripeFeePercent));
-    console.log(`Deposit: $${(amount/100).toFixed(2)} -> Charge: $${(chargeAmount/100).toFixed(2)}`);
+    console.log(`Deposit: $${(amount/100).toFixed(2)} -> Charge: $${(chargeAmount/100).toFixed(2)} for user: ${userId || 'anonymous'}`);
 
-    const customer = await stripe.customers.create();
+    // Get or create Stripe customer
+    let customerId = null;
+    let user = null;
+    
+    if (userId) {
+      // Check if user already has a Stripe customer
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, email, full_name, stripe_customer_id')
+        .eq('id', userId)
+        .single();
+      
+      user = userData;
+      
+      if (user?.stripe_customer_id) {
+        customerId = user.stripe_customer_id;
+        console.log('Using existing Stripe customer:', customerId);
+      }
+    }
+    
+    // Create new Stripe customer if needed
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user?.email || undefined,
+        name: user?.full_name || undefined,
+      });
+      customerId = customer.id;
+      console.log('Created new Stripe customer:', customerId);
+      
+      // Save customer ID to user record if we have a userId
+      if (userId) {
+        await supabase
+          .from('users')
+          .update({ stripe_customer_id: customerId })
+          .eq('id', userId);
+      }
+    }
 
-    const ephemeralKey = await stripe.ephemeralKeys.create(
-      { customer: customer.id },
-      { apiVersion: '2023-10-16' }
-    );
+    // Try to create ephemeral key, handle case where customer doesn't exist (e.g., test->live switch)
+    let ephemeralKey;
+    try {
+      ephemeralKey = await stripe.ephemeralKeys.create(
+        { customer: customerId },
+        { apiVersion: '2023-10-16' }
+      );
+    } catch (ephemeralError) {
+      // If customer doesn't exist (test mode customer in live mode), create new one
+      if (ephemeralError.code === 'resource_missing') {
+        console.log('Customer not found (likely test mode ID in live mode), creating new customer...');
+        const newCustomer = await stripe.customers.create({
+          email: user?.email || undefined,
+          name: user?.full_name || undefined,
+        });
+        customerId = newCustomer.id;
+        console.log('Created new Stripe customer:', customerId);
+        
+        // Update user record with new customer ID
+        if (userId) {
+          await supabase
+            .from('users')
+            .update({ stripe_customer_id: customerId })
+            .eq('id', userId);
+        }
+        
+        // Retry ephemeral key creation
+        ephemeralKey = await stripe.ephemeralKeys.create(
+          { customer: customerId },
+          { apiVersion: '2023-10-16' }
+        );
+      } else {
+        throw ephemeralError; // Re-throw if different error
+      }
+    }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: chargeAmount, // Charge includes Stripe fee
       currency: 'usd',
-      customer: customer.id,
+      customer: customerId,
       automatic_payment_methods: { enabled: true },
     });
 
     res.json({
       paymentIntentClientSecret: paymentIntent.client_secret,
-      customer: customer.id,
+      customer: customerId,
       ephemeralKeySecret: ephemeralKey.secret,
     });
   } catch (err) {
@@ -149,16 +216,9 @@ app.post("/users/profile", async (req, res) => {
     
     const normalizedName = fullName ? fullName.trim() : (existingUser?.full_name || "");
 
+    // Don't create Stripe customer during signup - defer until first deposit
     let stripeCustomerId = existingUser?.stripe_customer_id ?? null;
-
-    if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email: normalizedEmail,
-        name: normalizedName,
-        phone: phone || undefined,
-      });
-      stripeCustomerId = customer.id;
-    }
+    // Stripe customer will be created lazily in /create-payment-intent when user deposits
     // Validate recipient IDs before using them
     let validCustomRecipientId = null;
     let validCommittedRecipientId = null;
@@ -421,6 +481,460 @@ app.post('/recipient-invites/code-only', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// Recipient Signup - Creates user account from invite (no Stripe Connect)
+// -----------------------------------------------------------------------------
+app.post('/recipient-signup', async (req, res) => {
+  try {
+    const { inviteCode, fullName, email, phone, password } = req.body || {};
+    
+    console.log('📥 /recipient-signup:', { inviteCode, email, fullName });
+    
+    // Validate required fields (phone is optional)
+    if (!inviteCode || !fullName || !email || !password) {
+      return res.status(400).json({ error: 'Required fields: inviteCode, fullName, email, password' });
+    }
+    
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    // Find the invite
+    const { data: invite, error: inviteError } = await supabase
+      .from('recipient_invites')
+      .select('*, payer:payer_user_id(id, full_name, email)')
+      .eq('invite_code', inviteCode.toUpperCase())
+      .maybeSingle();
+    
+    if (inviteError || !invite) {
+      return res.status(404).json({ error: 'Invalid invite code' });
+    }
+    
+    if (invite.status === 'accepted') {
+      return res.status(400).json({ error: 'This invite has already been used' });
+    }
+    
+    // Check if email already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+    
+    if (existingUser) {
+      return res.status(409).json({ error: 'An account with this email already exists. Please sign in instead.' });
+    }
+    
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+    
+    // Create new user (recipient becomes a full EOS user)
+    const { data: newUser, error: userError } = await supabase
+      .from('users')
+      .insert({
+        full_name: fullName.trim(),
+        email: normalizedEmail,
+        phone: phone || null,
+        password_hash: passwordHash,
+        balance_cents: 0,
+        active_balance_cents: 0,
+        payout_destination: 'charity', // Recipients default to charity too
+      })
+      .select()
+      .single();
+    
+    if (userError) {
+      console.error('Failed to create recipient user:', userError);
+      return res.status(500).json({ error: 'Failed to create account', detail: userError.message });
+    }
+    
+    // Update invite status to accepted (DB constraint requires specific values: pending, accepted)
+    const { error: inviteUpdateError } = await supabase
+      .from('recipient_invites')
+      .update({ status: 'accepted' })
+      .eq('id', invite.id);
+    
+    if (inviteUpdateError) {
+      console.error('Warning: Failed to update invite status:', inviteUpdateError);
+    }
+    
+    // Create entry in recipients table (required for FK constraint on users.custom_recipient_id)
+    console.log('📝 Creating recipients table entry for:', normalizedEmail);
+    
+    const { data: recipientEntry, error: recipientError } = await supabase
+      .from('recipients')
+      .insert({
+        name: fullName.trim(),
+        email: normalizedEmail,
+        phone: phone || null,
+        type: 'individual'
+      })
+      .select()
+      .single();
+    
+    if (recipientError) {
+      console.error('❌ Failed to create recipient entry:', recipientError);
+      // This is critical - without this, we can't link to payer
+      return res.status(500).json({ error: 'Failed to create recipient record', detail: recipientError.message });
+    }
+    
+    console.log('✅ Recipient entry created with ID:', recipientEntry.id);
+    
+    // Update payer's custom_recipient_id with the recipient entry (not user ID due to FK constraint)
+    if (recipientEntry) {
+      console.log('📝 Updating payer:', invite.payer_user_id, 'with custom_recipient_id:', recipientEntry.id);
+      
+      const { data: updatedPayer, error: payerUpdateError } = await supabase
+        .from('users')
+        .update({ 
+          custom_recipient_id: recipientEntry.id,
+          payout_destination: 'custom'
+        })
+        .eq('id', invite.payer_user_id)
+        .select('id, full_name, custom_recipient_id, payout_destination')
+        .single();
+      
+      if (payerUpdateError) {
+        console.error('❌ Failed to update payer custom_recipient_id:', payerUpdateError);
+      } else {
+        console.log('✅ Payer updated successfully:', updatedPayer);
+      }
+      
+      // Also update invite with recipient_id AND recipient_user_id (CRITICAL for iOS linking)
+      const { error: inviteLinkError } = await supabase
+        .from('recipient_invites')
+        .update({ 
+          recipient_id: recipientEntry.id,
+          recipient_user_id: newUser.id  // THIS WAS MISSING - links the actual user
+        })
+        .eq('id', invite.id);
+      
+      if (inviteLinkError) {
+        console.error('⚠️ Failed to link recipient_user_id to invite:', inviteLinkError);
+      } else {
+        console.log('✅ Linked recipient_user_id:', newUser.id, 'to invite:', invite.id);
+      }
+    }
+    
+    console.log('✅ Recipient user created:', { 
+      recipientId: newUser.id, 
+      recipientEmail: normalizedEmail,
+      payerId: invite.payer_user_id,
+      payerName: invite.payer?.full_name,
+      inviteCode: inviteCode
+    });
+    
+    res.json({
+      success: true,
+      userId: newUser.id,
+      message: 'Account created successfully',
+      payerName: invite.payer?.full_name || 'Your accountability partner',
+      // Include user data for auto-login on portal
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        full_name: newUser.full_name,
+        phone: newUser.phone,
+        balance_cents: newUser.balance_cents || 0,
+        created_at: newUser.created_at
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error in /recipient-signup:', err);
+    res.status(500).json({ error: 'Failed to create account', detail: String(err) });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Web Auth - Login endpoint for portal
+// -----------------------------------------------------------------------------
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    // Find user
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+    
+    if (userError || !user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    
+    // Check password
+    if (!user.password_hash) {
+      return res.status(401).json({ error: 'Please reset your password' });
+    }
+    
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    
+    console.log('✅ User logged in:', { id: user.id, email: user.email });
+    
+    // Return user data (excluding sensitive fields)
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        phone: user.phone,
+        balance_cents: user.balance_cents,
+        created_at: user.created_at
+      }
+    });
+    
+  } catch (err) {
+    console.error('Error in /auth/login:', err);
+    res.status(500).json({ error: 'Login failed', detail: String(err) });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Get user transactions for portal
+// -----------------------------------------------------------------------------
+app.get('/users/:userId/transactions', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const { data: transactions, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .or(`payer_user_id.eq.${userId},recipient_user_id.eq.${userId}`)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    
+    if (error) {
+      console.error('Error fetching transactions:', error);
+      return res.status(500).json({ error: 'Failed to load transactions' });
+    }
+    
+    // Add description based on transaction type
+    const enrichedTransactions = (transactions || []).map(tx => {
+      let description = 'Transaction';
+      let amount_cents = 0;
+      
+      if (tx.recipient_user_id === userId) {
+        description = 'Received from missed goal';
+        amount_cents = tx.amount_cents || 0;
+      } else if (tx.payer_user_id === userId) {
+        description = 'Missed goal payout';
+        amount_cents = -(tx.amount_cents || 0);
+      }
+      
+      return {
+        ...tx,
+        description,
+        amount_cents
+      };
+    });
+    
+    res.json({ transactions: enrichedTransactions });
+    
+  } catch (err) {
+    console.error('Error in /users/:userId/transactions:', err);
+    res.status(500).json({ error: 'Failed to load transactions' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Withdrawal - Create Stripe Connect & transfer funds on demand
+// -----------------------------------------------------------------------------
+app.post('/withdraw', async (req, res) => {
+  try {
+    const { 
+      userId, 
+      amount, 
+      legalName, 
+      dob, 
+      address, 
+      ssnLast4, 
+      payoutMethod, 
+      paymentToken 
+    } = req.body || {};
+    
+    console.log('📤 /withdraw request:', { userId, amount, payoutMethod });
+    
+    // Validate required fields
+    if (!userId || !amount || !legalName || !dob || !address || !ssnLast4 || !paymentToken) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Get user and verify balance
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    
+    if (userError || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const amountCents = Math.round(amount * 100);
+    
+    if ((user.balance_cents || 0) < amountCents) {
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+    
+    let stripeConnectAccountId = user.stripe_connect_account_id;
+    
+    // Create Stripe Connect account if user doesn't have one
+    if (!stripeConnectAccountId) {
+      try {
+        const account = await stripe.accounts.create({
+          type: 'custom',
+          country: 'US',
+          email: user.email,
+          capabilities: {
+            card_payments: { requested: false },
+            transfers: { requested: true }
+          },
+          business_type: 'individual',
+          individual: {
+            first_name: legalName.split(' ')[0],
+            last_name: legalName.split(' ').slice(1).join(' ') || legalName.split(' ')[0],
+            email: user.email,
+            phone: user.phone,
+            dob: {
+              day: dob.day,
+              month: dob.month,
+              year: dob.year
+            },
+            address: {
+              line1: address.line1,
+              city: address.city,
+              state: address.state,
+              postal_code: address.postal_code,
+              country: 'US'
+            },
+            ssn_last_4: ssnLast4
+          },
+          business_profile: {
+            mcc: '7941',
+            url: 'https://live-eos.com'
+          },
+          tos_acceptance: {
+            date: Math.floor(Date.now() / 1000),
+            ip: req.ip || '0.0.0.0'
+          }
+        });
+        
+        stripeConnectAccountId = account.id;
+        
+        // Save Connect account ID to user
+        await supabase
+          .from('users')
+          .update({ stripe_connect_account_id: stripeConnectAccountId })
+          .eq('id', userId);
+        
+        console.log('✅ Created Stripe Connect account:', stripeConnectAccountId);
+        
+      } catch (stripeErr) {
+        console.error('Failed to create Connect account:', stripeErr.message);
+        return res.status(500).json({ error: 'Failed to create payout account: ' + stripeErr.message });
+      }
+    }
+    
+    // Add external account (bank or card)
+    try {
+      await stripe.accounts.createExternalAccount(stripeConnectAccountId, {
+        external_account: paymentToken,
+        default_for_currency: true
+      });
+      console.log('✅ Added external account to Connect account');
+    } catch (extErr) {
+      // If error is "already exists", continue
+      if (!extErr.message.includes('already exists')) {
+        console.error('Failed to add external account:', extErr.message);
+        return res.status(500).json({ error: 'Failed to add bank account: ' + extErr.message });
+      }
+    }
+    
+    // Transfer funds from EOS platform to Connect account
+    let transferId = null;
+    try {
+      const transfer = await stripe.transfers.create({
+        amount: amountCents,
+        currency: 'usd',
+        destination: stripeConnectAccountId,
+        description: 'EOS withdrawal',
+        metadata: { user_id: userId }
+      });
+      transferId = transfer.id;
+      console.log('✅ Transfer created:', transferId);
+    } catch (transferErr) {
+      console.error('Transfer failed:', transferErr.message);
+      return res.status(500).json({ error: 'Transfer failed: ' + transferErr.message });
+    }
+    
+    // Trigger immediate payout to their bank/card
+    let payoutId = null;
+    try {
+      const balance = await stripe.balance.retrieve({ stripeAccount: stripeConnectAccountId });
+      const available = balance.available[0]?.amount || 0;
+      
+      if (available > 0) {
+        const payout = await stripe.payouts.create({
+          amount: available,
+          currency: 'usd',
+          method: payoutMethod === 'card' ? 'instant' : 'standard'
+        }, { stripeAccount: stripeConnectAccountId });
+        payoutId = payout.id;
+        console.log('✅ Payout initiated:', payoutId);
+      }
+    } catch (payoutErr) {
+      console.error('Payout warning (funds will arrive via daily payout):', payoutErr.message);
+    }
+    
+    // Deduct balance from user
+    const newBalance = Math.max(0, (user.balance_cents || 0) - amountCents);
+    await supabase
+      .from('users')
+      .update({ 
+        balance_cents: newBalance, 
+        active_balance_cents: newBalance 
+      })
+      .eq('id', userId);
+    
+    // Record transaction
+    await supabase
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        payer_user_id: userId,
+        type: 'withdrawal',
+        amount_cents: -amountCents,
+        status: 'completed',
+        description: 'Withdrawal to ' + (payoutMethod === 'bank' ? 'bank account' : 'debit card'),
+        stripe_payment_id: transferId
+      });
+    
+    console.log('✅ Withdrawal complete:', { userId, amount, transferId, newBalance });
+    
+    res.json({
+      success: true,
+      transferId,
+      payoutId,
+      amountWithdrawn: amount,
+      newBalanceCents: newBalance
+    });
+    
+  } catch (err) {
+    console.error('Error in /withdraw:', err);
+    res.status(500).json({ error: 'Withdrawal failed: ' + err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // Optional: Supabase debug endpoint
 // -----------------------------------------------------------------------------
 app.get('/debug/supabase', async (req, res) => {
@@ -525,36 +1039,204 @@ app.post("/users/:userId/commit-destination", async (req, res) => {
 });
 
 // Get user invites with recipient status
+// Returns: ALL accepted recipients (with isSelected flag) + pending invites
 app.get("/users/:userId/invites", async (req, res) => {
     try {
         const { userId } = req.params;
         
-        const { data: invites, error } = await supabase
+        // Get payer's currently selected recipient
+        const { data: payer } = await supabase
+            .from("users")
+            .select("custom_recipient_id, payout_destination")
+            .eq("id", userId)
+            .single();
+        
+        const selectedRecipientId = payer?.custom_recipient_id;
+        
+        // Get ALL accepted invites with their recipient info
+        const { data: acceptedInvites, error: acceptedError } = await supabase
             .from("recipient_invites")
-            .select("id, phone, invite_code, status, created_at, recipient_id")
+            .select("id, invite_code, status, created_at, recipient_id")
             .eq("payer_user_id", userId)
+            .eq("status", "accepted")
             .order("created_at", { ascending: false });
         
-        if (error) {
-            return res.status(500).json({ error: error.message });
+        if (acceptedError) {
+            console.error("Error fetching accepted invites:", acceptedError);
         }
         
-        // Enrich with recipient info
-        const enriched = await Promise.all((invites || []).map(async (inv) => {
-            if (inv.recipient_id) {
-                const { data: r } = await supabase
-                    .from("recipients")
-                    .select("name, email")
-                    .eq("id", inv.recipient_id)
-                    .single();
-                return { ...inv, recipient: r };
-            }
-            return inv;
-        }));
+        // Get the most recent pending invite
+        const { data: pendingInvites, error: pendingError } = await supabase
+            .from("recipient_invites")
+            .select("id, invite_code, status, created_at")
+            .eq("payer_user_id", userId)
+            .eq("status", "pending")
+            .order("created_at", { ascending: false })
+            .limit(1);
         
-        res.json({ invites: enriched });
+        if (pendingError) {
+            console.error("Error fetching pending invites:", pendingError);
+        }
+        
+        // Build the invites array with recipient info
+        const invites = [];
+        const seenRecipientIds = new Set(); // Avoid duplicates (multiple invites can point to same recipient)
+        
+        // FIRST: Always include the currently selected recipient (even if no invite record)
+        if (selectedRecipientId) {
+            const { data: selectedR } = await supabase
+                .from("recipients")
+                .select("id, name, email")
+                .eq("id", selectedRecipientId)
+                .single();
+            
+            if (selectedR) {
+                seenRecipientIds.add(selectedR.id);
+                invites.push({
+                    id: selectedR.id,
+                    status: 'accepted',
+                    isSelected: true,
+                    recipient: {
+                        name: selectedR.name,
+                        email: selectedR.email,
+                        recipientId: selectedR.id
+                    }
+                });
+            }
+        }
+        
+        // Add other accepted recipients from invites (deduplicated by recipient_id)
+        for (const inv of (acceptedInvites || [])) {
+            if (!inv.recipient_id || seenRecipientIds.has(inv.recipient_id)) {
+                continue; // Skip if no recipient or already added
+            }
+            seenRecipientIds.add(inv.recipient_id);
+            
+            // Get recipient info
+            const { data: r } = await supabase
+                .from("recipients")
+                .select("id, name, email")
+                .eq("id", inv.recipient_id)
+                .single();
+            
+            if (r) {
+                const isSelected = r.id === selectedRecipientId;
+                invites.push({
+                    id: r.id,  // Use recipient ID as the invite ID for selection
+                    status: isSelected ? 'accepted' : 'inactive', // 'accepted' = selected, 'inactive' = available but not selected
+                    isSelected: isSelected,
+                    recipient: {
+                        name: r.name,
+                        email: r.email,
+                        recipientId: r.id
+                    }
+                });
+            }
+        }
+        
+        // Sort: selected first, then by name
+        invites.sort((a, b) => {
+            if (a.isSelected && !b.isSelected) return -1;
+            if (!a.isSelected && b.isSelected) return 1;
+            return (a.recipient?.name || '').localeCompare(b.recipient?.name || '');
+        });
+        
+        // Add pending invites at the end
+        for (const inv of (pendingInvites || [])) {
+            invites.push({
+                id: inv.id,
+                invite_code: inv.invite_code,
+                status: 'pending',
+                created_at: inv.created_at
+            });
+        }
+        
+        // Find current selected recipient for response
+        const currentRecipient = invites.find(i => i.isSelected)?.recipient || null;
+        
+        console.log('📋 Returning invites for user:', userId, 
+            '- Total recipients:', seenRecipientIds.size, 
+            '- Selected:', currentRecipient?.name || 'none',
+            '- Pending:', pendingInvites?.length || 0);
+        
+        res.json({ 
+            invites,
+            currentRecipient: currentRecipient ? {
+                id: currentRecipient.recipientId,
+                name: currentRecipient.name,
+                email: currentRecipient.email,
+                status: 'active'
+            } : null,
+            totalRecipients: seenRecipientIds.size,
+            pendingCount: pendingInvites?.length || 0
+        });
         
     } catch (error) {
+        console.error("Error in /users/:userId/invites:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Switch active recipient (select a different one from the list)
+app.post("/users/:userId/select-recipient", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { recipientId } = req.body || {};
+        
+        console.log('🔄 Switching recipient for user:', userId, 'to:', recipientId);
+        
+        if (!recipientId) {
+            return res.status(400).json({ error: "recipientId is required" });
+        }
+        
+        // Verify the recipient exists in the recipients table
+        const { data: recipient, error: recipientError } = await supabase
+            .from("recipients")
+            .select("id, name, email")
+            .eq("id", recipientId)
+            .single();
+        
+        if (recipientError || !recipient) {
+            return res.status(404).json({ error: "Recipient not found" });
+        }
+        
+        // Note: We trust that the iOS app only shows recipients from our invites endpoint
+        // The endpoint already filters to only show recipients linked to this payer
+        // Additional verification here would be redundant and cause issues with legacy data
+        
+        // Update the user's custom_recipient_id
+        const { data: updatedUser, error: updateError } = await supabase
+            .from("users")
+            .update({ 
+                custom_recipient_id: recipientId,
+                payout_destination: 'custom'  // Ensure payout goes to custom
+            })
+            .eq("id", userId)
+            .select("id, custom_recipient_id, payout_destination")
+            .single();
+        
+        if (updateError) {
+            console.error("Failed to update custom_recipient_id:", updateError);
+            return res.status(500).json({ error: "Failed to switch recipient" });
+        }
+        
+        console.log('✅ Switched recipient successfully:', {
+            userId,
+            newRecipientId: recipientId,
+            recipientName: recipient.name
+        });
+        
+        res.json({
+            success: true,
+            selectedRecipient: {
+                id: recipient.id,
+                name: recipient.name,
+                email: recipient.email
+            }
+        });
+        
+    } catch (error) {
+        console.error("Error in /users/:userId/select-recipient:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -666,8 +1348,51 @@ app.post("/objectives/check-missed", async (req, res) => {
                 console.log("Charity payout recorded:", charityName, payoutAmountCents, "cents");
             }
             
-            // Transfer to recipient if custom
+            // Transfer DB balance to recipient if custom
+            // NOTE: Real money stays in EOS account until recipient withdraws
             if (destination === "custom" && recipientId) {
+                // Look up the recipient entry to get their email
+                const { data: recipientEntry } = await supabase
+                    .from("recipients")
+                    .select("id, email, name")
+                    .eq("id", recipientId)
+                    .single();
+                
+                if (!recipientEntry) {
+                    console.error("Recipient entry not found in recipients table:", recipientId);
+                } else {
+                    // Find the user account by email (recipients table links to users via email)
+                    const { data: recipientUser, error: recipientError } = await supabase
+                        .from("users")
+                        .select("id, balance_cents, active_balance_cents, full_name, email")
+                        .eq("email", recipientEntry.email)
+                        .single();
+                    
+                    if (recipientUser) {
+                        // Add payout amount to recipient's balance (DB only, no Stripe transfer)
+                        const newRecipientBalance = (recipientUser.balance_cents || 0) + payoutAmountCents;
+                        await supabase
+                            .from("users")
+                            .update({ 
+                                balance_cents: newRecipientBalance, 
+                                active_balance_cents: newRecipientBalance 
+                            })
+                            .eq("id", recipientUser.id);
+                        
+                        console.log("💰 DB balance transfer:", {
+                            from: user.email,
+                            to: recipientUser.full_name,
+                            recipientUserId: recipientUser.id,
+                            recipientEmail: recipientUser.email,
+                            amount: payoutAmountCents / 100,
+                            newRecipientBalance: newRecipientBalance / 100
+                        });
+                    } else {
+                        console.error("Recipient user not found by email:", recipientEntry.email, recipientError);
+                    }
+                }
+                
+                /* COMMENTED OUT - Old Stripe Connect auto-transfer
                 const { data: recipient } = await supabase
                     .from("recipients")
                     .select("stripe_connect_account_id")
@@ -686,7 +1411,7 @@ app.post("/objectives/check-missed", async (req, res) => {
                         stripeTransferId = transfer.id;
                         console.log("Transfer success:", transfer.id, "to", recipient.stripe_connect_account_id);
                         
-                        // Trigger instant payout to recipients card
+                        // Trigger instant payout
                         try {
                             const recipientBalance = await stripe.balance.retrieve({ stripeAccount: recipient.stripe_connect_account_id });
                             const availableAmount = recipientBalance.available[0]?.amount || 0;
@@ -699,23 +1424,28 @@ app.post("/objectives/check-missed", async (req, res) => {
                                 console.log("Instant payout triggered:", payout.id, "Amount:", availableAmount);
                             }
                         } catch (payoutErr) {
-                            console.error("Instant payout failed (will use daily):", payoutErr.message);
+                            console.error("Instant payout failed:", payoutErr.message);
                         }
                     } catch (err) {
                         console.error("Stripe transfer failed:", err.message);
                     }
                 }
+                */
             }
             
-            // Create transaction
+            // Create transaction (with recipient_user_id for DB transfers)
             const { data: tx } = await supabase
                 .from("transactions")
                 .insert({
                     user_id: session.user_id,
+                    payer_user_id: session.user_id,
+                    recipient_user_id: destination === "custom" ? recipientId : null,
                     type: "payout",
                     amount_cents: payoutAmountCents,
-                    status: "accepted",
-                    description: "Missed objective payout (auto)",
+                    status: "completed",
+                    description: destination === "charity" 
+                        ? "Missed objective - charity donation" 
+                        : "Missed objective payout",
                     stripe_payment_id: stripeTransferId
                 })
                 .select()

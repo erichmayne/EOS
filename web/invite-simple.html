@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOS - Accept Accountability Invite</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Segoe UI', Roboto, sans-serif;
+            background: #FFFFFF;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+            max-width: 520px;
+            width: 100%;
+            padding: 40px;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo h1 {
+            font-size: 48px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #000000 0%, #D9A600 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .step {
+            display: none;
+        }
+        
+        .step.active {
+            display: block;
+        }
+        
+        .step-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .step-header h2 {
+            font-size: 24px;
+            color: #000000;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+        
+        .step-header p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #000000;
+            margin-bottom: 8px;
+        }
+        
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            border: 2px solid #E5E5E5;
+            border-radius: 12px;
+            transition: all 0.3s;
+            background: #FAFAFA;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #D9A600;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 3px rgba(217, 166, 0, 0.1);
+        }
+        
+        .button {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #D9A600 0%, #F0BA00 100%);
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(217, 166, 0, 0.3);
+        }
+        
+        .button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(217, 166, 0, 0.4);
+        }
+        
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .button-secondary {
+            background: transparent;
+            color: #000000;
+            border: 2px solid #E5E5E5;
+            box-shadow: none;
+            margin-top: 12px;
+        }
+        
+        .payer-info {
+            text-align: center;
+            padding: 24px;
+            background: linear-gradient(135deg, rgba(217, 166, 0, 0.05) 0%, rgba(217, 166, 0, 0.02) 100%);
+            border-radius: 16px;
+            margin-bottom: 20px;
+            border: 2px solid rgba(217, 166, 0, 0.1);
+        }
+        
+        .payer-info .amount {
+            font-size: 36px;
+            font-weight: 800;
+            color: #D9A600;
+            margin: 12px 0;
+        }
+        
+        .error {
+            background: rgba(239, 68, 68, 0.08);
+            color: #DC2626;
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        .success {
+            background: rgba(34, 197, 94, 0.08);
+            color: #16A34A;
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        .info-box {
+            background: #FAFAFA;
+            border-left: 4px solid #D9A600;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid white;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.6s linear infinite;
+            margin: 0 auto;
+        }
+        
+        .button.loading .spinner {
+            display: block;
+        }
+        
+        .button.loading #button-text {
+            display: none;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .signin-link {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .signin-link a {
+            color: #D9A600;
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>EOS</h1>
+        </div>
+        
+        <!-- Step 1: Enter Code -->
+        <div class="step active" id="step-code">
+            <div class="step-header">
+                <h2>Enter Your Invite Code</h2>
+                <p>Enter the 8-character code from your invite</p>
+            </div>
+            
+            <div class="form-group">
+                <input type="text" id="invite-code" placeholder="ABC123XY" maxlength="8" style="text-align: center; font-size: 24px; font-weight: 700; letter-spacing: 8px; text-transform: uppercase;">
+            </div>
+            
+            <button class="button" onclick="verifyCode()">Verify Code</button>
+            
+            <div class="signin-link">
+                Already have an account? <a href="https://live-eos.com/portal">Sign In</a>
+            </div>
+        </div>
+        
+        <!-- Step 2: Confirm -->
+        <div class="step" id="step-confirm">
+            <div class="step-header">
+                <h2>Accept Accountability Invite</h2>
+                <p>You've been selected as an accountability partner</p>
+            </div>
+            
+            <div class="payer-info">
+                <div id="payer-name" style="font-size: 20px; font-weight: 700; color: #000; margin-bottom: 8px;">Loading...</div>
+                <div style="color: #666;">will send you</div>
+                <div class="amount">cash payouts</div>
+                <div style="color: #666;">each time they miss their daily fitness goal</div>
+            </div>
+            
+            <button class="button" onclick="showStep('step-signup')">Create Account</button>
+            <button class="button button-secondary" onclick="showStep('step-code')">Back</button>
+        </div>
+        
+        <!-- Step 3: Simple Signup -->
+        <div class="step" id="step-signup">
+            <div class="step-header">
+                <h2>Create Your Account</h2>
+                <p>Quick setup - withdraw your earnings anytime</p>
+            </div>
+            
+            <form id="signup-form">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="recipient-name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="recipient-email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Phone Number <span style="opacity:0.5">(optional)</span></label>
+                    <input type="tel" id="recipient-phone" placeholder="(555) 123-4567">
+                </div>
+                
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="recipient-password" minlength="6" required>
+                </div>
+                
+                <div class="info-box">
+                    💰 Your earnings will accumulate in your account. Withdraw anytime by setting up your bank details later.
+                </div>
+                
+                <button type="submit" class="button" id="submit-btn">
+                    <span id="button-text">Create Account</span>
+                    <div class="spinner"></div>
+                </button>
+                
+                <button type="button" class="button button-secondary" onclick="showStep('step-confirm')">Back</button>
+            </form>
+        </div>
+        
+        <!-- Step 4: Success -->
+        <div class="step" id="step-success">
+            <div class="step-header">
+                <h2>🎉 You're All Set!</h2>
+                <p>Your account is ready</p>
+            </div>
+            
+            <div class="success">
+                ✓ Account created! You'll receive payouts whenever <span id="success-payer-name">your partner</span> misses their goal.
+            </div>
+            
+            <div class="info-box">
+                <strong>What's next?</strong><br><br>
+                • Your earnings will show in your account<br>
+                • Download the EOS app to track your balance<br>
+                • Withdraw anytime from your portal
+            </div>
+            
+            <button class="button" onclick="window.location.href='https://live-eos.com/portal'">Go to Portal</button>
+        </div>
+        
+        <div id="error-message" class="error" style="display: none;"></div>
+    </div>
+    
+    <script>
+        const API_URL = 'https://api.live-eos.com';
+        let inviteData = null;
+        
+        // Auto-uppercase invite code
+        document.getElementById('invite-code').addEventListener('input', (e) => {
+            e.target.value = e.target.value.toUpperCase();
+        });
+        
+        // Format phone number
+        document.getElementById('recipient-phone').addEventListener('input', (e) => {
+            let value = e.target.value.replace(/\D/g, '');
+            if (value.length >= 6) {
+                value = `(${value.slice(0,3)}) ${value.slice(3,6)}-${value.slice(6,10)}`;
+            } else if (value.length >= 3) {
+                value = `(${value.slice(0,3)}) ${value.slice(3)}`;
+            }
+            e.target.value = value;
+        });
+        
+        // Verify invite code
+        async function verifyCode() {
+            const code = document.getElementById('invite-code').value.trim();
+            
+            if (code.length < 6 || code.length > 8) {
+                showError('Please enter your 6-8 character invite code');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_URL}/verify-invite/${code}`);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Invalid code');
+                }
+                
+                inviteData = data;
+                document.getElementById('payer-name').textContent = data.payerName;
+                
+                showStep('step-confirm');
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+        
+        // Form submission
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitButton = document.getElementById('submit-btn');
+            submitButton.classList.add('loading');
+            hideError();
+            
+            try {
+                const formData = {
+                    inviteCode: inviteData.inviteCode,
+                    fullName: document.getElementById('recipient-name').value.trim(),
+                    email: document.getElementById('recipient-email').value.trim(),
+                    phone: document.getElementById('recipient-phone').value.replace(/\D/g, ''),
+                    password: document.getElementById('recipient-password').value
+                };
+                
+                const response = await fetch(`${API_URL}/recipient-signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to create account');
+                }
+                
+                // Save session for auto-login on portal
+                if (data.user) {
+                    localStorage.setItem('eos_session', JSON.stringify(data.user));
+                }
+                
+                document.getElementById('success-payer-name').textContent = inviteData.payerName || data.payerName;
+                showStep('step-success');
+                
+            } catch (error) {
+                showError(error.message);
+                submitButton.classList.remove('loading');
+            }
+        });
+        
+        function showStep(stepId) {
+            document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+            document.getElementById(stepId).classList.add('active');
+            hideError();
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function hideError() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+        
+        // Check for code in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const codeParam = urlParams.get('code');
+        if (codeParam) {
+            document.getElementById('invite-code').value = codeParam.toUpperCase();
+            verifyCode();
+        }
+    </script>
+</body>
+</html>

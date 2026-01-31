@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOS - Withdraw Funds</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Segoe UI', Roboto, sans-serif;
+            background: #FFFFFF;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+            max-width: 520px;
+            width: 100%;
+            padding: 40px;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo h1 {
+            font-size: 48px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #000000 0%, #D9A600 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .step {
+            display: none;
+        }
+        
+        .step.active {
+            display: block;
+        }
+        
+        .step-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .step-header h2 {
+            font-size: 24px;
+            color: #000000;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+        
+        .step-header p {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #000000;
+            margin-bottom: 8px;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            border: 2px solid #E5E5E5;
+            border-radius: 12px;
+            transition: all 0.3s;
+            background: #FAFAFA;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #D9A600;
+            background: #FFFFFF;
+            box-shadow: 0 0 0 3px rgba(217, 166, 0, 0.1);
+        }
+        
+        .button {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #D9A600 0%, #F0BA00 100%);
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(217, 166, 0, 0.3);
+        }
+        
+        .button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(217, 166, 0, 0.4);
+        }
+        
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .button-secondary {
+            background: transparent;
+            color: #000000;
+            border: 2px solid #E5E5E5;
+            box-shadow: none;
+            margin-top: 12px;
+        }
+        
+        .amount-display {
+            text-align: center;
+            padding: 32px;
+            background: linear-gradient(135deg, rgba(217, 166, 0, 0.08) 0%, rgba(217, 166, 0, 0.02) 100%);
+            border-radius: 16px;
+            margin-bottom: 24px;
+            border: 2px solid rgba(217, 166, 0, 0.2);
+        }
+        
+        .amount-display .label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
+        .amount-display .amount {
+            font-size: 48px;
+            font-weight: 800;
+            color: #D9A600;
+        }
+        
+        .dob-fields {
+            display: grid;
+            grid-template-columns: 70px 70px 100px;
+            gap: 12px;
+        }
+        
+        .payout-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin: 12px 0;
+        }
+        
+        .payout-option {
+            border: 2px solid #E5E5E5;
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .payout-option.active {
+            border-color: #D9A600;
+            background: rgba(217, 166, 0, 0.05);
+        }
+        
+        .stripe-element {
+            padding: 14px 16px;
+            border: 2px solid #E5E5E5;
+            border-radius: 12px;
+            background: #FAFAFA;
+            transition: all 0.3s;
+        }
+        
+        .stripe-element--focus {
+            border-color: #D9A600;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(217, 166, 0, 0.1);
+        }
+        
+        .address-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .checkbox-label {
+            display: flex;
+            align-items: flex-start;
+        }
+        
+        .checkbox-label input {
+            width: auto;
+            margin-right: 8px;
+            margin-top: 2px;
+        }
+        
+        .spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid white;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.6s linear infinite;
+            margin: 0 auto;
+        }
+        
+        .button.loading .spinner {
+            display: block;
+        }
+        
+        .button.loading #button-text {
+            display: none;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error {
+            background: rgba(239, 68, 68, 0.08);
+            color: #DC2626;
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        .success {
+            background: rgba(34, 197, 94, 0.08);
+            color: #16A34A;
+            padding: 12px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        .info-box {
+            background: #FAFAFA;
+            border-left: 4px solid #D9A600;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        @media (max-width: 600px) {
+            .payout-options, .address-row, .dob-fields {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>EOS</h1>
+        </div>
+        
+        <!-- Step 1: Confirm Amount -->
+        <div class="step active" id="step-confirm">
+            <div class="step-header">
+                <h2>Withdraw Funds</h2>
+                <p>Set up your payout account to receive funds</p>
+            </div>
+            
+            <div class="amount-display">
+                <div class="label">Available to withdraw</div>
+                <div class="amount" id="withdraw-amount">$0.00</div>
+            </div>
+            
+            <div class="info-box">
+                🔒 Your information is securely processed by Stripe. We never store your bank details.
+            </div>
+            
+            <button class="button" onclick="showStep('step-setup')" id="continue-btn">Continue to Setup</button>
+            <button class="button button-secondary" onclick="window.location.href='/portal'">Back to Portal</button>
+        </div>
+        
+        <!-- Step 2: Payout Setup (Stripe Connect) -->
+        <div class="step" id="step-setup">
+            <div class="step-header">
+                <h2>Payout Details</h2>
+                <p>Required for tax reporting and fund transfers</p>
+            </div>
+            
+            <form id="payout-form">
+                <div class="form-group">
+                    <label>Legal Full Name</label>
+                    <input type="text" id="legal-name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Date of Birth</label>
+                    <div class="dob-fields">
+                        <input type="number" id="dob-month" placeholder="MM" min="1" max="12" required>
+                        <input type="number" id="dob-day" placeholder="DD" min="1" max="31" required>
+                        <input type="number" id="dob-year" placeholder="YYYY" min="1900" max="2006" required>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Payout Method</label>
+                    <div class="payout-options">
+                        <button type="button" class="payout-option active" data-method="bank" onclick="switchMethod('bank')">
+                            🏦 Bank Account
+                        </button>
+                        <button type="button" class="payout-option" data-method="card" onclick="switchMethod('card')">
+                            💳 Debit Card
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="bank-fields">
+                    <div class="form-group">
+                        <label>Routing Number</label>
+                        <input type="text" id="routing-number" maxlength="9">
+                    </div>
+                    <div class="form-group">
+                        <label>Account Number</label>
+                        <input type="password" id="account-number">
+                    </div>
+                    <div class="form-group">
+                        <label>Confirm Account Number</label>
+                        <input type="text" id="confirm-account">
+                    </div>
+                </div>
+                
+                <div id="card-fields" style="display: none;">
+                    <div class="form-group">
+                        <label>Debit Card Details</label>
+                        <div id="card-element" class="stripe-element"></div>
+                        <div id="card-errors" style="color: #DC2626; font-size: 14px; margin-top: 8px;"></div>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Street Address</label>
+                    <input type="text" id="address-line1" required>
+                </div>
+                
+                <div class="address-row">
+                    <div class="form-group">
+                        <label>City</label>
+                        <input type="text" id="city" required>
+                    </div>
+                    <div class="form-group">
+                        <label>State</label>
+                        <select id="state" required>
+                            <option value="">Select</option>
+                            <option value="AL">AL</option><option value="AK">AK</option>
+                            <option value="AZ">AZ</option><option value="AR">AR</option>
+                            <option value="CA">CA</option><option value="CO">CO</option>
+                            <option value="CT">CT</option><option value="DE">DE</option>
+                            <option value="FL">FL</option><option value="GA">GA</option>
+                            <option value="HI">HI</option><option value="ID">ID</option>
+                            <option value="IL">IL</option><option value="IN">IN</option>
+                            <option value="IA">IA</option><option value="KS">KS</option>
+                            <option value="KY">KY</option><option value="LA">LA</option>
+                            <option value="ME">ME</option><option value="MD">MD</option>
+                            <option value="MA">MA</option><option value="MI">MI</option>
+                            <option value="MN">MN</option><option value="MS">MS</option>
+                            <option value="MO">MO</option><option value="MT">MT</option>
+                            <option value="NE">NE</option><option value="NV">NV</option>
+                            <option value="NH">NH</option><option value="NJ">NJ</option>
+                            <option value="NM">NM</option><option value="NY">NY</option>
+                            <option value="NC">NC</option><option value="ND">ND</option>
+                            <option value="OH">OH</option><option value="OK">OK</option>
+                            <option value="OR">OR</option><option value="PA">PA</option>
+                            <option value="RI">RI</option><option value="SC">SC</option>
+                            <option value="SD">SD</option><option value="TN">TN</option>
+                            <option value="TX">TX</option><option value="UT">UT</option>
+                            <option value="VT">VT</option><option value="VA">VA</option>
+                            <option value="WA">WA</option><option value="WV">WV</option>
+                            <option value="WI">WI</option><option value="WY">WY</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>ZIP</label>
+                        <input type="text" id="zip" maxlength="5" required>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Last 4 Digits of SSN</label>
+                    <input type="password" id="ssn-last4" maxlength="4" required>
+                    <small style="color: #666; font-size: 12px;">Required by law for tax reporting (1099-K)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="terms" required>
+                        <span style="font-size: 14px; color: #666;">I agree to <a href="https://stripe.com/legal/connect-account" target="_blank" style="color: #D9A600;">Stripe's Connected Account Agreement</a></span>
+                    </label>
+                </div>
+                
+                <button type="submit" class="button" id="submit-btn">
+                    <span id="button-text">Complete Withdrawal</span>
+                    <div class="spinner"></div>
+                </button>
+                
+                <button type="button" class="button button-secondary" onclick="showStep('step-confirm')">Back</button>
+            </form>
+        </div>
+        
+        <!-- Step 3: Success -->
+        <div class="step" id="step-success">
+            <div class="step-header">
+                <h2>🎉 Withdrawal Complete!</h2>
+                <p>Your funds are on the way</p>
+            </div>
+            
+            <div class="success">
+                ✓ Your withdrawal has been processed. Funds will arrive in 1-2 business days.
+            </div>
+            
+            <div class="amount-display">
+                <div class="label">Amount withdrawn</div>
+                <div class="amount" id="success-amount">$0.00</div>
+            </div>
+            
+            <button class="button" onclick="window.location.href='/portal'">Back to Portal</button>
+        </div>
+        
+        <div id="error-message" class="error" style="display: none;"></div>
+    </div>
+    
+    <script>
+        const API_URL = 'https://api.live-eos.com';
+        // TEST MODE - switch to pk_live_... for production
+        const stripe = Stripe('pk_test_51SFmmBJvjEmusMrWIL4uCrFlK4Fd2h4ATB9L3WLiVEYs5ij3F381qTLbzEvS5802WktpHXDhCNBlkQUnhvjjS7sX00suGslfmz');
+        let currentUser = null;
+        let withdrawAmount = 0;
+        let cardElement = null;
+        let currentMethod = 'bank';
+        
+        // Check session and load amount
+        function init() {
+            const session = localStorage.getItem('eos_session');
+            if (!session) {
+                window.location.href = '/portal';
+                return;
+            }
+            
+            try {
+                currentUser = JSON.parse(session);
+                withdrawAmount = (currentUser.balance_cents || 0) / 100;
+                
+                document.getElementById('withdraw-amount').textContent = `$${withdrawAmount.toFixed(2)}`;
+                document.getElementById('success-amount').textContent = `$${withdrawAmount.toFixed(2)}`;
+                
+                // Pre-fill name if available
+                if (currentUser.full_name) {
+                    document.getElementById('legal-name').value = currentUser.full_name;
+                }
+                
+                // Disable if no balance
+                if (withdrawAmount <= 0) {
+                    document.getElementById('continue-btn').disabled = true;
+                    document.getElementById('continue-btn').textContent = 'No funds to withdraw';
+                }
+                
+            } catch (e) {
+                window.location.href = '/portal';
+            }
+        }
+        
+        // Switch payment method
+        function switchMethod(method) {
+            document.querySelectorAll('.payout-option').forEach(b => b.classList.remove('active'));
+            document.querySelector(`[data-method="${method}"]`).classList.add('active');
+            
+            currentMethod = method;
+            
+            if (method === 'bank') {
+                document.getElementById('bank-fields').style.display = 'block';
+                document.getElementById('card-fields').style.display = 'none';
+            } else {
+                document.getElementById('bank-fields').style.display = 'none';
+                document.getElementById('card-fields').style.display = 'block';
+                
+                if (!cardElement) {
+                    const elements = stripe.elements();
+                    cardElement = elements.create('card', {
+                        style: {
+                            base: {
+                                fontSize: '16px',
+                                color: '#333',
+                                '::placeholder': { color: '#999' }
+                            }
+                        },
+                        hidePostalCode: true
+                    });
+                    cardElement.mount('#card-element');
+                    cardElement.on('change', (event) => {
+                        document.getElementById('card-errors').textContent = event.error ? event.error.message : '';
+                    });
+                }
+            }
+        }
+        
+        // Form submission
+        document.getElementById('payout-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitButton = document.getElementById('submit-btn');
+            submitButton.classList.add('loading');
+            hideError();
+            
+            try {
+                // Validate account numbers match
+                if (currentMethod === 'bank') {
+                    const account = document.getElementById('account-number').value;
+                    const confirm = document.getElementById('confirm-account').value;
+                    if (account !== confirm) {
+                        throw new Error('Account numbers do not match');
+                    }
+                }
+                
+                const formData = {
+                    userId: currentUser.id,
+                    amount: withdrawAmount,
+                    legalName: document.getElementById('legal-name').value.trim(),
+                    dob: {
+                        month: parseInt(document.getElementById('dob-month').value),
+                        day: parseInt(document.getElementById('dob-day').value),
+                        year: parseInt(document.getElementById('dob-year').value)
+                    },
+                    address: {
+                        line1: document.getElementById('address-line1').value.trim(),
+                        city: document.getElementById('city').value.trim(),
+                        state: document.getElementById('state').value,
+                        postal_code: document.getElementById('zip').value.trim(),
+                        country: 'US'
+                    },
+                    ssnLast4: document.getElementById('ssn-last4').value,
+                    payoutMethod: currentMethod
+                };
+                
+                let paymentToken = null;
+                
+                if (currentMethod === 'bank') {
+                    const result = await stripe.createToken('bank_account', {
+                        country: 'US',
+                        currency: 'usd',
+                        routing_number: document.getElementById('routing-number').value,
+                        account_number: document.getElementById('account-number').value,
+                        account_holder_name: formData.legalName,
+                        account_holder_type: 'individual'
+                    });
+                    
+                    if (result.error) {
+                        throw new Error(result.error.message);
+                    }
+                    paymentToken = result.token.id;
+                } else {
+                    const result = await stripe.createToken(cardElement, {
+                        currency: 'usd',
+                        name: formData.legalName,
+                        address_line1: formData.address.line1,
+                        address_city: formData.address.city,
+                        address_state: formData.address.state,
+                        address_zip: formData.address.postal_code,
+                        address_country: 'US'
+                    });
+                    
+                    if (result.error) {
+                        throw new Error(result.error.message);
+                    }
+                    paymentToken = result.token.id;
+                }
+                
+                // Submit to backend
+                const response = await fetch(`${API_URL}/withdraw`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...formData, paymentToken })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Withdrawal failed');
+                }
+                
+                // Update local session with new balance
+                currentUser.balance_cents = 0;
+                localStorage.setItem('eos_session', JSON.stringify(currentUser));
+                
+                showStep('step-success');
+                
+            } catch (error) {
+                showError(error.message);
+                submitButton.classList.remove('loading');
+            }
+        });
+        
+        function showStep(stepId) {
+            document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+            document.getElementById(stepId).classList.add('active');
+            hideError();
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        function hideError() {
+            document.getElementById('error-message').style.display = 'none';
+        }
+        
+        // Initialize
+        init();
+    </script>
+</body>
+</html>

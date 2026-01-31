@@ -788,30 +788,56 @@ final class DepositPaymentService: ObservableObject {
 
     func preparePaymentSheet(amount: Double, completion: @escaping (Error?) -> Void) {
         let cents = max(1, Int((amount * 100).rounded()))
+        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
+        
+        print("💳 preparePaymentSheet - amount: \(cents) cents, userId: '\(userId)'")
+        
+        guard !userId.isEmpty else {
+            completion(NSError(domain: "EOS", code: 0, userInfo: [NSLocalizedDescriptionKey: "Not signed in - please sign in first"]))
+            return
+        }
 
-        var request = URLRequest(url: StripeConfig.backendURL.appendingPathComponent("/create-payment-intent"))
+        var request = URLRequest(url: StripeConfig.backendURL.appendingPathComponent("create-payment-intent"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload: [String: Any] = ["amount": cents]
+        let payload: [String: Any] = ["amount": cents, "userId": userId]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload, options: [])
 
-        URLSession.shared.dataTask(with: request) { data, _, error in
+        URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
+                print("❌ Network error: \(error.localizedDescription)")
                 completion(error)
                 return
             }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📡 Response status: \(httpResponse.statusCode)")
+            }
+            
+            guard let data = data else {
+                print("❌ No data received")
+                completion(NSError(domain: "Stripe", code: 0, userInfo: [NSLocalizedDescriptionKey: "No data from server"]))
+                return
+            }
+            
+            if let rawString = String(data: data, encoding: .utf8) {
+                print("📦 Raw response: \(rawString)")
+            }
 
             guard
-                let data = data,
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let customerId = json["customer"] as? String,
                 let ephemeralKeySecret = json["ephemeralKeySecret"] as? String,
                 let clientSecret = json["paymentIntentClientSecret"] as? String
             else {
-                completion(NSError(domain: "Stripe", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid backend response"]))
+                let errorMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "Invalid backend response"
+                print("❌ Parse failed: \(errorMsg)")
+                completion(NSError(domain: "Stripe", code: 0, userInfo: [NSLocalizedDescriptionKey: errorMsg]))
                 return
             }
+            
+            print("✅ Got payment intent, customer: \(customerId)")
 
             var configuration = PaymentSheet.Configuration()
             configuration.merchantDisplayName = "EOS"
@@ -871,20 +897,20 @@ extension UIApplication {
 struct CustomRecipient: Codable, Identifiable {
     let id: String
     let name: String
-    let phone: String
+    let email: String
     let status: String // "pending", "active", "inactive"
     
-    init(name: String, phone: String) {
+    init(name: String, email: String) {
         self.id = UUID().uuidString
         self.name = name
-        self.phone = phone
+        self.email = email
         self.status = "pending"
     }
     
-    init(id: String, name: String, phone: String, status: String) {
+    init(id: String, name: String, email: String, status: String) {
         self.id = id
         self.name = name
-        self.phone = phone
+        self.email = email
         self.status = status
     }
 }
@@ -924,6 +950,25 @@ struct RecipientRow: View {
     
     @State private var isPressed = false
     
+    // Status colors based on recipient status
+    private var statusBackgroundColor: Color {
+        switch recipient.status.lowercased() {
+        case "active": return Color.green.opacity(0.15)
+        case "available": return Color.blue.opacity(0.15)
+        case "pending": return Color.orange.opacity(0.15)
+        default: return Color.gray.opacity(0.15)
+        }
+    }
+    
+    private var statusForegroundColor: Color {
+        switch recipient.status.lowercased() {
+        case "active": return Color.green.opacity(0.9)
+        case "available": return Color.blue.opacity(0.9)
+        case "pending": return Color.orange.opacity(0.9)
+        default: return Color.gray.opacity(0.9)
+        }
+    }
+    
     var body: some View {
         Button(action: onSelect) {
             HStack {
@@ -936,7 +981,7 @@ struct RecipientRow: View {
                     Text(recipient.name)
                         .font(.system(.body, design: .rounded, weight: isSelected ? .medium : .regular))
                         .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                    Text(recipient.phone)
+                    Text(recipient.email)
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(Color.black.opacity(0.6))
                 }
@@ -949,13 +994,9 @@ struct RecipientRow: View {
                     .padding(.vertical, 3)
                     .background(
                         Capsule()
-                            .fill(recipient.status == "active" 
-                                ? Color.green.opacity(0.15) 
-                                : Color.orange.opacity(0.15))
+                            .fill(statusBackgroundColor)
                     )
-                    .foregroundStyle(recipient.status == "active" 
-                        ? Color.green.opacity(0.9) 
-                        : Color.orange.opacity(0.9))
+                    .foregroundStyle(statusForegroundColor)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -999,6 +1040,7 @@ struct ProfileView: View {
     @AppStorage("payoutType") private var payoutType: String = "charity"
     @AppStorage("selectedCharity") private var selectedCharity: String = "Global Learning Fund"
     @AppStorage("customRecipientsData") private var customRecipientsData: Data = Data()
+    @AppStorage("cachedRecipientsForUserId") private var cachedRecipientsForUserId: String = ""  // Track which user the cache belongs to
     @AppStorage("selectedRecipientId") private var selectedRecipientId: String = ""
     @AppStorage("missedGoalPayout") private var missedGoalPayout: Double = 0.0
     @AppStorage("payoutCommitted") private var payoutCommitted: Bool = false
@@ -1329,7 +1371,10 @@ struct ProfileView: View {
                                                     recipient: recipient,
                                                     isSelected: selectedRecipientId == recipient.id,
                                                     onSelect: { 
-                                                        selectedRecipientId = recipient.id 
+                                                        // Only allow selecting active or available recipients
+                                                        if recipient.status == "active" || recipient.status == "available" {
+                                                            selectRecipient(recipient.id)
+                                                        }
                                                     }
                                                 )
                                                 
@@ -1353,9 +1398,10 @@ struct ProfileView: View {
                         }
                         
                         // Commit Destination Button - ALWAYS visible
+                        // Disabled if custom selected but no active recipient
                         Button(action: commitDestination) {
                             HStack {
-                                Image(systemName: destinationCommitted ? "checkmark.circle.fill" : "lock.fill")
+                                Image(systemName: isCommitButtonDisabled ? "exclamationmark.circle.fill" : (destinationCommitted ? "checkmark.circle.fill" : "lock.fill"))
                                     .font(.body)
                                 Text(lockButtonText)
                                     .font(.system(.body, design: .rounded, weight: .semibold))
@@ -1364,11 +1410,14 @@ struct ProfileView: View {
                             .padding(.vertical, 14)
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                    .fill(isCommitButtonDisabled 
+                                        ? Color.gray.opacity(0.3) 
+                                        : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(isCommitButtonDisabled ? .gray : .white)
                         }
                         .buttonStyle(.plain)
+                        .disabled(isCommitButtonDisabled)
                         .padding(.top, 8)
                     }
                     .listRowBackground(Color.white)
@@ -1660,7 +1709,33 @@ struct ProfileView: View {
                     profileCompleted: $profileCompleted
                 )
             }
+            .onChange(of: isSignedIn) { oldValue, newValue in
+                if newValue {
+                    // User just signed in - clear old recipient cache and fetch fresh
+                    let newUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
+                    if newUserId != cachedRecipientsForUserId {
+                        customRecipients = []
+                        customRecipientsData = Data()
+                        selectedRecipientId = ""
+                        cachedRecipientsForUserId = newUserId
+                        print("🔄 User signed in, cleared recipient cache for: \(newUserId)")
+                    }
+                    // Fetch fresh data for new user
+                    syncInviteStatuses()
+                }
+            }
             .onAppear {
+                // Check if user changed - clear recipient cache if so
+                let currentUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
+                if !currentUserId.isEmpty && currentUserId != cachedRecipientsForUserId {
+                    // Different user - clear stale cache
+                    customRecipients = []
+                    customRecipientsData = Data()
+                    selectedRecipientId = ""
+                    cachedRecipientsForUserId = currentUserId
+                    print("🔄 User changed, cleared recipient cache")
+                }
+                
                 loadCustomRecipients()
                 refreshBalance()
                 syncInviteStatuses()
@@ -1669,11 +1744,16 @@ struct ProfileView: View {
     
     private var isProfileValid: Bool {
         // Password only required for new accounts, not updates
-        let baseValid = !profileUsername.isEmpty && !profileEmail.isEmpty && !profilePhone.isEmpty
+        // Phone is optional
+        let baseValid = !profileUsername.isEmpty && !profileEmail.isEmpty
         return isSignedIn ? baseValid : (baseValid && !profilePassword.isEmpty)
     }
 
     private var lockButtonText: String {
+        // Can't lock custom without an active recipient
+        if payoutType.lowercased() == "custom" && !hasActiveRecipient {
+            return "Recipient Not Active"
+        }
         if !destinationCommitted {
             return "Lock Destination"
         }
@@ -1684,6 +1764,30 @@ struct ProfileView: View {
             return "Change Payout Lock"
         }
         return "Destination Locked"
+    }
+    
+    /// Returns true if there's an active recipient selected (for custom payout)
+    private var hasActiveRecipient: Bool {
+        // If not custom, this check doesn't apply
+        if payoutType.lowercased() != "custom" { return true }
+        
+        // Check if selected recipient exists and is active or available
+        guard !selectedRecipientId.isEmpty else { return false }
+        
+        if let recipient = customRecipients.first(where: { $0.id == selectedRecipientId }) {
+            let status = recipient.status.lowercased()
+            return status == "active" || status == "available"
+        }
+        return false
+    }
+    
+    /// Returns true if the commit button should be disabled
+    private var isCommitButtonDisabled: Bool {
+        // Charity is always allowed
+        if payoutType.lowercased() == "charity" { return false }
+        
+        // Custom requires an active recipient
+        return !hasActiveRecipient
     }
 
     
@@ -1781,7 +1885,12 @@ struct ProfileView: View {
     }
     
     private func syncInviteStatuses() {
-        guard let userId = UserDefaults.standard.string(forKey: "userId"), !userId.isEmpty else { return }
+        guard let userId = UserDefaults.standard.string(forKey: "userId"), !userId.isEmpty else {
+            print("⚠️ syncInviteStatuses: No userId found, skipping")
+            return
+        }
+        
+        print("📡 syncInviteStatuses: Fetching for userId: \(userId)")
         
         guard let url = URL(string: "/users/\(userId)/invites", relativeTo: StripeConfig.backendURL) else { return }
         
@@ -1791,29 +1900,67 @@ struct ProfileView: View {
                   let invites = json["invites"] as? [[String: Any]] else { return }
             
             DispatchQueue.main.async {
-                // Update customRecipients status based on invites
+                // Rebuild customRecipients from backend invites
+                var newRecipients: [CustomRecipient] = []
+                
                 for invite in invites {
-                    guard let phone = invite["phone"] as? String,
-                          let status = invite["status"] as? String else { continue }
-                    
-                    // Find matching recipient by phone
-                    if let index = self.customRecipients.firstIndex(where: { $0.phone == phone }) {
-                        // Create updated recipient with new status
-                        let old = self.customRecipients[index]
-                        let newStatus = status == "completed" ? "active" : status
-                        
-                        // Get recipient name from invite if available
-                        var recipientName = old.name
-                        if let recipient = invite["recipient"] as? [String: Any],
-                           let fullName = recipient["full_name"] as? String {
-                            recipientName = fullName
-                        }
-                        
-                        let updated = CustomRecipient(id: old.id, name: recipientName, phone: old.phone, status: newStatus)
-                        self.customRecipients[index] = updated
+                    // ID can be UUID string or Int - handle both
+                    let inviteId: String
+                    if let idString = invite["id"] as? String {
+                        inviteId = idString
+                    } else if let idInt = invite["id"] as? Int {
+                        inviteId = String(idInt)
+                    } else {
+                        continue // Skip if no valid ID
                     }
+                    
+                    guard let status = invite["status"] as? String else { continue }
+                    
+                    let inviteCode = invite["invite_code"] as? String ?? ""
+                    // Backend status mapping:
+                    // "accepted" = currently selected recipient → display as "active"
+                    // "inactive" = available recipient (not selected) → display as "available"
+                    // "pending" = invite not yet accepted → display as "pending"
+                    let newStatus: String
+                    if status == "accepted" || status == "active" {
+                        newStatus = "active"
+                    } else if status == "inactive" {
+                        newStatus = "available"  // Available to select but not currently active
+                    } else {
+                        newStatus = status  // pending, expired, etc.
+                    }
+                    
+                    // Get recipient info if they've signed up
+                    var recipientName = "Pending Invite"
+                    var recipientEmail = inviteCode // Show invite code if no email yet
+                    
+                    if let recipient = invite["recipient"] as? [String: Any] {
+                        if let name = recipient["name"] as? String, !name.isEmpty {
+                            recipientName = name
+                        }
+                        if let email = recipient["email"] as? String, !email.isEmpty {
+                            recipientEmail = email
+                        }
+                    }
+                    
+                    let recipient = CustomRecipient(
+                        id: inviteId,
+                        name: recipientName,
+                        email: recipientEmail,
+                        status: newStatus
+                    )
+                    newRecipients.append(recipient)
                 }
+                
+                print("📥 syncInviteStatuses: Received \(newRecipients.count) recipients from API")
+                self.customRecipients = newRecipients
                 self.saveCustomRecipients()
+                
+                // Auto-select first active recipient if none selected
+                if self.selectedRecipientId.isEmpty,
+                   let firstActive = newRecipients.first(where: { $0.status == "active" }) {
+                    self.selectedRecipientId = firstActive.id
+                }
             }
         }.resume()
     }
@@ -1824,9 +1971,71 @@ struct ProfileView: View {
         }
     }
     
+    /// Select a recipient and sync to backend
+    private func selectRecipient(_ recipientId: String) {
+        guard let userId = UserDefaults.standard.string(forKey: "userId"), !userId.isEmpty else {
+            // No user ID, just update locally
+            selectedRecipientId = recipientId
+            return
+        }
+        
+        guard let url = URL(string: "/users/\(userId)/select-recipient", relativeTo: StripeConfig.backendURL) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ["recipientId": recipientId]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        // Optimistically update UI
+        selectedRecipientId = recipientId
+        
+        // Update local status - selected becomes "active", others become "available"
+        for i in customRecipients.indices {
+            if customRecipients[i].id == recipientId {
+                customRecipients[i] = CustomRecipient(
+                    id: customRecipients[i].id,
+                    name: customRecipients[i].name,
+                    email: customRecipients[i].email,
+                    status: "active"
+                )
+            } else if customRecipients[i].status == "active" {
+                customRecipients[i] = CustomRecipient(
+                    id: customRecipients[i].id,
+                    name: customRecipients[i].name,
+                    email: customRecipients[i].email,
+                    status: "available"
+                )
+            }
+        }
+        saveCustomRecipients()
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ Failed to select recipient: \(error)")
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else { return }
+            
+            if httpResponse.statusCode == 200 {
+                print("✅ Recipient selected successfully")
+                // Re-sync to get fresh data
+                DispatchQueue.main.async {
+                    self.syncInviteStatuses()
+                }
+            } else {
+                print("❌ Failed to select recipient: HTTP \(httpResponse.statusCode)")
+            }
+        }.resume()
+    }
+    
     private func saveCustomRecipients() {
         if let encoded = try? JSONEncoder().encode(customRecipients) {
             customRecipientsData = encoded
+            // Track which user this cache belongs to
+            cachedRecipientsForUserId = UserDefaults.standard.string(forKey: "userId") ?? ""
         }
     }
     
@@ -1921,10 +2130,7 @@ struct ProfileView: View {
             profileErrorMessage = "Email is required."
             return
         }
-        guard !trimmedPhone.isEmpty else {
-            profileErrorMessage = "Phone number is required."
-            return
-        }
+        // Phone is optional - no validation needed
         guard !trimmedPassword.isEmpty else {
             profileErrorMessage = "Password is required."
             return
@@ -2078,6 +2284,18 @@ struct AddRecipientSheet: View {
     var body: some View {
         NavigationView {
             Form {
+                // MARK: - Info Notice
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.8)))
+                        Text("Only one recipient can be active at a time. If a new invite is accepted, they will replace your current recipient.")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.7))
+                    }
+                    .padding(.vertical, 4)
+                }
+                
                 // MARK: - Generate Code UI (Active)
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
@@ -2104,11 +2322,11 @@ struct AddRecipientSheet: View {
                                     .foregroundStyle(.secondary)
                                 
                                 Button(action: {
-                                    let shareText = "Want to get paid when I miss my goals? 💰\n\nSign up here: app.live-eos.com/invite\nUse code: \(code)"
+                                    let shareText = "Want to get paid when I miss my goals? 💰\n\nSign up here: live-eos.com/invite-simple\nUse code: \(code)"
                                     UIPasteboard.general.string = shareText
                                     errorMessage = "✅ Copied!"
                                 }) {
-                                    Text("Want to get paid when I miss my goals? 💰\n\nSign up here: app.live-eos.com/invite\nUse code: \(code)")
+                                    Text("Want to get paid when I miss my goals? 💰\n\nSign up here: live-eos.com/invite-simple\nUse code: \(code)")
                                         .font(.system(.subheadline, design: .rounded))
                                         .multilineTextAlignment(.leading)
                                         .foregroundStyle(.white)
@@ -2746,15 +2964,6 @@ struct CreateAccountView: View {
                                 )
                                 .foregroundStyle(Color.black)
                             
-                            TextField("Phone", text: $phone, prompt: Text("Phone").foregroundColor(Color.black.opacity(0.5)))
-                                .keyboardType(.phonePad)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.gray.opacity(0.2))
-                                )
-                                .foregroundStyle(Color.black)
-                            
                             SecureField("Password", text: $password, prompt: Text("Password").foregroundColor(Color.black.opacity(0.5)))
                                 .padding()
                                 .background(
@@ -2788,7 +2997,7 @@ struct CreateAccountView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                         )
-                        .disabled(isLoading || name.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty)
+                        .disabled(isLoading || name.isEmpty || email.isEmpty || password.isEmpty)
                         .padding(.horizontal)
                         
                         Text("By creating an account, you agree to our Terms of Service")
@@ -2826,7 +3035,6 @@ struct CreateAccountView: View {
         let body: [String: Any] = [
             "fullName": name.trimmingCharacters(in: .whitespaces),
             "email": email.trimmingCharacters(in: .whitespaces),
-            "phone": phone.trimmingCharacters(in: .whitespaces),
             "password": password.trimmingCharacters(in: .whitespaces),
             "balanceCents": 0,
             "createOnly": true
@@ -2863,7 +3071,18 @@ struct CreateAccountView: View {
                     return
                 }
                 
-                // Successfully created account
+                // Successfully created account - extract and save userId
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let id = json["id"] as? String {
+                        UserDefaults.standard.set(id, forKey: "userId")
+                        print("✅ New account created, userId saved: \(id)")
+                    } else if let id = json["id"] as? Int {
+                        UserDefaults.standard.set(String(id), forKey: "userId")
+                        print("✅ New account created, userId saved: \(id)")
+                    }
+                }
+                
                 self.profileUsername = self.name
                 self.profileEmail = self.email
                 self.profilePhone = self.phone
