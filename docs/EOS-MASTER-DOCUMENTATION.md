@@ -2571,6 +2571,128 @@ private var selectedRecipientIsActive: Bool {
 
 ---
 
+### Withdraw Button (iOS)
+**Added withdraw button to Balance section in iOS app.**
+
+Opens web portal where users can view balance and request withdrawals.
+
+#### Location:
+Balance section in `ProfileView` → below the deposit button
+
+#### Implementation:
+```swift
+// Withdraw button - links to web portal
+Button(action: {
+    if let url = URL(string: "https://live-eos.com/portal") {
+        UIApplication.shared.open(url)
+    }
+}) {
+    Text("Withdraw")
+        .font(.system(.subheadline, design: .rounded, weight: .medium))
+}
+.padding(.horizontal, 16)
+.padding(.vertical, 8)
+.frame(maxWidth: .infinity)
+.background(Color.white)
+.foregroundStyle(Color.black)
+.overlay(
+    RoundedRectangle(cornerRadius: 8)
+        .stroke(Color.black, lineWidth: 1)
+)
+.cornerRadius(8)
+```
+
+#### Style:
+- White background with black border (outline style)
+- Opens Safari to `https://live-eos.com/portal`
+- User can view balance and initiate withdrawal on web
+
+---
+
+### Live Countdown Timer (iOS)
+**Replaced static deadline display with real-time countdown.**
+
+#### Display States:
+| State | Display | Color |
+|-------|---------|-------|
+| No objective | "No objective today" | Gold |
+| Completed | "✓ Completed" | Green |
+| Active | "2h 34m" or "45m 12s" or "30s" | Gold |
+| Missed | "⚠️ Deadline passed" | Red |
+
+#### Implementation:
+```swift
+var timeUntilDeadline: String {
+    if !shouldShowObjective {
+        return "No objective today"
+    }
+    
+    if objectiveMet {
+        return "✓ Completed"
+    }
+
+    let todayDeadline = combineDateWithTodayTime(objectiveDeadline)
+    let timeInterval = todayDeadline.timeIntervalSince(currentTime)
+
+    if timeInterval <= 0 {
+        return "⚠️ Deadline passed"
+    }
+
+    let hours = Int(timeInterval) / 3600
+    let minutes = Int(timeInterval) % 3600 / 60
+    let seconds = Int(timeInterval) % 60
+
+    if hours > 0 {
+        return "\(hours)h \(minutes)m"
+    } else if minutes > 0 {
+        return "\(minutes)m \(seconds)s"
+    } else {
+        return "\(seconds)s"
+    }
+}
+```
+
+#### Timer Update:
+Uses `@State private var currentTime = Date()` with a 1-second timer:
+```swift
+.onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+    currentTime = Date()
+}
+```
+
+---
+
+### Terms & Conditions Page
+**Professional legal terms page at `/terms`.**
+
+#### URL: `https://live-eos.com/terms`
+
+#### Sections Covered:
+1. **Acceptance of Terms** - Using the app = agreement
+2. **Description of Service** - Goal-setting with financial commitment
+3. **Account Registration** - User responsibilities, accuracy
+4. **Financial Terms** - Deposits, payouts, withdrawals, no refunds
+5. **Charitable Donations** - Money stays in EOS account, donated in aggregate
+6. **User Conduct** - Prohibited activities
+7. **Intellectual Property** - EOS owns the platform
+8. **Disclaimers** - As-is, no guarantees
+9. **Limitation of Liability** - Capped at amount paid
+10. **Termination** - EOS can suspend accounts
+11. **Changes to Terms** - Can update with notice
+12. **Contact** - connect@live-eos.com
+
+#### Key Legal Points:
+- No age restriction specified
+- Charitable donations made in aggregate (not per-user)
+- Non-refundable deposits (committed funds)
+- Liability limited to user's deposit amount
+
+#### Linked From:
+- Main website footer (`index.html`)
+- iOS app (future: Settings)
+
+---
+
 ### Password Reset System
 **Implemented custom password reset flow using Google Workspace SMTP.**
 
