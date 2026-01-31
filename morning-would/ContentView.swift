@@ -1619,6 +1619,26 @@ struct ProfileView: View {
                             .foregroundStyle(.white)
                             .cornerRadius(8)
                         }
+                        
+                        // Withdraw button - links to web portal
+                        Button(action: {
+                            if let url = URL(string: "https://live-eos.com/portal") {
+                                UIApplication.shared.open(url)
+                            }
+                        }) {
+                            Text("Withdraw")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.white)
+                        .foregroundStyle(Color.black)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.black, lineWidth: 1)
+                        )
+                        .cornerRadius(8)
 
                         if let error = depositErrorMessage {
                             HStack {
