@@ -1242,24 +1242,6 @@ struct ProfileView: View {
                                         Divider()
                                         
                                         HStack {
-                                            Image(systemName: "phone")
-                                                .font(.caption)
-                                                .foregroundStyle(Color.black.opacity(0.6))
-                                                .frame(width: 20)
-                                            TextField("Phone", text: $profilePhone)
-                                                .font(.system(.subheadline, design: .rounded))
-                                                .keyboardType(.phonePad)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.gray.opacity(0.2))
-                                )
-                                .foregroundStyle(Color.black)
-                                                .foregroundStyle(Color.black)
-                                        }
-                                        Divider()
-                                        
-                                        HStack {
                                             Image(systemName: "lock")
                                                 .font(.caption)
                                                 .foregroundStyle(Color.black.opacity(0.6))
