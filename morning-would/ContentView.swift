@@ -495,9 +495,9 @@ struct PushUpSessionView: View {
             return
         }
         
-        let body: [String: Any] = ["count": count]
+        let body: [String: Any] = ["completedCount": count]
         
-        guard let url = URL(string: "https://api.live-eos.com/objectives/sessions/\(userId)/progress") else {
+        guard let url = URL(string: "https://api.live-eos.com/objectives/complete/\(userId)") else {
             print("⚠️ Invalid URL for pushup sync")
             return
         }
