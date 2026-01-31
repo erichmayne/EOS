@@ -345,6 +345,7 @@ struct PushUpSessionView: View {
     @State private var sessionCount = 0
     @State private var isStaging = true
     @State private var showCompletionBanner = false
+    @AppStorage("userId") private var userId: String = ""
 
     var body: some View {
         NavigationView {
@@ -435,7 +436,9 @@ struct PushUpSessionView: View {
                                 .foregroundStyle(Color.white.opacity(0.9))
 
                             Button(action: {
-                                todayPushUpCount += cameraViewModel.pushupCount
+                                let newCount = todayPushUpCount + cameraViewModel.pushupCount
+                                todayPushUpCount = newCount
+                                syncPushupProgress(count: newCount)
                                 dismiss()
                             }) {
                                 Text("Done")
@@ -484,6 +487,40 @@ struct PushUpSessionView: View {
         .onDisappear {
             cameraViewModel.stopSession()
         }
+    }
+    
+    private func syncPushupProgress(count: Int) {
+        guard !userId.isEmpty else {
+            print("⚠️ No userId, skipping pushup sync")
+            return
+        }
+        
+        let body: [String: Any] = ["count": count]
+        
+        guard let url = URL(string: "https://api.live-eos.com/objectives/sessions/\(userId)/progress") else {
+            print("⚠️ Invalid URL for pushup sync")
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ Pushup sync error: \(error.localizedDescription)")
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    print("✅ Pushup progress synced: \(count)")
+                } else {
+                    print("⚠️ Pushup sync status: \(httpResponse.statusCode)")
+                }
+            }
+        }.resume()
     }
 }
 
