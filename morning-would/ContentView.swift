@@ -147,16 +147,18 @@ struct ContentView: View {
                                         )
                                     }
 
-                                    if shouldShowObjective {
-                                        let deadline = combineDateWithTodayTime(objectiveDeadline)
-                                        VStack(spacing: 4) {
-                                            Text(timeUntilDeadline)
-                                                .font(.system(.title3, design: .rounded, weight: .semibold))
-                                                .foregroundStyle(
-                                                    objectiveMet ? Color.green :
-                                                    (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
-                                                    Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                                )
+                                    // Timer always shows - displays "No objective today" for weekends when on Weekdays schedule
+                                    VStack(spacing: 4) {
+                                        Text(timeUntilDeadline)
+                                            .font(.system(.title3, design: .rounded, weight: .semibold))
+                                            .foregroundStyle(
+                                                !shouldShowObjective ? Color.gray :
+                                                (objectiveMet ? Color.green :
+                                                (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
+                                                Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
+                                            )
+                                        if shouldShowObjective {
+                                            let deadline = combineDateWithTodayTime(objectiveDeadline)
                                             Text("Deadline: \(deadline, style: .time)")
                                                 .font(.system(.caption, design: .rounded))
                                                 .foregroundStyle(Color.black.opacity(0.5))
