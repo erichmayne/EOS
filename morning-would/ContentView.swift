@@ -24,6 +24,10 @@ struct ContentView: View {
     @State private var showObjectiveSettings = false
     @State private var showProfileView = false
     @State private var showPushUpSession = false
+    @State private var currentTime = Date() // For live countdown
+    
+    // Timer for live countdown updates
+    private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private let notificationManager = NotificationManager()
 
@@ -47,13 +51,17 @@ struct ContentView: View {
         if !shouldShowObjective {
             return "No objective today"
         }
+        
+        // Check if objective is already met
+        if objectiveMet {
+            return "✓ Completed"
+        }
 
-        let now = Date()
         let todayDeadline = combineDateWithTodayTime(objectiveDeadline)
-        let timeInterval = todayDeadline.timeIntervalSince(now)
+        let timeInterval = todayDeadline.timeIntervalSince(currentTime)
 
         if timeInterval <= 0 {
-            return "Deadline passed"
+            return "⚠️ Deadline passed"
         }
 
         let hours = Int(timeInterval) / 3600
@@ -61,11 +69,11 @@ struct ContentView: View {
         let seconds = Int(timeInterval) % 60
 
         if hours > 0 {
-            return "\(hours)h \(minutes)m"
+            return "\(hours)h \(minutes)m remaining"
         } else if minutes > 0 {
-            return "\(minutes)m \(seconds)s"
+            return "\(minutes)m \(seconds)s remaining"
         } else {
-            return "\(seconds)s"
+            return "\(seconds)s remaining"
         }
     }
 
@@ -141,9 +149,18 @@ struct ContentView: View {
 
                                     if shouldShowObjective {
                                         let deadline = combineDateWithTodayTime(objectiveDeadline)
-                                        Text("Complete by: \(deadline, style: .time) - \(timeUntilDeadline)")
-                                            .font(.system(.caption, design: .rounded))
-                                            .foregroundStyle(Color.black.opacity(0.65))
+                                        VStack(spacing: 4) {
+                                            Text(timeUntilDeadline)
+                                                .font(.system(.title3, design: .rounded, weight: .semibold))
+                                                .foregroundStyle(
+                                                    objectiveMet ? Color.green :
+                                                    (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
+                                                    Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                                )
+                                            Text("Deadline: \(deadline, style: .time)")
+                                                .font(.system(.caption, design: .rounded))
+                                                .foregroundStyle(Color.black.opacity(0.5))
+                                        }
                                     }
                                 }
                                 .padding(30)
@@ -263,6 +280,9 @@ struct ContentView: View {
                     scheduleType: scheduleType
                 )
             }
+        }
+        .onReceive(countdownTimer) { time in
+            currentTime = time
         }
     }
 
@@ -1038,7 +1058,7 @@ struct ProfileView: View {
     
     // Payout Destination Settings
     @AppStorage("payoutType") private var payoutType: String = "charity"
-    @AppStorage("selectedCharity") private var selectedCharity: String = "Global Learning Fund"
+    @AppStorage("selectedCharity") private var selectedCharity: String = "GiveDirectly"
     @AppStorage("customRecipientsData") private var customRecipientsData: Data = Data()
     @AppStorage("cachedRecipientsForUserId") private var cachedRecipientsForUserId: String = ""  // Track which user the cache belongs to
     @AppStorage("selectedRecipientId") private var selectedRecipientId: String = ""
@@ -1074,18 +1094,32 @@ struct ProfileView: View {
     @State private var isAccountExpanded: Bool = false
     @State private var customRecipients: [CustomRecipient] = []
     @State private var showingAddRecipient = false
+    @State private var showingCharityPicker = false
     @State private var showSignInView = false
     @State private var showCreateAccountView = false
     @FocusState private var isPayoutAmountFocused: Bool
     @FocusState private var isDepositAmountFocused: Bool
 
     private let charities = [
-        "Global Learning Fund",
-        "Clean Water Initiative",
-        "Open Source Labs",
-        "Youth Sports Foundation",
-        "Environmental Defense Fund",
-        "Doctors Without Borders"
+        "GiveDirectly",
+        "Doctors Without Borders",
+        "charity: water",
+        "St. Jude Children's Hospital",
+        "Feeding America",
+        "Direct Relief",
+        "World Central Kitchen",
+        "American Red Cross",
+        "The Nature Conservancy",
+        "Habitat for Humanity",
+        "UNICEF",
+        "Save the Children",
+        "American Cancer Society",
+        "Wounded Warrior Project",
+        "ASPCA",
+        "Make-A-Wish Foundation",
+        "ACLU",
+        "Khan Academy",
+        "Against Malaria Foundation"
     ]
 
     var body: some View {
@@ -1334,12 +1368,29 @@ struct ProfileView: View {
                                 Text("Select charity")
                                     .font(.system(.subheadline, design: .rounded))
                                     .foregroundStyle(Color.black.opacity(0.6))
-                                Picker("Charity", selection: $selectedCharity) {
-                                    ForEach(charities, id: \.self) { charity in
-                                        Text(charity).tag(charity)
+                                
+                                Button(action: { showingCharityPicker = true }) {
+                                    HStack {
+                                        Text(charities.contains(selectedCharity) ? selectedCharity : charities.first ?? "Select")
+                                            .font(.system(.body, design: .rounded))
+                                            .foregroundStyle(Color.black)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(Color.gray)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(Color.gray.opacity(0.1))
+                                    .cornerRadius(10)
+                                }
+                                .buttonStyle(.plain)
+                                .onAppear {
+                                    // Reset to valid charity if current selection is invalid
+                                    if !charities.contains(selectedCharity) {
+                                        selectedCharity = charities.first ?? "GiveDirectly"
                                     }
                                 }
-                                .pickerStyle(.menu)
                             }
                         } else {
                             VStack(alignment: .leading, spacing: 12) {
@@ -1728,6 +1779,38 @@ struct ProfileView: View {
                     profilePhone: $profilePhone,
                     profileCompleted: $profileCompleted
                 )
+            }
+            .sheet(isPresented: $showingCharityPicker) {
+                NavigationView {
+                    List {
+                        ForEach(charities, id: \.self) { charity in
+                            Button(action: {
+                                selectedCharity = charity
+                                showingCharityPicker = false
+                            }) {
+                                HStack {
+                                    Text(charity)
+                                        .foregroundStyle(Color.primary)
+                                    Spacer()
+                                    if charity == selectedCharity {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("Select Charity")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showingCharityPicker = false
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
             }
             .onChange(of: isSignedIn) { oldValue, newValue in
                 if newValue {
@@ -2308,13 +2391,14 @@ struct AddRecipientSheet: View {
                 Section {
                     HStack(spacing: 10) {
                         Image(systemName: "info.circle.fill")
-                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.8)))
+                            .foregroundStyle(Color.white.opacity(0.8))
                         Text("Only one recipient can be active at a time. If a new invite is accepted, they will replace your current recipient.")
                             .font(.system(.caption, design: .rounded))
-                            .foregroundStyle(Color.black.opacity(0.7))
+                            .foregroundStyle(Color.white.opacity(0.9))
                     }
                     .padding(.vertical, 4)
                 }
+                .listRowBackground(Color.clear)
                 
                 // MARK: - Generate Code UI (Active)
                 Section {

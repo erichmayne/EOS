@@ -2569,11 +2569,52 @@ private var selectedRecipientIsActive: Bool {
 
 ---
 
+---
+
+### Password Reset System
+**Implemented custom password reset flow using Google Workspace SMTP.**
+
+#### Flow:
+1. User clicks "Forgot password?" on `/portal`
+2. User enters email on `/forgot-password`
+3. Backend generates secure token, stores in DB, emails reset link
+4. User clicks link → `/reset-password?token=xxx`
+5. User enters new password, backend validates token & updates password
+
+#### Backend Endpoints:
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/auth/forgot-password` | POST | Generate token, send email |
+| `/auth/reset-password` | POST | Validate token, update password |
+
+#### Database Columns (users table):
+```sql
+password_reset_token TEXT      -- Secure random token
+password_reset_expires TIMESTAMPTZ  -- Token expiry (1 hour)
+```
+
+#### Web Pages:
+- `/forgot-password` - Email input form
+- `/reset-password` - New password form (requires token in URL)
+
+#### Email Configuration:
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=connect@live-eos.com
+SMTP_PASS=[App Password from Google Workspace]
+```
+
+---
+
 ### File Changes Summary
 | File | Changes |
 |------|---------|
-| `server.js` | Timezone support, charity payout handling, admin endpoints |
-| `ContentView.swift` | Timezone sync, committedCharity, keyboard fix, recipient lock protection |
+| `server.js` | Timezone support, charity payout handling, admin endpoints, password reset endpoints, SMTP email |
+| `ContentView.swift` | Timezone sync, committedCharity, keyboard fix, recipient lock protection, live countdown, charity picker |
 | `sql/charity-tracking.sql` | New file for charity system |
+| `web/forgot-password.html` | New file for password reset request |
+| `web/reset-password.html` | New file for password reset form |
+| `web/terms.html` | Professional Terms & Conditions |
 | Crontab | Changed from */5 to * (every minute) |
 

@@ -7,6 +7,7 @@ const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcryptjs');
 const twilio = require('twilio');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 
 const app = express();
 
@@ -26,6 +27,17 @@ const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+// Email transporter (Google Workspace SMTP)
+const emailTransporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: false, // true for 465, false for other ports
+  auth: {
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || ''
+  }
+});
 
 app.use(cors());
 app.use(express.json());
@@ -695,6 +707,163 @@ app.post('/auth/login', async (req, res) => {
   } catch (err) {
     console.error('Error in /auth/login:', err);
     res.status(500).json({ error: 'Login failed', detail: String(err) });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Password Reset - Request reset email
+// -----------------------------------------------------------------------------
+app.post('/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    const normalizedEmail = email.trim().toLowerCase();
+    
+    // Find user
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, email, full_name')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+    
+    // Always return success (don't reveal if email exists)
+    if (!user) {
+      console.log('Password reset requested for non-existent email:', normalizedEmail);
+      return res.json({ success: true, message: 'If an account exists, a reset link has been sent.' });
+    }
+    
+    // Generate secure token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetExpires = new Date(Date.now() + 3600000); // 1 hour from now
+    
+    // Store token in database
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        password_reset_token: resetToken,
+        password_reset_expires: resetExpires.toISOString()
+      })
+      .eq('id', user.id);
+    
+    if (updateError) {
+      console.error('Failed to store reset token:', updateError);
+      return res.status(500).json({ error: 'Failed to process request' });
+    }
+    
+    // Send email
+    const resetUrl = `https://live-eos.com/reset-password?token=${resetToken}`;
+    
+    try {
+      await emailTransporter.sendMail({
+        from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+        to: user.email,
+        subject: 'Reset Your EOS Password',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 40px 20px;">
+            <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+              <div style="background: linear-gradient(135deg, #000 0%, #333 100%); padding: 32px; text-align: center;">
+                <h1 style="color: #D9A600; margin: 0; font-size: 32px; font-weight: 800;">EOS</h1>
+              </div>
+              <div style="padding: 32px;">
+                <h2 style="margin: 0 0 16px; color: #000; font-size: 20px;">Reset Your Password</h2>
+                <p style="color: #666; line-height: 1.6; margin: 0 0 24px;">
+                  Hi${user.full_name ? ' ' + user.full_name.split(' ')[0] : ''},<br><br>
+                  We received a request to reset your password. Click the button below to choose a new password.
+                </p>
+                <a href="${resetUrl}" style="display: block; background: linear-gradient(135deg, #D9A600 0%, #F0BA00 100%); color: #fff; text-decoration: none; padding: 14px 24px; border-radius: 12px; font-weight: 600; text-align: center; margin-bottom: 24px;">
+                  Reset Password
+                </a>
+                <p style="color: #999; font-size: 13px; line-height: 1.5; margin: 0;">
+                  This link expires in 1 hour. If you didn't request this, you can safely ignore this email.
+                </p>
+              </div>
+              <div style="background: #f9f9f9; padding: 20px 32px; text-align: center; border-top: 1px solid #eee;">
+                <p style="color: #999; font-size: 12px; margin: 0;">© 2026 EOS. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `
+      });
+      console.log('Password reset email sent to:', user.email);
+    } catch (emailError) {
+      console.error('Failed to send reset email:', emailError);
+      // Still return success to not reveal email existence
+    }
+    
+    res.json({ success: true, message: 'If an account exists, a reset link has been sent.' });
+    
+  } catch (err) {
+    console.error('Error in /auth/forgot-password:', err);
+    res.status(500).json({ error: 'Failed to process request' });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Password Reset - Verify token and update password
+// -----------------------------------------------------------------------------
+app.post('/auth/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token and new password are required' });
+    }
+    
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    
+    // Find user with valid token
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, email, password_reset_expires')
+      .eq('password_reset_token', token)
+      .maybeSingle();
+    
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid or expired reset link' });
+    }
+    
+    // Check if token is expired
+    if (new Date(user.password_reset_expires) < new Date()) {
+      return res.status(400).json({ error: 'Reset link has expired. Please request a new one.' });
+    }
+    
+    // Hash new password
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    
+    // Update password and clear reset token
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        password_hash: passwordHash,
+        password_reset_token: null,
+        password_reset_expires: null
+      })
+      .eq('id', user.id);
+    
+    if (updateError) {
+      console.error('Failed to update password:', updateError);
+      return res.status(500).json({ error: 'Failed to update password' });
+    }
+    
+    console.log('Password reset successful for:', user.email);
+    res.json({ success: true, message: 'Password has been reset successfully' });
+    
+  } catch (err) {
+    console.error('Error in /auth/reset-password:', err);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
