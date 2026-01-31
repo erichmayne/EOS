@@ -1296,6 +1296,18 @@ struct ProfileView: View {
                                     .buttonStyle(.plain)
                                     .disabled(isSavingProfile || !isProfileValid)
                                     
+                                    // Change password link
+                                    Button(action: {
+                                        if let url = URL(string: "https://live-eos.com/forgot-password") {
+                                            UIApplication.shared.open(url)
+                                        }
+                                    }) {
+                                        Text("Change password")
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(Color.gray)
+                                    }
+                                    .padding(.top, 4)
+                                    
                                     Button(action: {
                                         // Sign out
                                         isSignedIn = false
@@ -2860,6 +2872,18 @@ struct SignInView: View {
                     )
                     .disabled(isLoading || email.isEmpty || password.isEmpty)
                     .padding(.horizontal)
+                    
+                    // Forgot password link
+                    Button(action: {
+                        if let url = URL(string: "https://live-eos.com/forgot-password") {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        Text("Forgot password?")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                    }
+                    .padding(.top, 8)
                     
                     Spacer()
                 }
