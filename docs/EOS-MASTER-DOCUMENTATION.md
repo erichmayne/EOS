@@ -2729,6 +2729,75 @@ SMTP_PASS=[App Password from Google Workspace]
 
 ---
 
+### Withdrawal Queue System
+**Handles withdrawals with EOS Stripe balance precheck and automatic retry.**
+
+#### Flow:
+```
+User requests withdrawal
+    │
+    ▼
+✅ Stripe Connect account created (if needed)
+✅ Bank/card added to account
+✅ User DB balance deducted immediately
+    │
+    ▼
+Check EOS Stripe available balance
+    │
+ ┌──┴──┐
+ YES   NO (insufficient)
+  │     │
+  ▼     ▼
+Transfer  Queue for retry
+Complete  (cron processes hourly)
+```
+
+#### Backend Endpoints:
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/withdraw` | POST | Process withdrawal or queue if insufficient balance |
+| `/withdrawals/process-queue` | POST | Process pending withdrawals (cron) |
+| `/withdrawals/pending/:userId` | GET | Get user's pending withdrawals |
+
+#### Database Table: `withdrawal_requests`
+```sql
+CREATE TABLE withdrawal_requests (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id),
+    amount_cents INTEGER,
+    status TEXT,  -- 'pending', 'processing', 'completed', 'failed'
+    stripe_connect_account_id TEXT,
+    payout_method TEXT,  -- 'bank' or 'card'
+    legal_name TEXT,
+    dob JSONB,
+    address JSONB,
+    ssn_last4 TEXT,
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+    stripe_transfer_id TEXT,
+    stripe_payout_id TEXT,
+    created_at TIMESTAMPTZ,
+    processed_at TIMESTAMPTZ
+);
+```
+
+#### Cron Job:
+- **Script:** `/home/user/morning-would-payments/process-withdrawals.sh`
+- **Schedule:** Every hour at :30 (`30 * * * *`)
+- **Action:** Calls `/withdrawals/process-queue` to process pending withdrawals
+
+#### Safety Features:
+1. DB balance deducted immediately (prevents double-withdrawal)
+2. Max 5 retries before marking as "failed"
+3. Oldest requests processed first
+4. Batch limit of 10 per cron run
+
+#### User Messaging:
+- All withdrawals show "5-7 business days" for deposit timing
+- Queued withdrawals show "Your request is being processed"
+
+---
+
 ### File Changes Summary
 | File | Changes |
 |------|---------|
