@@ -452,8 +452,8 @@
     
     <script>
         const API_URL = 'https://api.live-eos.com';
-        // TEST MODE - switch to pk_live_... for production
-        const stripe = Stripe('pk_test_51SFmmBJvjEmusMrWIL4uCrFlK4Fd2h4ATB9L3WLiVEYs5ij3F381qTLbzEvS5802WktpHXDhCNBlkQUnhvjjS7sX00suGslfmz');
+        // LIVE MODE
+        const stripe = Stripe('pk_live_51SFmmBJvjEmusMrWmyxxYVbOCdbGXGPP1abyBQx6de058XiwPgiZwZ1QfsBSnxlaH2aXC1XQtr3D71F3rT09wNIp00yWIHDvsH');
         let currentUser = null;
         let withdrawAmount = 0;
         let cardElement = null;

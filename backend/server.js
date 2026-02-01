@@ -972,7 +972,7 @@ app.post('/withdraw', async (req, res) => {
             first_name: legalName.split(' ')[0],
             last_name: legalName.split(' ').slice(1).join(' ') || legalName.split(' ')[0],
             email: user.email,
-            phone: user.phone,
+            ...(user.phone && user.phone.length >= 10 ? { phone: user.phone } : {}),
             dob: {
               day: dob.day,
               month: dob.month,
