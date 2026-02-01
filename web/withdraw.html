@@ -427,18 +427,22 @@
         <!-- Step 3: Success -->
         <div class="step" id="step-success">
             <div class="step-header">
-                <h2>🎉 Withdrawal Complete!</h2>
-                <p>Your funds are on the way</p>
+                <h2 id="success-title">🎉 Withdrawal Submitted!</h2>
+                <p id="success-subtitle">Your funds are on the way</p>
             </div>
             
-            <div class="success">
-                ✓ Your withdrawal has been processed. Funds will arrive in 1-2 business days.
+            <div class="success" id="success-message">
+                ✓ Your withdrawal has been submitted. Funds will be deposited to your account within <strong>5-7 business days</strong>.
             </div>
             
             <div class="amount-display">
                 <div class="label">Amount withdrawn</div>
                 <div class="amount" id="success-amount">$0.00</div>
             </div>
+            
+            <p style="font-size: 14px; color: #666; text-align: center; margin-bottom: 20px;">
+                You'll receive an email confirmation once the transfer is complete.
+            </p>
             
             <button class="button" onclick="window.location.href='/portal'">Back to Portal</button>
         </div>
@@ -605,8 +609,21 @@
                 }
                 
                 // Update local session with new balance
-                currentUser.balance_cents = 0;
+                currentUser.balance_cents = data.newBalanceCents || 0;
                 localStorage.setItem('eos_session', JSON.stringify(currentUser));
+                
+                // Update success message based on queue status
+                if (data.queued) {
+                    document.getElementById('success-title').textContent = '⏳ Withdrawal Submitted!';
+                    document.getElementById('success-subtitle').textContent = 'Your request is being processed';
+                    document.getElementById('success-message').innerHTML = 
+                        '✓ Your withdrawal has been submitted and is in the processing queue. Funds will be deposited to your account within <strong>5-7 business days</strong>.';
+                } else {
+                    document.getElementById('success-title').textContent = '🎉 Withdrawal Complete!';
+                    document.getElementById('success-subtitle').textContent = 'Your funds are on the way';
+                    document.getElementById('success-message').innerHTML = 
+                        '✓ Your withdrawal has been processed! Funds will be deposited to your account within <strong>5-7 business days</strong>.';
+                }
                 
                 showStep('step-success');
                 

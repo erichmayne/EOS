@@ -915,7 +915,7 @@ app.get('/users/:userId/transactions', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// Withdrawal - Create Stripe Connect & transfer funds on demand
+// Withdrawal - Create Stripe Connect & transfer funds (with queue for insufficient balance)
 // -----------------------------------------------------------------------------
 app.post('/withdraw', async (req, res) => {
   try {
@@ -951,7 +951,7 @@ app.post('/withdraw', async (req, res) => {
     const amountCents = Math.round(amount * 100);
     
     if ((user.balance_cents || 0) < amountCents) {
-      return res.status(400).json({ error: 'Insufficient balance' });
+      return res.status(400).json({ error: 'Insufficient balance', available: (user.balance_cents || 0) / 100 });
     }
     
     let stripeConnectAccountId = user.stripe_connect_account_id;
@@ -1028,6 +1028,86 @@ app.post('/withdraw', async (req, res) => {
       }
     }
     
+    // Check EOS platform balance BEFORE attempting transfer
+    let eosBalance = 0;
+    try {
+      const platformBalance = await stripe.balance.retrieve();
+      eosBalance = platformBalance.available.reduce((sum, b) => sum + (b.currency === 'usd' ? b.amount : 0), 0);
+      console.log('💰 EOS platform available balance:', eosBalance / 100);
+    } catch (balErr) {
+      console.error('Failed to check platform balance:', balErr.message);
+    }
+    
+    // Deduct user's DB balance FIRST (prevents double-withdrawal)
+    const newBalance = Math.max(0, (user.balance_cents || 0) - amountCents);
+    await supabase
+      .from('users')
+      .update({ 
+        balance_cents: newBalance, 
+        active_balance_cents: newBalance 
+      })
+      .eq('id', userId);
+    console.log('💳 User DB balance deducted:', { userId, oldBalance: user.balance_cents, newBalance });
+    
+    // If insufficient EOS balance, queue the withdrawal
+    if (eosBalance < amountCents) {
+      console.log('⏳ Insufficient EOS balance, queuing withdrawal');
+      
+      // Save to withdrawal_requests queue
+      const { data: queuedRequest, error: queueError } = await supabase
+        .from('withdrawal_requests')
+        .insert({
+          user_id: userId,
+          amount_cents: amountCents,
+          status: 'pending',
+          stripe_connect_account_id: stripeConnectAccountId,
+          payout_method: payoutMethod,
+          legal_name: legalName,
+          dob: dob,
+          address: address,
+          ssn_last4: ssnLast4
+        })
+        .select()
+        .single();
+      
+      if (queueError) {
+        console.error('Failed to queue withdrawal:', queueError);
+        // Refund the user's balance since we couldn't queue
+        await supabase
+          .from('users')
+          .update({ 
+            balance_cents: user.balance_cents, 
+            active_balance_cents: user.balance_cents 
+          })
+          .eq('id', userId);
+        return res.status(500).json({ error: 'Failed to process withdrawal request' });
+      }
+      
+      // Record pending transaction
+      await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          payer_user_id: userId,
+          type: 'withdrawal',
+          amount_cents: -amountCents,
+          status: 'pending',
+          description: 'Withdrawal queued - processing within 5-7 business days',
+          stripe_payment_id: null
+        });
+      
+      console.log('📋 Withdrawal queued:', { requestId: queuedRequest.id, userId, amount });
+      
+      return res.json({
+        success: true,
+        queued: true,
+        requestId: queuedRequest.id,
+        message: 'Your withdrawal has been submitted. Funds will be deposited to your account within 5-7 business days.',
+        amountWithdrawn: amount,
+        newBalanceCents: newBalance
+      });
+    }
+    
     // Transfer funds from EOS platform to Connect account
     let transferId = null;
     try {
@@ -1041,8 +1121,45 @@ app.post('/withdraw', async (req, res) => {
       transferId = transfer.id;
       console.log('✅ Transfer created:', transferId);
     } catch (transferErr) {
-      console.error('Transfer failed:', transferErr.message);
-      return res.status(500).json({ error: 'Transfer failed: ' + transferErr.message });
+      console.error('Transfer failed, queuing instead:', transferErr.message);
+      
+      // Queue it instead of failing
+      const { data: queuedRequest } = await supabase
+        .from('withdrawal_requests')
+        .insert({
+          user_id: userId,
+          amount_cents: amountCents,
+          status: 'pending',
+          stripe_connect_account_id: stripeConnectAccountId,
+          payout_method: payoutMethod,
+          legal_name: legalName,
+          dob: dob,
+          address: address,
+          ssn_last4: ssnLast4,
+          error_message: transferErr.message
+        })
+        .select()
+        .single();
+      
+      await supabase
+        .from('transactions')
+        .insert({
+          user_id: userId,
+          payer_user_id: userId,
+          type: 'withdrawal',
+          amount_cents: -amountCents,
+          status: 'pending',
+          description: 'Withdrawal queued - processing within 5-7 business days'
+        });
+      
+      return res.json({
+        success: true,
+        queued: true,
+        requestId: queuedRequest?.id,
+        message: 'Your withdrawal has been submitted. Funds will be deposited to your account within 5-7 business days.',
+        amountWithdrawn: amount,
+        newBalanceCents: newBalance
+      });
     }
     
     // Trigger immediate payout to their bank/card
@@ -1064,17 +1181,7 @@ app.post('/withdraw', async (req, res) => {
       console.error('Payout warning (funds will arrive via daily payout):', payoutErr.message);
     }
     
-    // Deduct balance from user
-    const newBalance = Math.max(0, (user.balance_cents || 0) - amountCents);
-    await supabase
-      .from('users')
-      .update({ 
-        balance_cents: newBalance, 
-        active_balance_cents: newBalance 
-      })
-      .eq('id', userId);
-    
-    // Record transaction
+    // Record completed transaction
     await supabase
       .from('transactions')
       .insert({
@@ -1091,8 +1198,10 @@ app.post('/withdraw', async (req, res) => {
     
     res.json({
       success: true,
+      queued: false,
       transferId,
       payoutId,
+      message: 'Withdrawal complete! Funds will be deposited to your account within 5-7 business days.',
       amountWithdrawn: amount,
       newBalanceCents: newBalance
     });
@@ -1100,6 +1209,179 @@ app.post('/withdraw', async (req, res) => {
   } catch (err) {
     console.error('Error in /withdraw:', err);
     res.status(500).json({ error: 'Withdrawal failed: ' + err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Process queued withdrawals (called by cron)
+// -----------------------------------------------------------------------------
+app.post('/withdrawals/process-queue', async (req, res) => {
+  try {
+    console.log('🔄 Processing withdrawal queue...');
+    
+    // Check EOS platform balance
+    let eosBalance = 0;
+    try {
+      const platformBalance = await stripe.balance.retrieve();
+      eosBalance = platformBalance.available.reduce((sum, b) => sum + (b.currency === 'usd' ? b.amount : 0), 0);
+      console.log('💰 EOS platform available balance:', eosBalance / 100);
+    } catch (balErr) {
+      console.error('Failed to check platform balance:', balErr.message);
+      return res.status(500).json({ error: 'Failed to check platform balance' });
+    }
+    
+    if (eosBalance <= 0) {
+      console.log('⚠️ No available balance, skipping queue processing');
+      return res.json({ processed: 0, message: 'No available balance' });
+    }
+    
+    // Get pending withdrawal requests (oldest first, limit 10)
+    const { data: pendingRequests, error: fetchError } = await supabase
+      .from('withdrawal_requests')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(10);
+    
+    if (fetchError) {
+      console.error('Failed to fetch pending requests:', fetchError);
+      return res.status(500).json({ error: 'Failed to fetch queue' });
+    }
+    
+    if (!pendingRequests || pendingRequests.length === 0) {
+      console.log('📋 No pending withdrawals in queue');
+      return res.json({ processed: 0, message: 'No pending withdrawals' });
+    }
+    
+    console.log(`📋 Found ${pendingRequests.length} pending withdrawals`);
+    
+    const results = [];
+    let remainingBalance = eosBalance;
+    
+    for (const request of pendingRequests) {
+      // Skip if not enough balance for this request
+      if (remainingBalance < request.amount_cents) {
+        console.log(`⏭️ Skipping request ${request.id}: need ${request.amount_cents}, have ${remainingBalance}`);
+        continue;
+      }
+      
+      // Mark as processing
+      await supabase
+        .from('withdrawal_requests')
+        .update({ status: 'processing' })
+        .eq('id', request.id);
+      
+      try {
+        // Transfer funds
+        const transfer = await stripe.transfers.create({
+          amount: request.amount_cents,
+          currency: 'usd',
+          destination: request.stripe_connect_account_id,
+          description: 'EOS withdrawal (queued)',
+          metadata: { user_id: request.user_id, request_id: request.id }
+        });
+        
+        console.log('✅ Transfer created for queued request:', transfer.id);
+        
+        // Trigger payout
+        let payoutId = null;
+        try {
+          const connectBalance = await stripe.balance.retrieve({ stripeAccount: request.stripe_connect_account_id });
+          const available = connectBalance.available[0]?.amount || 0;
+          
+          if (available > 0) {
+            const payout = await stripe.payouts.create({
+              amount: available,
+              currency: 'usd',
+              method: request.payout_method === 'card' ? 'instant' : 'standard'
+            }, { stripeAccount: request.stripe_connect_account_id });
+            payoutId = payout.id;
+            console.log('✅ Payout initiated:', payoutId);
+          }
+        } catch (payoutErr) {
+          console.error('Payout warning:', payoutErr.message);
+        }
+        
+        // Mark as completed
+        await supabase
+          .from('withdrawal_requests')
+          .update({ 
+            status: 'completed',
+            stripe_transfer_id: transfer.id,
+            stripe_payout_id: payoutId,
+            processed_at: new Date().toISOString()
+          })
+          .eq('id', request.id);
+        
+        // Update transaction status
+        await supabase
+          .from('transactions')
+          .update({ status: 'completed', stripe_payment_id: transfer.id })
+          .eq('user_id', request.user_id)
+          .eq('type', 'withdrawal')
+          .eq('status', 'pending')
+          .eq('amount_cents', -request.amount_cents);
+        
+        remainingBalance -= request.amount_cents;
+        results.push({ requestId: request.id, status: 'completed', transferId: transfer.id });
+        
+      } catch (transferErr) {
+        console.error('Transfer failed for request:', request.id, transferErr.message);
+        
+        // Increment retry count
+        const newRetryCount = (request.retry_count || 0) + 1;
+        const newStatus = newRetryCount >= 5 ? 'failed' : 'pending';
+        
+        await supabase
+          .from('withdrawal_requests')
+          .update({ 
+            status: newStatus,
+            retry_count: newRetryCount,
+            error_message: transferErr.message
+          })
+          .eq('id', request.id);
+        
+        results.push({ requestId: request.id, status: newStatus, error: transferErr.message, retryCount: newRetryCount });
+      }
+    }
+    
+    console.log('🔄 Queue processing complete:', { processed: results.length, results });
+    
+    res.json({ 
+      processed: results.filter(r => r.status === 'completed').length,
+      total: results.length,
+      remainingBalance: remainingBalance / 100,
+      results 
+    });
+    
+  } catch (err) {
+    console.error('Error processing queue:', err);
+    res.status(500).json({ error: 'Queue processing failed: ' + err.message });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Get user's pending withdrawals
+// -----------------------------------------------------------------------------
+app.get('/withdrawals/pending/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const { data: pending, error } = await supabase
+      .from('withdrawal_requests')
+      .select('id, amount_cents, status, created_at, error_message, retry_count')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'processing'])
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ pending: pending || [] });
+    
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
