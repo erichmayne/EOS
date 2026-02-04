@@ -700,7 +700,8 @@ app.post('/auth/login', async (req, res) => {
         full_name: user.full_name,
         phone: user.phone,
         balance_cents: user.balance_cents,
-        created_at: user.created_at
+        created_at: user.created_at,
+        settings_locked_until: user.settings_locked_until
       }
     });
     
@@ -952,6 +953,18 @@ app.post('/withdraw', async (req, res) => {
     
     if ((user.balance_cents || 0) < amountCents) {
       return res.status(400).json({ error: 'Insufficient balance', available: (user.balance_cents || 0) / 100 });
+    }
+    
+    // Check if settings are locked - block withdrawal if locked
+    if (user.settings_locked_until) {
+      const lockDate = new Date(user.settings_locked_until);
+      if (lockDate > new Date()) {
+        console.log('🔒 Withdrawal blocked - settings locked until:', lockDate);
+        return res.status(403).json({ 
+          error: 'Withdrawals are locked until your objective is completed',
+          lockedUntil: user.settings_locked_until
+        });
+      }
     }
     
     let stripeConnectAccountId = user.stripe_connect_account_id;
@@ -1902,14 +1915,21 @@ app.post("/objectives/check-missed", async (req, res) => {
                 .select()
                 .single();
             
-            // Deduct balance and mark session (update both columns)
+            // Deduct balance, reset settings lock, and mark session
+            // Reset settings_locked_until so user can start fresh after failing
             const newBalance = Math.max(0, userBalance - payoutAmountCents);
-            await supabase.from("users").update({ balance_cents: newBalance, active_balance_cents: newBalance }).eq("id", session.user_id);
+            await supabase.from("users").update({ 
+                balance_cents: newBalance, 
+                active_balance_cents: newBalance,
+                settings_locked_until: null  // Reset lock - user paid the price, gets fresh start
+            }).eq("id", session.user_id);
             await supabase.from("objective_sessions").update({ 
                 status: "missed", 
                 payout_triggered: true,
                 payout_transaction_id: tx?.id 
             }).eq("id", session.id);
+            
+            console.log("🔓 Settings lock reset for user:", user.email, "- missed objective payout processed");
             
             results.push({
                 userId: session.user_id,
@@ -1917,7 +1937,8 @@ app.post("/objectives/check-missed", async (req, res) => {
                 amount: session.payout_amount,
                 destination: destination,
                 stripeTransferId: stripeTransferId,
-                newBalanceCents: newBalance
+                newBalanceCents: newBalance,
+                settingsLockReset: true
             });
         }
         
@@ -1991,7 +2012,7 @@ app.get("/users/:userId/balance", async (req, res) => {
         
         const { data: user, error } = await supabase
             .from("users")
-            .select("balance_cents")
+            .select("balance_cents, settings_locked_until")
             .eq("id", userId)
             .single();
         
@@ -2001,7 +2022,8 @@ app.get("/users/:userId/balance", async (req, res) => {
         
         res.json({
             balanceCents: user.balance_cents || 0,
-            balanceDollars: (user.balance_cents || 0) / 100
+            balanceDollars: (user.balance_cents || 0) / 100,
+            settings_locked_until: user.settings_locked_until
         });
         
     } catch (error) {
@@ -3014,12 +3036,38 @@ app.get("/recipients/:recipientId/status", async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// Settings Lock - Get user's settings lock state
+// -----------------------------------------------------------------------------
+app.get("/users/:userId/settings-lock", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        const { data: user, error } = await supabase
+            .from("users")
+            .select("settings_locked_until")
+            .eq("id", userId)
+            .single();
+        
+        if (error) {
+            return res.status(400).json({ error: error.message });
+        }
+        
+        res.json({ 
+            settings_locked_until: user?.settings_locked_until || null 
+        });
+    } catch (error) {
+        console.error("Get settings lock error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// -----------------------------------------------------------------------------
 // Objective Settings - Update user objective configuration
 // -----------------------------------------------------------------------------
 app.post("/objectives/settings/:userId", async (req, res) => {
     try {
         const { userId } = req.params;
-        const { objective_type, objective_count, objective_schedule, objective_deadline, missed_goal_payout, timezone } = req.body;
+        const { objective_type, objective_count, objective_schedule, objective_deadline, missed_goal_payout, timezone, settings_locked_until } = req.body;
         
         const updateData = {};
         if (objective_type) updateData.objective_type = objective_type;
@@ -3031,6 +3079,7 @@ app.post("/objectives/settings/:userId", async (req, res) => {
             if (missed_goal_payout > 0) updateData.payout_committed = true; 
         }
         if (timezone) updateData.timezone = timezone;
+        if (settings_locked_until) updateData.settings_locked_until = settings_locked_until;
         
         // 1. Update user settings
         const { data: userData, error: userError } = await supabase

@@ -460,7 +460,7 @@
         let currentMethod = 'bank';
         
         // Check session and load amount
-        function init() {
+        async function init() {
             const session = localStorage.getItem('eos_session');
             if (!session) {
                 window.location.href = '/portal';
@@ -469,6 +469,20 @@
             
             try {
                 currentUser = JSON.parse(session);
+                
+                // Fetch fresh lock status from server
+                try {
+                    const balanceRes = await fetch(`${API_URL}/users/${currentUser.id}/balance`);
+                    if (balanceRes.ok) {
+                        const data = await balanceRes.json();
+                        currentUser.balance_cents = data.balanceCents || 0;
+                        currentUser.settings_locked_until = data.settings_locked_until || null;
+                        localStorage.setItem('eos_session', JSON.stringify(currentUser));
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch balance:', e);
+                }
+                
                 withdrawAmount = (currentUser.balance_cents || 0) / 100;
                 
                 document.getElementById('withdraw-amount').textContent = `$${withdrawAmount.toFixed(2)}`;
@@ -477,6 +491,16 @@
                 // Pre-fill name if available
                 if (currentUser.full_name) {
                     document.getElementById('legal-name').value = currentUser.full_name;
+                }
+                
+                // Check if settings are locked - redirect back if so
+                if (currentUser.settings_locked_until) {
+                    const lockDate = new Date(currentUser.settings_locked_until);
+                    if (lockDate > new Date()) {
+                        alert('Withdrawals are locked until your objective is completed');
+                        window.location.href = '/portal';
+                        return;
+                    }
                 }
                 
                 // Disable if no balance

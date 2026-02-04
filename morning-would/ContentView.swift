@@ -16,6 +16,7 @@ struct ContentView: View {
         return Calendar.current.nextDate(after: Date(), matching: components, matchingPolicy: .nextTime) ?? Date()
     }()
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
+    @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
     @AppStorage("profileUsername") private var profileUsername: String = ""
     @AppStorage("profileEmail") private var profileEmail: String = ""
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
@@ -260,6 +261,7 @@ struct ContentView: View {
                     objective: $pushupObjective,
                     deadline: $objectiveDeadline,
                     scheduleType: $scheduleType,
+                    settingsLockedUntil: $settingsLockedUntil,
                     onSave: {
                         syncObjectivesToBackend()
                     }
@@ -298,6 +300,34 @@ struct ContentView: View {
             todayPushUpCount = 0
             UserDefaults.standard.set(Date(), forKey: lastResetKey)
         }
+        
+        // Also sync lock state from server (in case it was reset after missed objective)
+        syncLockStateFromServer()
+    }
+    
+    private func syncLockStateFromServer() {
+        guard !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "https://api.live-eos.com/users/\(userId)/settings-lock") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+            
+            DispatchQueue.main.async {
+                if let lockDateStr = json["settings_locked_until"] as? String {
+                    let isoFormatter = ISO8601DateFormatter()
+                    if let lockDate = isoFormatter.date(from: lockDateStr) {
+                        self.settingsLockedUntil = lockDate
+                    }
+                } else {
+                    // No lock date or null means unlocked
+                    self.settingsLockedUntil = Date.distantPast
+                }
+            }
+        }.resume()
     }
     
     private func syncObjectivesToBackend() {
@@ -310,11 +340,19 @@ struct ContentView: View {
         formatter.dateFormat = "HH:mm"
         let deadlineString = formatter.string(from: objectiveDeadline)
         
-        let body: [String: Any] = [
+        // ISO8601 formatter for lock date
+        let isoFormatter = ISO8601DateFormatter()
+        let lockDateString = settingsLockedUntil > Date.distantPast ? isoFormatter.string(from: settingsLockedUntil) : nil
+        
+        var body: [String: Any] = [
             "objective_count": pushupObjective,
             "objective_schedule": scheduleType.lowercased(),
             "objective_deadline": deadlineString
         ]
+        
+        if let lockDate = lockDateString {
+            body["settings_locked_until"] = lockDate
+        }
         
         guard let url = URL(string: "/objectives/settings/\(userId)", relativeTo: URL(string: "https://api.live-eos.com")!) else { return }
         
@@ -530,13 +568,31 @@ struct ObjectiveSettingsView: View {
     @Binding var objective: Int
     @Binding var deadline: Date
     @Binding var scheduleType: String
+    @Binding var settingsLockedUntil: Date
     var onSave: (() -> Void)? = nil  // Callback to sync to backend
     @Environment(\.dismiss) private var dismiss
     @State private var tempObjective: Int = 10
     @State private var tempDeadline: Date = Date()
     @State private var tempScheduleType: String = "Daily"
+    @State private var lockDays: Double = 7
+    @State private var showLockConfirmation: Bool = false
 
     private let notificationManager = NotificationManager()
+    
+    var isLocked: Bool {
+        settingsLockedUntil > Date()
+    }
+    
+    var daysUntilUnlock: Int {
+        let interval = settingsLockedUntil.timeIntervalSince(Date())
+        return max(0, Int(ceil(interval / 86400)))
+    }
+    
+    var formattedDeadlineTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: tempDeadline)
+    }
 
     var body: some View {
         NavigationView {
@@ -545,6 +601,27 @@ struct ObjectiveSettingsView: View {
                     .ignoresSafeArea()
                 
                 Form {
+                    // Lock Status Banner (when locked)
+                    if isLocked {
+                        Section {
+                            HStack {
+                                Image(systemName: "lock.fill")
+                                    .foregroundStyle(Color.orange)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Settings Locked")
+                                        .font(.system(.headline, design: .rounded, weight: .bold))
+                                        .foregroundStyle(Color.black)
+                                    Text("\(daysUntilUnlock) day\(daysUntilUnlock == 1 ? "" : "s") remaining")
+                                        .font(.system(.caption, design: .rounded))
+                                        .foregroundStyle(Color.black.opacity(0.7))
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 8)
+                        }
+                        .listRowBackground(Color.orange.opacity(0.15))
+                    }
+                    
                     Section(header: Text("Daily Push-up Objective")
                         .foregroundStyle(Color.white)) {
                         Picker("", selection: $tempObjective) {
@@ -557,6 +634,8 @@ struct ObjectiveSettingsView: View {
                         .pickerStyle(.wheel)
                         .frame(height: 150)
                         .labelsHidden()
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.5 : 1)
                     }
                     .listRowBackground(Color.white)
 
@@ -569,6 +648,8 @@ struct ObjectiveSettingsView: View {
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
+                            .disabled(isLocked)
+                            .opacity(isLocked ? 0.5 : 1)
                             .onAppear {
                                 UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)
                                 UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
@@ -582,14 +663,103 @@ struct ObjectiveSettingsView: View {
                             Divider()
                                 .padding(.vertical, 4)
                             
+                            // AM/PM Label above time picker
+                            Text("Select deadline time (AM/PM)")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.6))
+                            
                             DatePicker("", selection: $tempDeadline, displayedComponents: .hourAndMinute)
                                 .datePickerStyle(.wheel)
                                 .labelsHidden()
                                 .frame(height: 120)
                                 .tint(Color.black)
                                 .colorScheme(.light)
+                                .disabled(isLocked)
+                                .opacity(isLocked ? 0.5 : 1)
+                            
+                            // Show selected time clearly
+                            Text("Deadline: \(formattedDeadlineTime)")
+                                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                         }
                         .padding(.vertical, 8)
+                    }
+                    .listRowBackground(Color.white)
+                    
+                    // Lock Settings Section
+                    Section(header: Text("Commitment Lock")
+                        .foregroundStyle(Color.white),
+                            footer: Text(isLocked ? 
+                                "Your settings are locked. You cannot change them until the lock expires." :
+                                "Lock your settings to prevent changes. This helps maintain your commitment.")
+                                .foregroundStyle(Color.white.opacity(0.95))) {
+                        
+                        if isLocked {
+                            // Show locked state
+                            HStack {
+                                Image(systemName: "lock.fill")
+                                    .foregroundStyle(Color.orange)
+                                Text("Locked for \(daysUntilUnlock) more day\(daysUntilUnlock == 1 ? "" : "s")")
+                                    .font(.system(.body, design: .rounded))
+                                    .foregroundStyle(Color.black)
+                                Spacer()
+                                Text(settingsLockedUntil, style: .date)
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.6))
+                            }
+                            .padding(.vertical, 4)
+                        } else {
+                            // Lock slider and button
+                            VStack(spacing: 16) {
+                                // Centered days display
+                                Text("\(Int(lockDays)) day\(Int(lockDays) == 1 ? "" : "s")")
+                                    .font(.system(.title2, design: .rounded, weight: .bold))
+                                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                
+                                // Slider with tick marks
+                                VStack(spacing: 4) {
+                                    Slider(value: $lockDays, in: 1...30, step: 1)
+                                        .tint(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                    
+                                    // Tick marks line
+                                    GeometryReader { geometry in
+                                        HStack(spacing: 0) {
+                                            ForEach(0..<30, id: \.self) { i in
+                                                Rectangle()
+                                                    .fill(Color.black.opacity(0.2))
+                                                    .frame(width: 1, height: i % 5 == 0 ? 8 : 4)
+                                                if i < 29 {
+                                                    Spacer()
+                                                }
+                                            }
+                                        }
+                                        .frame(width: geometry.size.width - 4)
+                                        .padding(.horizontal, 2)
+                                    }
+                                    .frame(height: 10)
+                                }
+                                
+                                Button(action: {
+                                    showLockConfirmation = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "lock.fill")
+                                        Text("Lock Settings")
+                                    }
+                                    .font(.system(.body, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(Color.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                            .padding(.vertical, 8)
+                        }
                     }
                     .listRowBackground(Color.white)
 
@@ -610,19 +780,42 @@ struct ObjectiveSettingsView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        objective = tempObjective
-                        deadline = tempDeadline
-                        scheduleType = tempScheduleType
-                        notificationManager.scheduleObjectiveReminder(
-                            deadline: deadline,
-                            objective: objective,
-                            scheduleType: scheduleType
-                        )
-                        onSave?()  // Sync to backend
+                        if !isLocked {
+                            objective = tempObjective
+                            deadline = tempDeadline
+                            scheduleType = tempScheduleType
+                            notificationManager.scheduleObjectiveReminder(
+                                deadline: deadline,
+                                objective: objective,
+                                scheduleType: scheduleType
+                            )
+                            onSave?()  // Sync to backend
+                        }
                         dismiss()
                     }
                     .font(.system(.body, design: .rounded, weight: .medium))
+                    .disabled(isLocked)
                 }
+            }
+            .alert("Lock Your Settings?", isPresented: $showLockConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Lock for \(Int(lockDays)) Days", role: .destructive) {
+                    // Save current settings first
+                    objective = tempObjective
+                    deadline = tempDeadline
+                    scheduleType = tempScheduleType
+                    // Set lock expiry
+                    settingsLockedUntil = Calendar.current.date(byAdding: .day, value: Int(lockDays), to: Date()) ?? Date()
+                    notificationManager.scheduleObjectiveReminder(
+                        deadline: deadline,
+                        objective: objective,
+                        scheduleType: scheduleType
+                    )
+                    onSave?()  // Sync to backend
+                    dismiss()
+                }
+            } message: {
+                Text("Are you sure? You will NOT be able to change your objective settings or back out of your commitment for \(Int(lockDays)) days.")
             }
         }
         .onAppear {
@@ -1117,6 +1310,7 @@ struct ProfileView: View {
         return Calendar.current.date(from: components) ?? Date()
     }()
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
+    @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
     
     @State private var showDestinationSelector: Bool = false
     @State private var activeRecipientName: String = ""
@@ -1704,25 +1898,30 @@ struct ProfileView: View {
                             .cornerRadius(8)
                         }
                         
-                        // Withdraw button - links to web portal
+                        // Withdraw button - links to web portal (greyed out if settings locked)
+                        let isWithdrawLocked = settingsLockedUntil > Date()
+                        
                         Button(action: {
-                            if let url = URL(string: "https://live-eos.com/portal") {
-                                UIApplication.shared.open(url)
+                            if !isWithdrawLocked {
+                                if let url = URL(string: "https://live-eos.com/portal") {
+                                    UIApplication.shared.open(url)
+                                }
                             }
                         }) {
-                            Text("Withdraw")
+                            Text(isWithdrawLocked ? "🔒 Withdraw Locked" : "Withdraw")
                                 .font(.system(.subheadline, design: .rounded, weight: .medium))
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity)
-                        .background(Color.white)
-                        .foregroundStyle(Color.black)
+                        .background(isWithdrawLocked ? Color.gray.opacity(0.3) : Color.white)
+                        .foregroundStyle(isWithdrawLocked ? Color.gray : Color.black)
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.black, lineWidth: 1)
+                                .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
                         )
                         .cornerRadius(8)
+                        .disabled(isWithdrawLocked)
 
                         if let error = depositErrorMessage {
                             HStack {
@@ -2815,6 +3014,7 @@ struct SignInView: View {
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
     @AppStorage("committedDestination") private var committedDestination: String = "charity"
     @AppStorage("userId") private var userId: String = ""
+    @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
     // Objective settings (populated from server on sign in)
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
@@ -3041,6 +3241,14 @@ struct SignInView: View {
                         formatter.dateFormat = "HH:mm"
                         if let time = formatter.date(from: objDeadline) {
                             self.objectiveDeadline = time
+                        }
+                    }
+                    
+                    // Settings lock date
+                    if let lockDateStr = user["settings_locked_until"] as? String {
+                        let isoFormatter = ISO8601DateFormatter()
+                        if let lockDate = isoFormatter.date(from: lockDateStr) {
+                            self.settingsLockedUntil = lockDate
                         }
                     }
                     

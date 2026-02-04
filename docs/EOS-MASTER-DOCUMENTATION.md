@@ -1,6 +1,6 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: January 30, 2026
-> Version: 2.6 - Recipient Linking Fixed
+> Last Updated: February 1, 2026
+> Version: 2.7 - App Store Submitted
 
 ---
 
@@ -2808,4 +2808,133 @@ CREATE TABLE withdrawal_requests (
 | `web/reset-password.html` | New file for password reset form |
 | `web/terms.html` | Professional Terms & Conditions |
 | Crontab | Changed from */5 to * (every minute) |
+
+---
+
+## 📱 App Store Submission (Feb 1, 2026)
+
+### App Store Connect Details
+| Field | Value |
+|-------|-------|
+| App Name | **The EOS** |
+| Subtitle | Early Or Suffer |
+| Bundle ID | `com.emayne.eos` |
+| SKU | `eos2026` |
+| Version | 1.0 (Build 2) |
+| Category | Health & Fitness |
+| Secondary Category | Lifestyle |
+| Status | **WAITING_FOR_REVIEW** |
+
+### App Store Connect API Keys
+```
+Issuer ID: c68810e9-b8f2-4f7b-bfe5-0868b6d5844c
+Key ID: KNKD93452H
+Key File: /Users/emayne/morning-would/docs/AuthKey_KNKD93452H.p8
+```
+
+### Apple Developer Account
+| Field | Value |
+|-------|-------|
+| Team ID | 3W9Q24UY7J |
+| Account Holder | Erich Mayne |
+| App ID | 6758569221 |
+
+### Submission Checklist (Completed)
+- ✅ Build archived and uploaded
+- ✅ App name, subtitle, description, keywords
+- ✅ Privacy policy URL (`https://live-eos.com/terms`)
+- ✅ Support URL (`https://live-eos.com`)
+- ✅ Category: Health & Fitness
+- ✅ Age rating configured (all clean)
+- ✅ Copyright: © 2026 Erich Mayne
+- ✅ Screenshots uploaded (5 iPhone screenshots)
+- ✅ App Privacy declarations published
+- ✅ Encryption declaration (No)
+- ✅ Content rights declaration
+- ✅ Review contact info set
+- ✅ Submitted for review
+
+### Future App Store Updates
+To submit a new version:
+```bash
+# 1. Bump version in Xcode project
+# 2. Archive
+cd /Users/emayne/morning-would
+xcodebuild -project Eos.xcodeproj -scheme "morning-would" \
+  -configuration Release -destination "generic/platform=iOS" \
+  archive -archivePath ~/Desktop/EOS.xcarchive \
+  -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic \
+  DEVELOPMENT_TEAM=3W9Q24UY7J
+
+# 3. Upload
+xcodebuild -exportArchive \
+  -archivePath ~/Desktop/EOS.xcarchive \
+  -exportOptionsPlist ExportOptions.plist \
+  -exportPath ~/Desktop/EOS-Export \
+  -allowProvisioningUpdates \
+  -authenticationKeyPath /Users/emayne/morning-would/docs/AuthKey_KNKD93452H.p8 \
+  -authenticationKeyID KNKD93452H \
+  -authenticationKeyIssuerID c68810e9-b8f2-4f7b-bfe5-0868b6d5844c
+```
+
+### Note on iPad Support
+- App is currently **iPhone-only** (`TARGETED_DEVICE_FAMILY = 1`)
+- iPad layout not optimized - disabled to avoid App Store rejection
+- Future: Add iPad-specific layouts if needed
+
+---
+
+## 🔐 Sensitive Files Reference
+
+### Local Secret Files (Gitignored - NEVER commit these)
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `SECRETS-LOCAL.md` | `/Users/emayne/morning-would/docs/` | Master list of all API keys, passwords, and credentials |
+| `AuthKey_KNKD93452H.p8` | `/Users/emayne/morning-would/docs/` | App Store Connect API private key for uploading builds (ONE-TIME DOWNLOAD) |
+| `.env` | `/Users/emayne/morning-would/backend/` | Backend environment variables (local) |
+| `.env` | `/home/user/morning-would-payments/` | Backend environment variables (server) |
+
+### What Each File Contains
+
+#### `SECRETS-LOCAL.md`
+- Stripe live keys (publishable + secret)
+- Google Workspace SMTP credentials
+- Apple Developer Team ID
+- App Store Connect API credentials (Issuer ID, Key ID)
+- Server SSH access info
+- Quick commands for App Store uploads
+
+#### `AuthKey_KNKD93452H.p8`
+- Apple App Store Connect API private key
+- Used for: Uploading builds via command line, API calls to App Store Connect
+- ⚠️ **Cannot be re-downloaded** - Apple only allows ONE download
+- Keep this file backed up securely!
+
+#### Backend `.env` (on server)
+```
+STRIPE_SECRET_KEY=sk_live_...
+SUPABASE_URL=https://...
+SUPABASE_SERVICE_ROLE_KEY=...
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM_NUMBER=...
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=connect@live-eos.com
+SMTP_PASS=...
+```
+
+### Gitignore Rules (from `.gitignore`)
+```gitignore
+.env
+.env.*
+docs/SECRETS-LOCAL.md
+docs/AuthKey_*.p8
+```
+
+### Backup Recommendations
+1. **SECRETS-LOCAL.md** - Keep a copy in a password manager (1Password, Bitwarden, etc.)
+2. **AuthKey_KNKD93452H.p8** - Back up to secure cloud storage (encrypted) or password manager
+3. **Server .env** - Document in SECRETS-LOCAL.md and keep server access secure
 
