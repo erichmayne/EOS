@@ -2023,8 +2023,256 @@ app.get("/users/:userId/balance", async (req, res) => {
         res.json({
             balanceCents: user.balance_cents || 0,
             balanceDollars: (user.balance_cents || 0) / 100,
-            settings_locked_until: user.settings_locked_until
+            settings_locked_until: user.settings_locked_until,
+            stravaConnected: !!user.strava_connection_id
         });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// -----------------------------------------------------------------------------
+// Strava Integration
+// -----------------------------------------------------------------------------
+
+const STRAVA_CLIENT_ID = process.env.STRAVA_CLIENT_ID;
+const STRAVA_CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET;
+const STRAVA_VERIFY_TOKEN = process.env.STRAVA_VERIFY_TOKEN || 'eos-strava-verify-2026';
+
+// Start Strava OAuth flow
+app.get('/strava/connect/:userId', (req, res) => {
+    const { userId } = req.params;
+    const redirectUri = encodeURIComponent('https://api.live-eos.com/strava/callback');
+    const scope = 'activity:read';
+    const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${userId}`;
+    res.redirect(authUrl);
+});
+
+// Strava OAuth callback
+app.get('/strava/callback', async (req, res) => {
+    try {
+        const { code, state: userId, error } = req.query;
+        
+        if (error) {
+            console.log('Strava OAuth denied:', error);
+            return res.redirect('https://live-eos.com/portal?strava=denied');
+        }
+        
+        if (!code || !userId) {
+            return res.redirect('https://live-eos.com/portal?strava=error');
+        }
+        
+        // Exchange code for tokens
+        const tokenResponse = await fetch('https://www.strava.com/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                client_id: STRAVA_CLIENT_ID,
+                client_secret: STRAVA_CLIENT_SECRET,
+                code: code,
+                grant_type: 'authorization_code'
+            })
+        });
+        
+        const tokenData = await tokenResponse.json();
+        
+        if (!tokenData.access_token) {
+            console.error('Strava token exchange failed:', tokenData);
+            return res.redirect('https://live-eos.com/portal?strava=error');
+        }
+        
+        const { access_token, refresh_token, expires_at, athlete } = tokenData;
+        
+        // Upsert into strava_connections
+        const { data: stravaConn, error: connError } = await supabase
+            .from('strava_connections')
+            .upsert({
+                strava_user_id: athlete.id,
+                access_token: access_token,
+                refresh_token: refresh_token,
+                token_expires_at: new Date(expires_at * 1000).toISOString(),
+                athlete_name: `${athlete.firstname || ''} ${athlete.lastname || ''}`.trim(),
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'strava_user_id' })
+            .select()
+            .single();
+        
+        if (connError) {
+            console.error('Strava connection save error:', connError);
+            return res.redirect('https://live-eos.com/portal?strava=error');
+        }
+        
+        // Link to user
+        await supabase
+            .from('users')
+            .update({ strava_connection_id: stravaConn.id })
+            .eq('id', userId);
+        
+        console.log(`✅ Strava connected for user ${userId}, athlete: ${athlete.firstname}`);
+        
+        // Redirect back - use custom URL scheme for iOS app or web portal
+        res.redirect('https://live-eos.com/portal?strava=connected');
+        
+    } catch (error) {
+        console.error('Strava callback error:', error);
+        res.redirect('https://live-eos.com/portal?strava=error');
+    }
+});
+
+// Strava webhook verification (GET - required by Strava)
+app.get('/strava/webhook', (req, res) => {
+    const { 'hub.mode': mode, 'hub.challenge': challenge, 'hub.verify_token': verifyToken } = req.query;
+    
+    if (mode === 'subscribe' && verifyToken === STRAVA_VERIFY_TOKEN) {
+        console.log('✅ Strava webhook verified');
+        res.json({ 'hub.challenge': challenge });
+    } else {
+        console.log('❌ Strava webhook verification failed');
+        res.sendStatus(403);
+    }
+});
+
+// Strava webhook receiver (POST - receives activity events)
+app.post('/strava/webhook', async (req, res) => {
+    // Respond immediately (Strava requires fast response)
+    res.sendStatus(200);
+    
+    try {
+        const { object_type, aspect_type, object_id, owner_id } = req.body;
+        
+        console.log(`📩 Strava webhook: ${object_type} ${aspect_type} for athlete ${owner_id}`);
+        
+        if (object_type !== 'activity' || aspect_type !== 'create') {
+            return; // Only process new activities
+        }
+        
+        // Find strava connection by athlete ID
+        const { data: stravaConn, error: connError } = await supabase
+            .from('strava_connections')
+            .select('*')
+            .eq('strava_user_id', owner_id)
+            .single();
+        
+        if (connError || !stravaConn) {
+            console.log(`No Strava connection found for athlete ${owner_id}`);
+            return;
+        }
+        
+        // Find user linked to this Strava connection
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('strava_connection_id', stravaConn.id)
+            .single();
+        
+        if (userError || !user) {
+            console.log(`No user found for Strava connection ${stravaConn.id}`);
+            return;
+        }
+        
+        // Check if user has a run objective
+        if (user.objective_type !== 'run') {
+            console.log(`User ${user.id} doesn't have a run objective, skipping`);
+            return;
+        }
+        
+        // Fetch activity details from Strava
+        const activityResponse = await fetch(`https://www.strava.com/api/v3/activities/${object_id}`, {
+            headers: { 'Authorization': `Bearer ${stravaConn.access_token}` }
+        });
+        
+        if (!activityResponse.ok) {
+            console.error(`Failed to fetch Strava activity ${object_id}`);
+            return;
+        }
+        
+        const activity = await activityResponse.json();
+        
+        // Only process runs
+        if (activity.type !== 'Run') {
+            console.log(`Activity ${object_id} is ${activity.type}, not a Run, skipping`);
+            return;
+        }
+        
+        const distanceMiles = activity.distance / 1609.34; // meters to miles
+        const goalMiles = user.objective_pushup_count; // reusing field for miles
+        
+        console.log(`🏃 Run detected: ${distanceMiles.toFixed(2)} miles (goal: ${goalMiles} miles)`);
+        
+        if (distanceMiles >= goalMiles) {
+            // Mark objective complete
+            const today = new Date().toISOString().split('T')[0];
+            
+            const { error: sessionError } = await supabase
+                .from('objective_sessions')
+                .upsert({
+                    user_id: user.id,
+                    date: today,
+                    target_count: Math.round(goalMiles * 100),
+                    completed_count: Math.round(distanceMiles * 100),
+                    completed: true
+                }, { onConflict: 'user_id,date' });
+            
+            if (sessionError) {
+                console.error('Failed to mark run objective complete:', sessionError);
+            } else {
+                console.log(`✅ Run objective met for user ${user.id}: ${distanceMiles.toFixed(2)} >= ${goalMiles} miles`);
+            }
+        } else {
+            console.log(`Run ${distanceMiles.toFixed(2)} miles doesn't meet goal of ${goalMiles} miles`);
+        }
+        
+    } catch (error) {
+        console.error('Strava webhook processing error:', error);
+    }
+});
+
+// Check Strava connection status
+app.get('/strava/status/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        const { data: user } = await supabase
+            .from('users')
+            .select('strava_connection_id')
+            .eq('id', userId)
+            .single();
+        
+        if (!user?.strava_connection_id) {
+            return res.json({ connected: false });
+        }
+        
+        const { data: stravaConn } = await supabase
+            .from('strava_connections')
+            .select('athlete_name, connected_at')
+            .eq('id', user.strava_connection_id)
+            .single();
+        
+        res.json({
+            connected: true,
+            athleteName: stravaConn?.athlete_name || 'Connected',
+            connectedAt: stravaConn?.connected_at
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Disconnect Strava
+app.delete('/strava/disconnect/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Remove link from user
+        await supabase
+            .from('users')
+            .update({ strava_connection_id: null })
+            .eq('id', userId);
+        
+        console.log(`🔌 Strava disconnected for user ${userId}`);
+        res.json({ success: true });
         
     } catch (error) {
         res.status(500).json({ error: error.message });

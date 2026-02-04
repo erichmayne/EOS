@@ -1311,8 +1311,13 @@ struct ProfileView: View {
     }()
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
     @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
+    @AppStorage("stravaConnected") private var stravaConnected: Bool = false
+    @AppStorage("stravaAthleteName") private var stravaAthleteName: String = ""
+    @AppStorage("objectiveType") private var objectiveType: String = "pushups"
     
     @State private var showDestinationSelector: Bool = false
+    @State private var isStravaExpanded: Bool = false
+    @State private var isCheckingStrava: Bool = false
     @State private var activeRecipientName: String = ""
     @State private var activeRecipientId: String = ""
     @State private var depositAmount: String = ""
@@ -1510,6 +1515,104 @@ struct ProfileView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .disabled(isSavingProfile || !isProfileValid)
+                                    
+                                    // Strava Connection Section
+                                    Divider()
+                                        .padding(.vertical, 8)
+                                    
+                                    Button(action: { isStravaExpanded.toggle() }) {
+                                        HStack {
+                                            Image(systemName: "figure.run")
+                                                .font(.system(size: 16))
+                                                .foregroundStyle(Color.orange)
+                                            
+                                            Text("Strava")
+                                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                                .foregroundStyle(Color.black)
+                                            
+                                            Spacer()
+                                            
+                                            if stravaConnected {
+                                                Text("Connected")
+                                                    .font(.system(.caption2, design: .rounded))
+                                                    .foregroundStyle(Color.green)
+                                            }
+                                            
+                                            Image(systemName: isStravaExpanded ? "chevron.up" : "chevron.down")
+                                                .font(.caption2)
+                                                .foregroundStyle(Color.black.opacity(0.5))
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    if isStravaExpanded {
+                                        VStack(spacing: 12) {
+                                            if stravaConnected {
+                                                // Connected state
+                                                HStack {
+                                                    Image(systemName: "checkmark.circle.fill")
+                                                        .foregroundStyle(Color.green)
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text("Connected to Strava")
+                                                            .font(.system(.caption, design: .rounded, weight: .medium))
+                                                            .foregroundStyle(Color.black)
+                                                        if !stravaAthleteName.isEmpty {
+                                                            Text(stravaAthleteName)
+                                                                .font(.system(.caption2, design: .rounded))
+                                                                .foregroundStyle(Color.gray)
+                                                        }
+                                                    }
+                                                    Spacer()
+                                                }
+                                                
+                                                Button(action: disconnectStrava) {
+                                                    Text("Disconnect")
+                                                        .font(.system(.caption, design: .rounded, weight: .medium))
+                                                        .foregroundStyle(Color.red)
+                                                        .frame(maxWidth: .infinity)
+                                                        .padding(.vertical, 8)
+                                                        .background(
+                                                            RoundedRectangle(cornerRadius: 6)
+                                                                .stroke(Color.red.opacity(0.5), lineWidth: 1)
+                                                        )
+                                                }
+                                                .buttonStyle(.plain)
+                                            } else {
+                                                // Not connected state
+                                                Text("Connect Strava to track run objectives automatically")
+                                                    .font(.system(.caption2, design: .rounded))
+                                                    .foregroundStyle(Color.gray)
+                                                    .multilineTextAlignment(.leading)
+                                                
+                                                Button(action: connectStrava) {
+                                                    HStack {
+                                                        if isCheckingStrava {
+                                                            ProgressView()
+                                                                .scaleEffect(0.7)
+                                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                                        } else {
+                                                            Image(systemName: "link")
+                                                                .font(.caption)
+                                                        }
+                                                        Text("Connect Strava")
+                                                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                                                    }
+                                                    .foregroundStyle(.white)
+                                                    .frame(maxWidth: .infinity)
+                                                    .padding(.vertical, 10)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 8)
+                                                            .fill(Color.orange)
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(.top, 4)
+                                    }
+                                    
+                                    Divider()
+                                        .padding(.vertical, 8)
                                     
                                     // Change password link
                                     Button(action: {
@@ -2074,6 +2177,7 @@ struct ProfileView: View {
                 loadCustomRecipients()
                 refreshBalance()
                 syncInviteStatuses()
+                checkStravaStatus()
             }
         }
     
@@ -2591,6 +2695,66 @@ struct ProfileView: View {
                 if let newBalanceCents = json["newBalanceCents"] as? Int {
                     self.profileCashHoldings = Double(newBalanceCents) / 100.0
                 }
+            }
+        }.resume()
+    }
+    
+    // MARK: - Strava Functions
+    
+    private func connectStrava() {
+        guard !userId.isEmpty else {
+            print("⚠️ No userId, can't connect Strava")
+            return
+        }
+        
+        let stravaConnectURL = "https://api.live-eos.com/strava/connect/\(userId)"
+        if let url = URL(string: stravaConnectURL) {
+            UIApplication.shared.open(url)
+        }
+    }
+    
+    private func disconnectStrava() {
+        guard !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "https://api.live-eos.com/strava/disconnect/\(userId)") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                    self.stravaConnected = false
+                    self.stravaAthleteName = ""
+                    // Reset to pushups if currently on run
+                    if self.objectiveType == "run" {
+                        self.objectiveType = "pushups"
+                    }
+                    print("✅ Strava disconnected")
+                }
+            }
+        }.resume()
+    }
+    
+    private func checkStravaStatus() {
+        guard !userId.isEmpty else { return }
+        
+        isCheckingStrava = true
+        
+        guard let url = URL(string: "https://api.live-eos.com/strava/status/\(userId)") else {
+            isCheckingStrava = false
+            return
+        }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            DispatchQueue.main.async {
+                self.isCheckingStrava = false
+                
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+                
+                self.stravaConnected = json["connected"] as? Bool ?? false
+                self.stravaAthleteName = json["athleteName"] as? String ?? ""
             }
         }.resume()
     }
