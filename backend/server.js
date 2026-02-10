@@ -3631,17 +3631,35 @@ app.post("/objectives/settings/:userId", async (req, res) => {
             updateData.settings_locked_until = settings_locked_until;  // Can be null to clear
         }
         
-        // 1. Update user settings
-        const { data: userData, error: userError } = await supabase
-            .from("users")
-            .update(updateData)
-            .eq("id", userId)
-            .select()
-            .single();
+        // 1. Update user settings (only if there are user-level fields to update)
+        let userData = null;
+        if (Object.keys(updateData).length > 0) {
+            const { data, error: userError } = await supabase
+                .from("users")
+                .update(updateData)
+                .eq("id", userId)
+                .select()
+                .single();
+            
+            if (userError) {
+                console.error("User update error:", userError);
+                return res.status(400).json({ error: userError.message });
+            }
+            userData = data;
+        } else {
+            // No user-level changes (e.g. pushups/run only) — fetch current user data
+            // so session logic below can still reference it
+            const { data } = await supabase
+                .from("users")
+                .select()
+                .eq("id", userId)
+                .single();
+            userData = data;
+        }
         
-        if (userError) {
-            console.error("User update error:", userError);
-            return res.status(400).json({ error: userError.message });
+        // If user doesn't exist at all, we're done (pushups/run still saved above)
+        if (!userData) {
+            return res.json({ success: true, user: null, session: null });
         }
         
         // 2. Also upsert todays session with new values

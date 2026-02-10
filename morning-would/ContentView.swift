@@ -819,6 +819,14 @@ struct ObjectiveSettingsView: View {
     @State private var isScheduleExpanded: Bool = true
     @State private var isLockExpanded: Bool = false
     
+    // Force view re-render after async saves (SwiftUI Form can defer @Published updates
+    // without a structural @State change — incrementing this and using .id() forces re-evaluation)
+    @State private var objectiveSaveGeneration: Int = 0
+    
+    // When true, loadObjectivesFromBackend() will skip overwriting pushups/run state,
+    // because an optimistic update was applied and hasn't been persisted yet.
+    @State private var hasOptimisticUpdate: Bool = false
+    
     // Saving states
     @State private var isSavingPushups: Bool = false
     @State private var isSavingRun: Bool = false
@@ -941,24 +949,20 @@ struct ObjectiveSettingsView: View {
                 
                 Spacer()
                 
-                Button(action: {
-                    if settings.pushupsIsSet { unsetPushups() } else { setPushups() }
-                }) {
-                    HStack(spacing: 4) {
-                        if isSavingPushups {
-                            ProgressView().scaleEffect(0.7)
-                        }
-                        Text(settings.pushupsIsSet ? "Unset" : "Set")
-                    }
+                // onTapGesture (not Button) avoids Form button tap bleed,
+                // and the set/unset functions use optimistic updates (synchronous
+                // state change) so the UI reflects immediately.
+                Text(settings.pushupsIsSet ? "Unset" : "Set")
                     .font(.system(.caption, design: .rounded, weight: .semibold))
                     .foregroundStyle(settings.pushupsIsSet ? Color.red : Color.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 8).fill(settings.pushupsIsSet ? Color.red.opacity(0.1) : goldColor))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.pushupsIsSet ? Color.red : Color.clear, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(isSavingPushups)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if settings.pushupsIsSet { unsetPushups() } else { setPushups() }
+                    }
             }
         }
         .padding(.vertical, 8)
@@ -1013,28 +1017,21 @@ struct ObjectiveSettingsView: View {
                 
                 Spacer()
                 
-                Button(action: {
-                    if !stravaConnected {
-                        showStravaRequiredAlert = true
-                        return
-                    }
-                    if settings.runIsSet { unsetRun() } else { setRun() }
-                }) {
-                    HStack(spacing: 4) {
-                        if isSavingRun {
-                            ProgressView().scaleEffect(0.7)
-                        }
-                        Text(settings.runIsSet ? "Unset" : "Set")
-                    }
+                Text(settings.runIsSet ? "Unset" : "Set")
                     .font(.system(.caption, design: .rounded, weight: .semibold))
                     .foregroundStyle(settings.runIsSet ? Color.red : (stravaConnected ? Color.white : Color.gray))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(RoundedRectangle(cornerRadius: 8).fill(settings.runIsSet ? Color.red.opacity(0.1) : (stravaConnected ? goldColor : Color.gray.opacity(0.3))))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.runIsSet ? Color.red : Color.clear, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(isSavingRun)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if !stravaConnected {
+                            showStravaRequiredAlert = true
+                            return
+                        }
+                        if settings.runIsSet { unsetRun() } else { setRun() }
+                    }
             }
             
             if !stravaConnected {
@@ -1379,37 +1376,40 @@ struct ObjectiveSettingsView: View {
                     
                     // MARK: - Objectives Section (Both Types)
                     Section {
-                        // Header row (always visible) - uses onTapGesture to avoid Form button tap bleed
-                        HStack {
-                            Image(systemName: "target")
-                                .font(.system(size: 16))
-                                .foregroundStyle(goldColor)
-                            
-                            Text("Objectives")
-                                .font(.system(.body, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                            
-                            Spacer()
-                            
-                            if !isObjectiveExpanded {
-                                Text(objectiveSummary)
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(hasAnyObjectiveSet ? Color.green : Color.orange)
-                            }
-                            
-                            Image(systemName: isObjectiveExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption2)
-                                .foregroundStyle(Color.black.opacity(0.5))
-                        }
-                        .padding(.vertical, 4)
-                        .opacity(isLocked ? 0.6 : 1)
-                        .onTapGesture {
+                        // Header row (always visible) - Button with .plain style matches working Schedule pattern
+                        Button(action: {
                             if !isLocked {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     isObjectiveExpanded.toggle()
                                 }
                             }
+                        }) {
+                            HStack {
+                                Image(systemName: "target")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(goldColor)
+                                
+                                Text("Objectives")
+                                    .font(.system(.body, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black)
+                                
+                                Spacer()
+                                
+                                if !isObjectiveExpanded {
+                                    Text(objectiveSummary)
+                                        .font(.system(.caption, design: .rounded))
+                                        .foregroundStyle(hasAnyObjectiveSet ? Color.green : Color.orange)
+                                }
+                                
+                                Image(systemName: isObjectiveExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.black.opacity(0.5))
+                            }
+                            .padding(.vertical, 4)
                         }
+                        .buttonStyle(.plain)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1)
                         
                         // Expanded content - BOTH objective types
                         if isObjectiveExpanded && !isLocked {
@@ -1431,6 +1431,7 @@ struct ObjectiveSettingsView: View {
                                 }
                             }
                             .padding(.top, 8)
+                            .id(objectiveSaveGeneration)
                         }
                     }
                     .listRowBackground(Color.white)
@@ -1579,98 +1580,117 @@ struct ObjectiveSettingsView: View {
     }
     
     private func setPushups() {
-        isSavingPushups = true
         print("💪 Setting pushups: \(tempPushupCount), userId: \(userId)")
         
-        let body: [String: Any] = [
+        // Optimistic update — change UI synchronously during the gesture handler
+        // so SwiftUI picks it up in the current rendering transaction.
+        hasOptimisticUpdate = true
+        settings.pushupsIsSet = true
+        settings.pushupsEnabled = true
+        objective = tempPushupCount
+        objectiveSaveGeneration += 1
+        showSuccess("Pushups set!")
+        
+        // Persist to backend in background; call onSave only after confirmed
+        saveObjectiveToBackend(body: [
             "pushups_count": tempPushupCount,
             "pushups_enabled": true
-        ]
-        
-        saveObjectiveToBackend(body: body) { success in
+        ]) { success in
             DispatchQueue.main.async {
-                self.isSavingPushups = false
+                self.hasOptimisticUpdate = false
                 if success {
-                    self.settings.pushupsIsSet = true
-                    self.settings.pushupsEnabled = true
-                    self.objective = self.tempPushupCount
-                    self.showSuccess("Pushups set!")
                     self.onSave?()
-                    print("✅ Pushups set successfully")
+                    print("✅ Pushups saved to backend")
                 } else {
-                    print("❌ Failed to set pushups")
+                    self.settings.pushupsIsSet = false
+                    self.settings.pushupsEnabled = false
+                    self.objectiveSaveGeneration += 1
+                    self.showSuccess("Save failed — try again")
+                    print("❌ Failed to save pushups — reverted")
                 }
             }
         }
     }
     
     private func unsetPushups() {
-        isSavingPushups = true
         print("💪 Unsetting pushups, userId: \(userId)")
         
-        let body: [String: Any] = [
-            "pushups_enabled": false
-        ]
+        hasOptimisticUpdate = true
+        settings.pushupsIsSet = false
+        settings.pushupsEnabled = false
+        objectiveSaveGeneration += 1
+        showSuccess("Pushups removed")
         
-        saveObjectiveToBackend(body: body) { success in
+        saveObjectiveToBackend(body: [
+            "pushups_enabled": false
+        ]) { success in
             DispatchQueue.main.async {
-                self.isSavingPushups = false
+                self.hasOptimisticUpdate = false
                 if success {
-                    self.settings.pushupsIsSet = false
-                    self.settings.pushupsEnabled = false
-                    self.showSuccess("Pushups removed")
-                    print("✅ Pushups unset successfully")
+                    print("✅ Pushups unset saved to backend")
                 } else {
-                    print("❌ Failed to unset pushups")
+                    self.settings.pushupsIsSet = true
+                    self.settings.pushupsEnabled = true
+                    self.objectiveSaveGeneration += 1
+                    self.showSuccess("Save failed — try again")
+                    print("❌ Failed to unset pushups — reverted")
                 }
             }
         }
     }
     
     private func setRun() {
-        isSavingRun = true
         print("🏃 Setting run: \(tempRunDistance) miles, userId: \(userId)")
         
-        let body: [String: Any] = [
+        hasOptimisticUpdate = true
+        settings.runIsSet = true
+        settings.runEnabled = true
+        settings.runDistance = tempRunDistance
+        objectiveSaveGeneration += 1
+        showSuccess("Run set!")
+        
+        saveObjectiveToBackend(body: [
             "run_distance": tempRunDistance,
             "run_enabled": true
-        ]
-        
-        saveObjectiveToBackend(body: body) { success in
+        ]) { success in
             DispatchQueue.main.async {
-                self.isSavingRun = false
+                self.hasOptimisticUpdate = false
                 if success {
-                    self.settings.runIsSet = true
-                    self.settings.runEnabled = true
-                    self.settings.runDistance = self.tempRunDistance
-                    self.showSuccess("Run set!")
                     self.onSave?()
-                    print("✅ Run set successfully")
+                    print("✅ Run saved to backend")
                 } else {
-                    print("❌ Failed to set run")
+                    self.settings.runIsSet = false
+                    self.settings.runEnabled = false
+                    self.objectiveSaveGeneration += 1
+                    self.showSuccess("Save failed — try again")
+                    print("❌ Failed to save run — reverted")
                 }
             }
         }
     }
     
     private func unsetRun() {
-        isSavingRun = true
         print("🏃 Unsetting run, userId: \(userId)")
         
-        let body: [String: Any] = [
-            "run_enabled": false
-        ]
+        hasOptimisticUpdate = true
+        settings.runIsSet = false
+        settings.runEnabled = false
+        objectiveSaveGeneration += 1
+        showSuccess("Run removed")
         
-        saveObjectiveToBackend(body: body) { success in
+        saveObjectiveToBackend(body: [
+            "run_enabled": false
+        ]) { success in
             DispatchQueue.main.async {
-                self.isSavingRun = false
+                self.hasOptimisticUpdate = false
                 if success {
-                    self.settings.runIsSet = false
-                    self.settings.runEnabled = false
-                    self.showSuccess("Run removed")
-                    print("✅ Run unset successfully")
+                    print("✅ Run unset saved to backend")
                 } else {
-                    print("❌ Failed to unset run")
+                    self.settings.runIsSet = true
+                    self.settings.runEnabled = true
+                    self.objectiveSaveGeneration += 1
+                    self.showSuccess("Save failed — try again")
+                    print("❌ Failed to unset run — reverted")
                 }
             }
         }
@@ -1800,39 +1820,47 @@ struct ObjectiveSettingsView: View {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             
             DispatchQueue.main.async {
-                print("📥 Loading objectives from backend...")
-                
-                // Load pushups
-                if let pushEnabled = json["pushups_enabled"] as? Bool {
-                    self.settings.pushupsIsSet = pushEnabled
-                    self.settings.pushupsEnabled = pushEnabled
-                    print("  - pushups_enabled: \(pushEnabled)")
-                }
-                if let pushCount = json["pushups_count"] as? Int, pushCount > 0 {
-                    self.tempPushupCount = pushCount
-                    if json["pushups_enabled"] == nil {
-                        // Legacy: if pushups_enabled doesn't exist but count > 0, assume set
-                        self.settings.pushupsIsSet = true
-                        self.settings.pushupsEnabled = true
+                // If the user just tapped Set/Unset (optimistic update), skip
+                // overwriting pushups/run state — the in-flight save hasn't
+                // reached the server yet, so this GET returns stale data.
+                if self.hasOptimisticUpdate {
+                    print("📥 Skipping backend load — optimistic update in progress")
+                    // Still load schedule (not affected by optimistic updates)
+                } else {
+                    print("📥 Loading objectives from backend...")
+                    
+                    // Load pushups
+                    if let pushEnabled = json["pushups_enabled"] as? Bool {
+                        self.settings.pushupsIsSet = pushEnabled
+                        self.settings.pushupsEnabled = pushEnabled
+                        print("  - pushups_enabled: \(pushEnabled)")
                     }
-                    print("  - pushups_count: \(pushCount)")
-                }
-                
-                // Load run
-                if let runEn = json["run_enabled"] as? Bool {
-                    self.settings.runIsSet = runEn
-                    self.settings.runEnabled = runEn
-                    print("  - run_enabled: \(runEn)")
-                }
-                if let runDist = json["run_distance"] as? Double, runDist > 0 {
-                    self.tempRunDistance = runDist
-                    self.settings.runDistance = runDist
-                    print("  - run_distance: \(runDist)")
-                }
-                
-                // Sync pushup objective to binding
-                if self.settings.pushupsIsSet {
-                    self.objective = self.tempPushupCount
+                    if let pushCount = json["pushups_count"] as? Int, pushCount > 0 {
+                        self.tempPushupCount = pushCount
+                        if json["pushups_enabled"] == nil {
+                            // Legacy: if pushups_enabled doesn't exist but count > 0, assume set
+                            self.settings.pushupsIsSet = true
+                            self.settings.pushupsEnabled = true
+                        }
+                        print("  - pushups_count: \(pushCount)")
+                    }
+                    
+                    // Load run
+                    if let runEn = json["run_enabled"] as? Bool {
+                        self.settings.runIsSet = runEn
+                        self.settings.runEnabled = runEn
+                        print("  - run_enabled: \(runEn)")
+                    }
+                    if let runDist = json["run_distance"] as? Double, runDist > 0 {
+                        self.tempRunDistance = runDist
+                        self.settings.runDistance = runDist
+                        print("  - run_distance: \(runDist)")
+                    }
+                    
+                    // Sync pushup objective to binding
+                    if self.settings.pushupsIsSet {
+                        self.objective = self.tempPushupCount
+                    }
                 }
                 
                 // Load schedule
@@ -1860,8 +1888,11 @@ struct ObjectiveSettingsView: View {
                 }
                 
                 // Collapse sections if set (better UX when data is loaded)
-                if self.settings.pushupsIsSet || self.settings.runIsSet {
-                    self.isObjectiveExpanded = false
+                // but NOT if we just did an optimistic update (user is actively editing)
+                if !self.hasOptimisticUpdate {
+                    if self.settings.pushupsIsSet || self.settings.runIsSet {
+                        self.isObjectiveExpanded = false
+                    }
                 }
                 if self.settings.scheduleIsSet {
                     self.isScheduleExpanded = false
@@ -3059,7 +3090,9 @@ struct ProfileView: View {
                             .background(Color.gray.opacity(0.25))
                             .cornerRadius(8)
                             
-                            Button(action: startDeposit) {
+                            // Deposit uses onTapGesture (not Button) to prevent Form button
+                            // tap bleed that was causing Withdraw to fire simultaneously
+                            HStack {
                                 if isProcessingDeposit {
                                     ProgressView()
                                         .scaleEffect(0.8)
@@ -3068,8 +3101,6 @@ struct ProfileView: View {
                                         .font(.system(.body, design: .rounded, weight: .medium))
                                 }
                             }
-                            .buttonStyle(.borderless)
-                            .disabled(depositAmount.isEmpty || isProcessingDeposit)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
                             .background(
@@ -3078,6 +3109,11 @@ struct ProfileView: View {
                             )
                             .foregroundStyle(.white)
                             .cornerRadius(8)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                guard !depositAmount.isEmpty, !isProcessingDeposit else { return }
+                                startDeposit()
+                            }
                         }
                         
                         // Withdraw - links to web portal (uses onTapGesture to avoid Form button tap bleed with Deposit)
@@ -3095,6 +3131,7 @@ struct ProfileView: View {
                                     .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
                             )
                             .cornerRadius(8)
+                            .contentShape(Rectangle())
                             .onTapGesture {
                                 if !isWithdrawLocked {
                                     if let url = URL(string: "https://live-eos.com/portal") {
