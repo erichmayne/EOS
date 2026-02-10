@@ -30,6 +30,13 @@ struct EOSApp: App {
                         .transition(.opacity)
                 }
             }
+            .onOpenURL { url in
+                // Handle Stripe payment redirects
+                let stripeHandled = StripeAPI.handleURLCallback(with: url)
+                if stripeHandled {
+                    print("✅ Stripe handled URL: \(url)")
+                }
+            }
         }
     }
 }

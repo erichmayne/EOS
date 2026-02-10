@@ -43,6 +43,20 @@ app.use(cors());
 app.use(express.json());
 
 // -----------------------------------------------------------------------------
+// Helper: Extract HH:MM from various time formats (TIME, TIMESTAMPTZ, string)
+// -----------------------------------------------------------------------------
+function parseDeadlineTime(deadline) {
+    if (!deadline) return "09:00";
+    const dl = String(deadline);
+    // Match HH:MM from formats like "07:00:00", "07:00:00-08:00", "2026-01-01T07:00:00Z"
+    const timeMatch = dl.match(/(\d{2}):(\d{2})/);
+    if (timeMatch) {
+        return `${timeMatch[1]}:${timeMatch[2]}`;
+    }
+    return "09:00";
+}
+
+// -----------------------------------------------------------------------------
 // Health check
 // -----------------------------------------------------------------------------
 app.get('/health', (req, res) => res.json({ ok: true }));
@@ -107,8 +121,8 @@ app.post('/create-payment-intent', async (req, res) => {
     try {
       ephemeralKey = await stripe.ephemeralKeys.create(
         { customer: customerId },
-        { apiVersion: '2023-10-16' }
-      );
+      { apiVersion: '2023-10-16' }
+    );
     } catch (ephemeralError) {
       // If customer doesn't exist (test mode customer in live mode), create new one
       if (ephemeralError.code === 'resource_missing') {
@@ -215,7 +229,7 @@ app.post("/users/profile", async (req, res) => {
       console.error("Supabase fetch user error:", fetchError);
       return res.status(500).json({ error: "Failed to load user.", detail: String(fetchError.message ?? fetchError) });
     }
-    
+
     // Block duplicate emails on account creation
     if (createOnly && existingUser) {
       return res.status(409).json({ error: "An account with this email already exists. Please sign in instead." });
@@ -1577,11 +1591,11 @@ app.get("/users/:userId/invites", async (req, res) => {
             seenRecipientIds.add(inv.recipient_id);
             
             // Get recipient info
-            const { data: r } = await supabase
-                .from("recipients")
+                const { data: r } = await supabase
+                    .from("recipients")
                 .select("id, name, email")
-                .eq("id", inv.recipient_id)
-                .single();
+                    .eq("id", inv.recipient_id)
+                    .single();
             
             if (r) {
                 const isSelected = r.id === selectedRecipientId;
@@ -1738,6 +1752,7 @@ app.get("/verify-invite/:code", async (req, res) => {
 // ========== OBJECTIVE CHECK & PAYOUT ENDPOINTS ==========
 
 // Check for missed objectives and trigger payouts
+// Supports multi-objective: ALL enabled objectives must be complete, or day fails
 app.post("/objectives/check-missed", async (req, res) => {
     try {
         // Helper: Get current time in user's timezone
@@ -1752,45 +1767,118 @@ app.post("/objectives/check-missed", async (req, res) => {
         
         const now = new Date();
         
-        // Find pending sessions where deadline has passed
-        // Note: We check ALL pending sessions and filter by timezone per-user
-        const { data: sessions, error: sessionsError } = await supabase
-            .from("objective_sessions")
-            .select("*, users!inner(id, email, balance_cents, missed_goal_payout, payout_destination, committed_destination, committed_recipient_id, custom_recipient_id, stripe_customer_id, timezone)")
-            .in("status", ["pending", "missed"])
-            .eq("payout_triggered", false);
+        // Get all users with enabled objectives and check deadline
+        const { data: usersWithObjectives, error: usersError } = await supabase
+            .from("users")
+            .select("id, email, balance_cents, missed_goal_payout, payout_destination, committed_destination, committed_recipient_id, custom_recipient_id, stripe_customer_id, timezone, objective_deadline")
+            .gt("missed_goal_payout", 0);
         
-        if (sessionsError) {
-            return res.status(400).json({ error: sessionsError.message });
+        if (usersError) {
+            return res.status(400).json({ error: usersError.message });
         }
         
         const results = [];
         
-        for (const session of sessions || []) {
-            const user = session.users;
+        for (const user of usersWithObjectives || []) {
             const userTimezone = user?.timezone || "America/New_York";
             const currentTime = getCurrentTimeInTimezone(userTimezone);
             const today = getTodayInTimezone(userTimezone);
+            const deadline = parseDeadlineTime(user.objective_deadline);
             
-            // Skip sessions older than 2 days (stale)
-            const sessionDate = new Date(session.session_date + "T00:00:00");
-            const now = new Date();
-            const daysDiff = (now - sessionDate) / (1000 * 60 * 60 * 24);
-            if (daysDiff > 2) continue;
-            
-            const deadline = (session.deadline || "09:00").slice(0, 5);
+            // Skip if deadline hasn't passed yet
             if (currentTime < deadline) continue;
             
-            // Check if completed
-            if (session.completed_count >= session.target_count) {
-                await supabase.from("objective_sessions").update({ status: "accepted" }).eq("id", session.id);
+            // Get user's enabled objectives from user_objectives table
+            const { data: enabledObjectives } = await supabase
+                .from("user_objectives")
+                .select("objective_type, target_value")
+                .eq("user_id", user.id)
+                .eq("enabled", true);
+            
+            // If no enabled objectives, skip
+            if (!enabledObjectives || enabledObjectives.length === 0) continue;
+            
+            // Get today's sessions for this user
+            const { data: todaySessions } = await supabase
+                .from("objective_sessions")
+                .select("objective_type, completed_count, target_count, status, payout_triggered")
+                .eq("user_id", user.id)
+                .eq("session_date", today);
+            
+            // Check if payout already triggered today (check BOTH sessions and transactions)
+            const alreadyTriggered = (todaySessions || []).some(s => s.payout_triggered);
+            if (alreadyTriggered) continue;
+            
+            // DOUBLE-CHECK: Also verify no transaction exists for today (prevents race conditions)
+            const { data: existingTx } = await supabase
+                .from("transactions")
+                .select("id")
+                .eq("user_id", user.id)
+                .eq("type", "payout")
+                .gte("created_at", today + "T00:00:00")
+                .lt("created_at", today + "T23:59:59")
+                .limit(1);
+            
+            if (existingTx && existingTx.length > 0) {
+                console.log(`⚠️ Skipping ${user.email} - payout already exists for ${today}`);
                 continue;
             }
             
-            const userBalance = user?.balance_cents || 0;
-            if (userBalance <= 0 || session.payout_amount <= 0) continue;
+            // Check if ALL enabled objectives are completed
+            const sessionMap = {};
+            (todaySessions || []).forEach(s => { sessionMap[s.objective_type] = s; });
             
-            const payoutAmountCents = Math.round(session.payout_amount * 100);
+            let allComplete = true;
+            let missedObjectives = [];
+            
+            for (const obj of enabledObjectives) {
+                const session = sessionMap[obj.objective_type];
+                const isComplete = session && session.completed_count >= session.target_count;
+                if (!isComplete) {
+                    allComplete = false;
+                    missedObjectives.push(obj.objective_type);
+                }
+            }
+            
+            // If all complete, mark sessions as accepted and continue
+            if (allComplete) {
+                for (const s of todaySessions || []) {
+                    if (s.status === "pending") {
+                        await supabase.from("objective_sessions").update({ status: "accepted" }).eq("user_id", user.id).eq("session_date", today).eq("objective_type", s.objective_type);
+                    }
+                }
+                continue;
+            }
+            
+            // MISSED: At least one objective not complete
+            console.log(`❌ User ${user.email} missed objectives: ${missedObjectives.join(", ")}`);
+            
+            // Use first session or create a tracking session
+            let session = todaySessions?.[0];
+            if (!session) {
+                // Create a session to track payout
+                const { data: newSession } = await supabase
+                    .from("objective_sessions")
+                    .insert({
+                        user_id: user.id,
+                        session_date: today,
+                        objective_type: missedObjectives[0],
+                        target_count: enabledObjectives[0].target_value,
+                        completed_count: 0,
+                        status: "pending",
+                        deadline: deadline,
+                        payout_amount: user.missed_goal_payout || 0
+                    })
+                    .select()
+                    .single();
+                session = newSession;
+            }
+            
+            const userBalance = user?.balance_cents || 0;
+            const payoutAmount = user?.missed_goal_payout || 0;
+            if (userBalance <= 0 || payoutAmount <= 0) continue;
+            
+            const payoutAmountCents = Math.round(payoutAmount * 100);
             const destination = user.committed_destination || user.payout_destination || "charity";
             const recipientId = user.committed_recipient_id || user.custom_recipient_id;
             
@@ -1901,15 +1989,15 @@ app.post("/objectives/check-missed", async (req, res) => {
             const { data: tx } = await supabase
                 .from("transactions")
                 .insert({
-                    user_id: session.user_id,
-                    payer_user_id: session.user_id,
+                    user_id: user.id,
+                    payer_user_id: user.id,
                     recipient_user_id: destination === "custom" ? recipientId : null,
                     type: "payout",
                     amount_cents: payoutAmountCents,
                     status: "completed",
                     description: destination === "charity" 
-                        ? "Missed objective - charity donation" 
-                        : "Missed objective payout",
+                        ? `Missed objective (${missedObjectives.join(", ")}) - charity donation` 
+                        : `Missed objective (${missedObjectives.join(", ")}) payout`,
                     stripe_payment_id: stripeTransferId
                 })
                 .select()
@@ -1922,19 +2010,22 @@ app.post("/objectives/check-missed", async (req, res) => {
                 balance_cents: newBalance, 
                 active_balance_cents: newBalance,
                 settings_locked_until: null  // Reset lock - user paid the price, gets fresh start
-            }).eq("id", session.user_id);
+            }).eq("id", user.id);
+            
+            // Mark all today's sessions as missed and payout triggered
             await supabase.from("objective_sessions").update({ 
                 status: "missed", 
                 payout_triggered: true,
                 payout_transaction_id: tx?.id 
-            }).eq("id", session.id);
+            }).eq("user_id", user.id).eq("session_date", today);
             
             console.log("🔓 Settings lock reset for user:", user.email, "- missed objective payout processed");
             
             results.push({
-                userId: session.user_id,
-                sessionId: session.id,
-                amount: session.payout_amount,
+                userId: user.id,
+                sessionId: session?.id,
+                missedObjectives: missedObjectives,
+                amount: payoutAmount,
                 destination: destination,
                 stripeTransferId: stripeTransferId,
                 newBalanceCents: newBalance,
@@ -2989,7 +3080,7 @@ app.post("/objectives/create-daily-sessions", async (req, res) => {
                     objective_type: user.objective_type || "pushups",
                     target_count: user.objective_count || 50,
                     completed_count: 0,
-                    deadline: user.objective_deadline || "09:00",
+                    deadline: parseDeadlineTime(user.objective_deadline),
                     status: "pending",
                     payout_amount: user.missed_goal_payout || 0
                 })
@@ -3040,19 +3131,55 @@ app.get("/objectives/today/:userId", async (req, res) => {
 app.post("/objectives/complete/:userId", async (req, res) => {
     try {
         const { userId } = req.params;
-        const { completedCount } = req.body;
+        const { completedCount, objectiveType = "pushups" } = req.body; // Default to pushups for backwards compat
         const today = new Date().toISOString().slice(0, 10);
         
-        // Get today session
-        const { data: session, error: getError } = await supabase
+        // Get today's session for this objective type
+        let { data: session, error: getError } = await supabase
             .from("objective_sessions")
             .select("*")
             .eq("user_id", userId)
             .eq("session_date", today)
+            .eq("objective_type", objectiveType)
             .single();
         
+        // If no session for this type, try to create one
         if (getError && getError.code === "PGRST116") {
-            return res.status(404).json({ error: "No session found for today" });
+            // Get user's objective settings
+            const { data: objective } = await supabase
+                .from("user_objectives")
+                .select("target_value")
+                .eq("user_id", userId)
+                .eq("objective_type", objectiveType)
+                .eq("enabled", true)
+                .single();
+            
+            const { data: user } = await supabase
+                .from("users")
+                .select("objective_deadline, missed_goal_payout")
+                .eq("id", userId)
+                .single();
+            
+            if (objective) {
+                // Create session
+                const { data: newSession } = await supabase
+                    .from("objective_sessions")
+                    .insert({
+                        user_id: userId,
+                        session_date: today,
+                        objective_type: objectiveType,
+                        target_count: objective.target_value,
+                        completed_count: 0,
+                        deadline: parseDeadlineTime(user?.objective_deadline),
+                        status: "pending",
+                        payout_amount: user?.missed_goal_payout || 0
+                    })
+                    .select()
+                    .single();
+                session = newSession;
+            } else {
+                return res.status(404).json({ error: `No enabled ${objectiveType} objective found` });
+            }
         }
         
         // Check if already completed
@@ -3069,7 +3196,6 @@ app.post("/objectives/complete/:userId", async (req, res) => {
             .update({
                 completed_count: newCount,
                 status: isComplete ? "completed" : "pending",
-                
             })
             .eq("id", session.id)
             .select()
@@ -3079,9 +3205,12 @@ app.post("/objectives/complete/:userId", async (req, res) => {
             return res.status(400).json({ error: updateError.message });
         }
         
+        console.log(`✅ ${objectiveType} progress: ${newCount}/${session.target_count} for user ${userId}`);
+        
         res.json({ 
             success: true, 
             completed: isComplete,
+            objectiveType: objectiveType,
             session: updated 
         });
         
@@ -3128,7 +3257,7 @@ app.post("/objectives/midnight-reset", async (req, res) => {
                         objective_type: user.objective_type || "pushups",
                         target_count: user.objective_count || 50,
                         completed_count: 0,
-                        deadline: user.objective_deadline || "09:00",
+                        deadline: parseDeadlineTime(user.objective_deadline),
                         status: "pending",
                         payout_amount: user.missed_goal_payout || 0
                     })
@@ -3182,6 +3311,46 @@ app.post("/signin", async (req, res) => {
             return res.status(401).json({ error: "Invalid email or password." });
         }
 
+        // Fetch user's objectives from user_objectives table
+        const { data: userObjectives } = await supabase
+            .from("user_objectives")
+            .select("objective_type, target_value, enabled")
+            .eq("user_id", user.id);
+
+        // Build objectives map
+        const objectivesMap = {};
+        if (userObjectives) {
+            userObjectives.forEach(obj => {
+                objectivesMap[obj.objective_type] = {
+                    target: obj.target_value,
+                    enabled: obj.enabled
+                };
+            });
+        }
+
+        // Fetch today's session progress
+        const today = new Date().toISOString().split("T")[0];
+        const { data: todaySessions } = await supabase
+            .from("objective_sessions")
+            .select("objective_type, completed_count, target_count, status")
+            .eq("user_id", user.id)
+            .eq("session_date", today);
+
+        // Build today's progress
+        let todayProgress = {};
+        if (todaySessions && todaySessions.length > 0) {
+            todaySessions.forEach(session => {
+                todayProgress[session.objective_type] = {
+                    completed: session.completed_count,
+                    target: session.target_count,
+                    status: session.status
+                };
+            });
+        }
+
+        // Check if Strava is connected
+        const stravaConnected = !!user.strava_connection_id;
+
         // Return full user data
         res.json({
             message: "Sign-in successful",
@@ -3191,16 +3360,32 @@ app.post("/signin", async (req, res) => {
                 email: user.email,
                 phone: user.phone,
                 balance_cents: user.balance_cents,
-                objective_type: user.objective_type,
+                timezone: user.timezone,
+                // Objective settings
+                objective_type: user.objective_type || "pushups",
                 objective_count: user.objective_count,
-                objective_schedule: user.objective_schedule,
-                objective_deadline: user.objective_deadline,
+                objective_schedule: user.objective_schedule || "daily",
+                objective_deadline: parseDeadlineTime(user.objective_deadline),
+                // Multi-objective support
+                pushups_enabled: objectivesMap.pushups?.enabled ?? (user.objective_count > 0),
+                pushups_count: objectivesMap.pushups?.target ?? user.objective_count ?? 50,
+                run_enabled: objectivesMap.run?.enabled ?? false,
+                run_distance: objectivesMap.run?.target ?? 2.0,
+                // Strava
+                strava_connected: stravaConnected,
+                strava_connection_id: user.strava_connection_id,
+                // Payout settings
                 missed_goal_payout: user.missed_goal_payout,
                 payout_destination: user.payout_destination,
                 payout_committed: user.payout_committed,
                 destination_committed: user.destination_committed,
                 committed_destination: user.committed_destination,
                 custom_recipient_id: user.custom_recipient_id,
+                // Lock status
+                settings_locked_until: user.settings_locked_until,
+                // Today's progress
+                today_progress: todayProgress,
+                // Stripe
                 stripe_customer_id: user.stripe_customer_id
             }
         });
@@ -3312,11 +3497,125 @@ app.get("/users/:userId/settings-lock", async (req, res) => {
 // -----------------------------------------------------------------------------
 // Objective Settings - Update user objective configuration
 // -----------------------------------------------------------------------------
+// GET objectives settings (using normalized user_objectives table)
+app.get("/objectives/settings/:userId", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Get user settings (including legacy fields for fallback)
+        const { data: user, error: userError } = await supabase
+            .from("users")
+            .select("objective_schedule, objective_deadline, missed_goal_payout, timezone, settings_locked_until, objective_count, objective_type")
+            .eq("id", userId)
+            .single();
+        
+        if (userError) {
+            console.error("Get user error:", userError);
+            return res.status(400).json({ error: userError.message });
+        }
+        
+        // Try to get objectives from new user_objectives table
+        let objectives = [];
+        try {
+            const { data: objData, error: objError } = await supabase
+                .from("user_objectives")
+                .select("objective_type, target_value, enabled")
+                .eq("user_id", userId);
+            
+            if (!objError && objData) {
+                objectives = objData;
+            }
+        } catch (e) {
+            // Table might not exist yet, that's ok - use legacy fallback
+            console.log("user_objectives table not available, using legacy fallback");
+        }
+        
+        // Build response with objectives array + individual flags for backwards compat
+        const objMap = {};
+        (objectives || []).forEach(obj => {
+            objMap[obj.objective_type] = { target: obj.target_value, enabled: obj.enabled };
+        });
+        
+        // LEGACY FALLBACK: If no objectives in new table, check old users.objective_count
+        let pushupsEnabled = objMap.pushups?.enabled ?? false;
+        let pushupsCount = objMap.pushups?.target ?? 50;
+        
+        if (!pushupsEnabled && user.objective_count && user.objective_count > 0) {
+            // User has legacy objective data - treat as enabled
+            pushupsEnabled = true;
+            pushupsCount = user.objective_count;
+            console.log(`Legacy fallback: user ${userId} has objective_count=${user.objective_count}`);
+        }
+        
+        res.json({
+            // New format: objectives array
+            objectives: objectives || [],
+            // Backwards compatible format (with legacy fallback)
+            pushups_enabled: pushupsEnabled,
+            pushups_count: pushupsCount,
+            run_enabled: objMap.run?.enabled ?? false,
+            run_distance: objMap.run?.target ?? 2.0,
+            // Schedule settings (still on users table)
+            objective_schedule: user.objective_schedule ?? "daily",
+            objective_deadline: user.objective_deadline ?? "09:00",
+            missed_goal_payout: user.missed_goal_payout ?? 0,
+            timezone: user.timezone,
+            settings_locked_until: user.settings_locked_until
+        });
+    } catch (error) {
+        console.error("Error getting settings:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.post("/objectives/settings/:userId", async (req, res) => {
     try {
         const { userId } = req.params;
-        const { objective_type, objective_count, objective_schedule, objective_deadline, missed_goal_payout, timezone, settings_locked_until } = req.body;
+        const { 
+            // New multi-objective fields (using user_objectives table)
+            pushups_enabled, pushups_count, run_enabled, run_distance,
+            // Legacy fields (still supported on users table)
+            objective_type, objective_count, 
+            objective_schedule, objective_deadline, 
+            missed_goal_payout, timezone, settings_locked_until 
+        } = req.body;
         
+        // Handle objective upserts to user_objectives table
+        if (typeof pushups_enabled === "boolean" || typeof pushups_count === "number") {
+            const targetValue = pushups_count ?? 50;
+            const enabled = pushups_enabled ?? true;
+            
+            await supabase
+                .from("user_objectives")
+                .upsert({
+                    user_id: userId,
+                    objective_type: "pushups",
+                    target_value: targetValue,
+                    enabled: enabled,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: "user_id,objective_type" });
+            
+            console.log(`Pushups ${enabled ? "enabled" : "disabled"}: ${targetValue} for user ${userId}`);
+        }
+        
+        if (typeof run_enabled === "boolean" || typeof run_distance === "number") {
+            const targetValue = run_distance ?? 2.0;
+            const enabled = run_enabled ?? true;
+            
+            await supabase
+                .from("user_objectives")
+                .upsert({
+                    user_id: userId,
+                    objective_type: "run",
+                    target_value: targetValue,
+                    enabled: enabled,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: "user_id,objective_type" });
+            
+            console.log(`Run ${enabled ? "enabled" : "disabled"}: ${targetValue} mi for user ${userId}`);
+        }
+        
+        // Update user table for schedule/deadline/payout settings
         const updateData = {};
         if (objective_type) updateData.objective_type = objective_type;
         if (objective_count) updateData.objective_count = objective_count;
@@ -3327,7 +3626,10 @@ app.post("/objectives/settings/:userId", async (req, res) => {
             if (missed_goal_payout > 0) updateData.payout_committed = true; 
         }
         if (timezone) updateData.timezone = timezone;
-        if (settings_locked_until) updateData.settings_locked_until = settings_locked_until;
+        // Handle settings_locked_until - allow null to clear the lock
+        if ('settings_locked_until' in req.body) {
+            updateData.settings_locked_until = settings_locked_until;  // Can be null to clear
+        }
         
         // 1. Update user settings
         const { data: userData, error: userError } = await supabase
@@ -3415,22 +3717,10 @@ app.post("/objectives/ensure-session/:userId", async (req, res) => {
         const { userId } = req.params;
         const today = new Date().toISOString().slice(0, 10);
         
-        // Check if session exists
-        const { data: existing } = await supabase
-            .from("objective_sessions")
-            .select("*")
-            .eq("user_id", userId)
-            .eq("session_date", today)
-            .limit(1);
-        
-        if (existing && existing.length > 0) {
-            return res.json({ session: existing[0], created: false });
-        }
-        
         // Get user settings
         const { data: user, error: userError } = await supabase
             .from("users")
-            .select("objective_type, objective_count, objective_deadline, missed_goal_payout, payout_committed")
+            .select("objective_deadline, missed_goal_payout")
             .eq("id", userId)
             .single();
         
@@ -3438,27 +3728,61 @@ app.post("/objectives/ensure-session/:userId", async (req, res) => {
             return res.status(404).json({ error: "User not found" });
         }
         
-        // Create new session
-        const { data: session, error: sessionError } = await supabase
-            .from("objective_sessions")
-            .insert({
-                user_id: userId,
-                session_date: today,
-                objective_type: user.objective_type || "pushups",
-                target_count: user.objective_count || 50,
-                completed_count: 0,
-                deadline: user.objective_deadline || "09:00",
-                status: "pending",
-                payout_amount: user.missed_goal_payout || 0
-            })
-            .select()
-            .single();
+        // Get enabled objectives from user_objectives table
+        const { data: enabledObjectives } = await supabase
+            .from("user_objectives")
+            .select("objective_type, target_value")
+            .eq("user_id", userId)
+            .eq("enabled", true);
         
-        if (sessionError) {
-            return res.status(400).json({ error: sessionError.message });
+        if (!enabledObjectives || enabledObjectives.length === 0) {
+            return res.json({ sessions: [], created: false, message: "No enabled objectives" });
         }
         
-        res.json({ session, created: true });
+        // Check existing sessions for today
+        const { data: existingSessions } = await supabase
+            .from("objective_sessions")
+            .select("*")
+            .eq("user_id", userId)
+            .eq("session_date", today);
+        
+        const existingTypes = new Set((existingSessions || []).map(s => s.objective_type));
+        const sessionsToCreate = [];
+        
+        // Create sessions for objectives that don't have one yet
+        for (const obj of enabledObjectives) {
+            if (!existingTypes.has(obj.objective_type)) {
+                sessionsToCreate.push({
+                user_id: userId,
+                session_date: today,
+                objective_type: obj.objective_type,
+                target_count: obj.target_value,
+                completed_count: 0,
+                deadline: parseDeadlineTime(user.objective_deadline),
+                status: "pending",
+                payout_amount: user.missed_goal_payout || 0
+                });
+            }
+        }
+        
+        let newSessions = [];
+        if (sessionsToCreate.length > 0) {
+            const { data: created, error: createError } = await supabase
+                .from("objective_sessions")
+                .insert(sessionsToCreate)
+                .select();
+            
+            if (createError) {
+                console.error("Session create error:", createError);
+            }
+            newSessions = created || [];
+        }
+        
+        res.json({ 
+            sessions: [...(existingSessions || []), ...newSessions], 
+            created: newSessions.length > 0,
+            newCount: newSessions.length
+        });
         
     } catch (error) {
         res.status(500).json({ error: error.message });

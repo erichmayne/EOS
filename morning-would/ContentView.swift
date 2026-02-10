@@ -5,9 +5,64 @@ import StripePaymentSheet
 import ContactsUI
 import Combine
 
+// MARK: - Shared Objective Settings (Observable)
+
+/// Shared state for objective settings that syncs with UserDefaults
+/// Used by ContentView and ObjectiveSettingsView to ensure immediate UI updates
+class ObjectiveSettings: ObservableObject {
+    private let defaults = UserDefaults.standard
+    
+    @Published var pushupsEnabled: Bool {
+        didSet { defaults.set(pushupsEnabled, forKey: "pushupsEnabled") }
+    }
+    @Published var pushupsIsSet: Bool {
+        didSet { defaults.set(pushupsIsSet, forKey: "pushupsIsSet") }
+    }
+    @Published var runEnabled: Bool {
+        didSet { defaults.set(runEnabled, forKey: "runEnabled") }
+    }
+    @Published var runIsSet: Bool {
+        didSet { defaults.set(runIsSet, forKey: "runIsSet") }
+    }
+    @Published var runDistance: Double {
+        didSet { defaults.set(runDistance, forKey: "runDistance") }
+    }
+    @Published var scheduleIsSet: Bool {
+        didSet { defaults.set(scheduleIsSet, forKey: "scheduleIsSet") }
+    }
+    
+    init() {
+        // Load from UserDefaults with sensible defaults
+        // Note: bool(forKey:) returns false if key doesn't exist, so we check object(forKey:) first
+        self.pushupsEnabled = defaults.object(forKey: "pushupsEnabled") != nil 
+            ? defaults.bool(forKey: "pushupsEnabled") : true
+        self.pushupsIsSet = defaults.bool(forKey: "pushupsIsSet")
+        self.runEnabled = defaults.bool(forKey: "runEnabled")
+        self.runIsSet = defaults.bool(forKey: "runIsSet")
+        self.runDistance = defaults.object(forKey: "runDistance") != nil 
+            ? defaults.double(forKey: "runDistance") : 2.0
+        self.scheduleIsSet = defaults.bool(forKey: "scheduleIsSet")
+    }
+    
+    /// Refresh all values from UserDefaults (call after external updates like sign-in)
+    func refreshFromDefaults() {
+        pushupsEnabled = defaults.object(forKey: "pushupsEnabled") != nil 
+            ? defaults.bool(forKey: "pushupsEnabled") : true
+        pushupsIsSet = defaults.bool(forKey: "pushupsIsSet")
+        runEnabled = defaults.bool(forKey: "runEnabled")
+        runIsSet = defaults.bool(forKey: "runIsSet")
+        runDistance = defaults.object(forKey: "runDistance") != nil 
+            ? defaults.double(forKey: "runDistance") : 2.0
+        scheduleIsSet = defaults.bool(forKey: "scheduleIsSet")
+    }
+}
+
 // MARK: - Main content view
 
 struct ContentView: View {
+    // Shared objective settings (observable for immediate UI updates)
+    @StateObject private var objectiveSettings = ObjectiveSettings()
+    
     @AppStorage("hasCompletedTodayPushUps") private var hasCompletedTodayPushUps: Bool = false
     @AppStorage("todayPushUpCount") private var todayPushUpCount: Int = 0
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
@@ -21,6 +76,10 @@ struct ContentView: View {
     @AppStorage("profileEmail") private var profileEmail: String = ""
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
     @AppStorage("userId") private var userId: String = ""
+    
+    // Today's progress tracking
+    @AppStorage("todayRunDistance") private var todayRunDistance: Double = 0.0
+    @AppStorage("hasCompletedTodayRun") private var hasCompletedTodayRun: Bool = false
 
     @State private var showObjectiveSettings = false
     @State private var showProfileView = false
@@ -31,6 +90,28 @@ struct ContentView: View {
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private let notificationManager = NotificationManager()
+    
+    // Computed: Check if any objective is enabled
+    private var hasAnyObjective: Bool {
+        objectiveSettings.pushupsEnabled || objectiveSettings.runEnabled
+    }
+    
+    // Computed: Check if pushup objective met
+    private var pushupObjectiveMet: Bool {
+        todayPushUpCount >= pushupObjective
+    }
+    
+    // Computed: Check if run objective met
+    private var runObjectiveMet: Bool {
+        todayRunDistance >= objectiveSettings.runDistance
+    }
+    
+    // Computed: Are ALL enabled objectives met?
+    private var allObjectivesMet: Bool {
+        let pushupsMet = !objectiveSettings.pushupsEnabled || pushupObjectiveMet
+        let runMet = !objectiveSettings.runEnabled || runObjectiveMet
+        return pushupsMet && runMet
+    }
 
     var isWeekend: Bool {
         let weekday = Calendar.current.component(.weekday, from: Date())
@@ -45,14 +126,27 @@ struct ContentView: View {
     }
 
     var objectiveMet: Bool {
-        todayPushUpCount >= pushupObjective
+        allObjectivesMet
+    }
+    
+    // Header text based on what's enabled
+    private var goalsHeaderText: String {
+        if objectiveSettings.pushupsEnabled && objectiveSettings.runEnabled {
+            return "Today's Goals"
+        } else if objectiveSettings.pushupsEnabled {
+            return "Today's Goal: \(pushupObjective) Pushups"
+        } else if objectiveSettings.runEnabled {
+            return "Today's Goal: \(String(format: "%.1f", objectiveSettings.runDistance)) Mile Run"
+        } else {
+            return "Today's Goals"
+        }
     }
 
     var timeUntilDeadline: String {
         if !shouldShowObjective {
             return "No objective today"
         }
-        
+
         // Check if objective is already met
         if objectiveMet {
             return "✓ Completed"
@@ -111,17 +205,75 @@ struct ContentView: View {
                         .padding(.top, 30)
 
                     VStack(spacing: 20) {
-                        VStack(spacing: 16) {
-                            Text("Today's Goal: \(pushupObjective) Pushups")
+                        // Goals Header
+                        Text(goalsHeaderText)
                                 .font(.system(.title3, design: .rounded, weight: .medium))
                                 .foregroundStyle(Color.black)
+                            .padding(.horizontal)
 
+                        // Objectives Card(s)
                             ZStack {
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                                     .fill(Color.white)
                                     .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
 
-                                VStack(spacing: 20) {
+                            VStack(spacing: 16) {
+                                // Show both objectives or single based on what's enabled
+                                if objectiveSettings.pushupsEnabled && objectiveSettings.runEnabled {
+                                    // BOTH objectives enabled - split view
+                                    HStack(spacing: 20) {
+                                        // Pushups column
+                                        VStack(spacing: 8) {
+                                            Image(systemName: "figure.strengthtraining.traditional")
+                                                .font(.title2)
+                                                .foregroundStyle(pushupObjectiveMet ? Color.green : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                                                Text("\(todayPushUpCount)")
+                                                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                                                    .foregroundStyle(Color.black)
+                                                Text("/\(pushupObjective)")
+                                                    .font(.system(size: 18, weight: .light, design: .rounded))
+                                                    .foregroundStyle(Color.black.opacity(0.4))
+                                            }
+                                            Text("pushups")
+                                                .font(.system(.caption, design: .rounded))
+                                                .foregroundStyle(Color.black.opacity(0.5))
+                                            Circle()
+                                                .fill(pushupObjectiveMet ? Color.green : Color.red.opacity(0.6))
+                                                .frame(width: 8, height: 8)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        
+                                        // Divider
+                                        Rectangle()
+                                            .fill(Color.gray.opacity(0.2))
+                                            .frame(width: 1, height: 80)
+                                        
+                                        // Run column
+                                        VStack(spacing: 8) {
+                                            Image(systemName: "figure.run")
+                                                .font(.title2)
+                                                .foregroundStyle(runObjectiveMet ? Color.green : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                            HStack(alignment: .lastTextBaseline, spacing: 2) {
+                                                Text(String(format: "%.1f", todayRunDistance))
+                                                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                                                    .foregroundStyle(Color.black)
+                                                Text(String(format: "/%.1f", objectiveSettings.runDistance))
+                                                    .font(.system(size: 18, weight: .light, design: .rounded))
+                                                    .foregroundStyle(Color.black.opacity(0.4))
+                                            }
+                                            Text("miles")
+                                                .font(.system(.caption, design: .rounded))
+                                                .foregroundStyle(Color.black.opacity(0.5))
+                                            Circle()
+                                                .fill(runObjectiveMet ? Color.green : Color.red.opacity(0.6))
+                                                .frame(width: 8, height: 8)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .padding(.top, 8)
+                                } else if objectiveSettings.pushupsEnabled {
+                                    // Only pushups
                                     HStack {
                                         Text("\(todayPushUpCount)")
                                             .font(.system(size: 72, weight: .bold, design: .rounded))
@@ -130,48 +282,75 @@ struct ContentView: View {
                                             .font(.system(size: 36, weight: .light, design: .rounded))
                                             .foregroundStyle(Color.black.opacity(0.4))
                                     }
+                                } else if objectiveSettings.runEnabled {
+                                    // Only run
+                                    HStack {
+                                        Text(String(format: "%.1f", todayRunDistance))
+                                            .font(.system(size: 72, weight: .bold, design: .rounded))
+                                            .foregroundStyle(Color.black)
+                                        Text(String(format: "/ %.1f mi", objectiveSettings.runDistance))
+                                            .font(.system(size: 36, weight: .light, design: .rounded))
+                                            .foregroundStyle(Color.black.opacity(0.4))
+                                    }
+                                } else {
+                                    // No objectives set
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "target")
+                                            .font(.largeTitle)
+                                            .foregroundStyle(Color.gray)
+                                        Text("No objectives set")
+                                            .font(.system(.headline, design: .rounded))
+                                            .foregroundStyle(Color.gray)
+                                        Text("Tap 'My Objective' to get started")
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(Color.gray.opacity(0.7))
+                                    }
+                                    .padding(.vertical, 20)
+                                }
 
-                                    if shouldShowObjective {
+                                // Status indicator (when objectives exist)
+                                if shouldShowObjective && hasAnyObjective {
                                         HStack {
                                             Circle()
-                                                .fill(objectiveMet ? Color.green : Color.red.opacity(0.8))
+                                            .fill(allObjectivesMet ? Color.green : Color.red.opacity(0.8))
                                                 .frame(width: 10, height: 10)
-                                            Text(objectiveMet ? "Objective met" : "Objective not met")
+                                        Text(allObjectivesMet ? "All objectives met" : "Objectives not met")
                                                 .font(.system(.subheadline, design: .rounded))
-                                                .foregroundStyle(objectiveMet ? Color.green : Color.red.opacity(0.8))
+                                            .foregroundStyle(allObjectivesMet ? Color.green : Color.red.opacity(0.8))
                                         }
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 8)
                                         .background(
                                             RoundedRectangle(cornerRadius: 20)
-                                                .fill((objectiveMet ? Color.green : Color.red).opacity(0.1))
-                                        )
-                                    }
+                                            .fill((allObjectivesMet ? Color.green : Color.red).opacity(0.1))
+                                    )
+                                }
 
-                                    // Timer always shows - displays "No objective today" for weekends when on Weekdays schedule
-                                    VStack(spacing: 4) {
-                                        Text(timeUntilDeadline)
-                                            .font(.system(.title3, design: .rounded, weight: .semibold))
-                                            .foregroundStyle(
-                                                !shouldShowObjective ? Color.gray :
-                                                (objectiveMet ? Color.green :
-                                                (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
-                                                Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
-                                            )
-                                        if shouldShowObjective {
-                                            let deadline = combineDateWithTodayTime(objectiveDeadline)
-                                            Text("Deadline: \(deadline, style: .time)")
-                                                .font(.system(.caption, design: .rounded))
-                                                .foregroundStyle(Color.black.opacity(0.5))
-                                        }
+                                // Timer section
+                                VStack(spacing: 4) {
+                                    Text(timeUntilDeadline)
+                                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                                        .foregroundStyle(
+                                            !shouldShowObjective ? Color.gray :
+                                            (allObjectivesMet ? Color.green :
+                                            (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
+                                            Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
+                                        )
+                                    if shouldShowObjective && hasAnyObjective {
+                                        let deadline = combineDateWithTodayTime(objectiveDeadline)
+                                        Text("Deadline: \(deadline, style: .time)")
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(Color.black.opacity(0.5))
                                     }
                                 }
-                                .padding(30)
                             }
-                            .frame(maxWidth: 350)
+                            .padding(24)
                         }
+                        .frame(maxWidth: 350)
                         .padding(.horizontal)
 
+                        // Action button - show pushup session if pushups enabled
+                        if objectiveSettings.pushupsEnabled {
                         Button(action: {
                             showPushUpSession = true
                         }) {
@@ -198,6 +377,7 @@ struct ContentView: View {
                                     )
                             )
                             .shadow(color: Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.3)), radius: 10, x: 0, y: 5)
+                            }
                         }
 
                         HStack(spacing: 15) {
@@ -258,6 +438,7 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showObjectiveSettings) {
                 ObjectiveSettingsView(
+                    settings: objectiveSettings,
                     objective: $pushupObjective,
                     deadline: $objectiveDeadline,
                     scheduleType: $scheduleType,
@@ -306,24 +487,65 @@ struct ContentView: View {
     }
     
     private func syncLockStateFromServer() {
-        guard !userId.isEmpty else { return }
+        guard !userId.isEmpty else { 
+            print("⚠️ syncLockState: No userId, skipping")
+            return 
+        }
         
-        guard let url = URL(string: "https://api.live-eos.com/users/\(userId)/settings-lock") else { return }
+        guard let url = URL(string: "https://api.live-eos.com/users/\(userId)/settings-lock") else { 
+            print("❌ syncLockState: Invalid URL")
+            return 
+        }
+        
+        print("🔄 Syncing lock state from server for user: \(userId)")
         
         URLSession.shared.dataTask(with: url) { data, response, error in
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            if let error = error {
+                print("❌ syncLockState error: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌ syncLockState: No HTTP response")
+                return
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                print("❌ syncLockState: HTTP \(httpResponse.statusCode)")
+                return
+            }
+            
+            guard let data = data else {
+                print("❌ syncLockState: No data")
+                return
+            }
+            
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                print("❌ syncLockState: JSON parse failed")
                 return
             }
             
             DispatchQueue.main.async {
-                if let lockDateStr = json["settings_locked_until"] as? String {
+                if let lockDateStr = json["settings_locked_until"] as? String, !lockDateStr.isEmpty {
                     let isoFormatter = ISO8601DateFormatter()
+                    isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    
                     if let lockDate = isoFormatter.date(from: lockDateStr) {
+                        print("🔒 Lock synced: \(lockDate)")
                         self.settingsLockedUntil = lockDate
+                    } else {
+                        // Try without fractional seconds
+                        isoFormatter.formatOptions = [.withInternetDateTime]
+                        if let lockDate = isoFormatter.date(from: lockDateStr) {
+                            print("🔒 Lock synced: \(lockDate)")
+                            self.settingsLockedUntil = lockDate
+                        } else {
+                            print("⚠️ Could not parse lock date: \(lockDateStr)")
+                        }
                     }
                 } else {
                     // No lock date or null means unlocked
+                    print("🔓 Lock cleared (server returned null)")
                     self.settingsLockedUntil = Date.distantPast
                 }
             }
@@ -344,7 +566,11 @@ struct ContentView: View {
         let isoFormatter = ISO8601DateFormatter()
         let lockDateString = settingsLockedUntil > Date.distantPast ? isoFormatter.string(from: settingsLockedUntil) : nil
         
+        // Get objective type from storage
+        let objType = UserDefaults.standard.string(forKey: "objectiveType") ?? "pushups"
+        
         var body: [String: Any] = [
+            "objective_type": objType,
             "objective_count": pushupObjective,
             "objective_schedule": scheduleType.lowercased(),
             "objective_deadline": deadlineString
@@ -367,7 +593,7 @@ struct ContentView: View {
                 return
             }
             if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                print("✅ Objectives synced to backend")
+                print("✅ Objectives synced to backend (type: \(objType))")
             }
         }.resume()
     }
@@ -533,7 +759,10 @@ struct PushUpSessionView: View {
             return
         }
         
-        let body: [String: Any] = ["completedCount": count]
+        let body: [String: Any] = [
+            "completedCount": count,
+            "objectiveType": "pushups"  // Multi-objective support
+        ]
         
         guard let url = URL(string: "https://api.live-eos.com/objectives/complete/\(userId)") else {
             print("⚠️ Invalid URL for pushup sync")
@@ -565,19 +794,50 @@ struct PushUpSessionView: View {
 // MARK: - Objective settings view
 
 struct ObjectiveSettingsView: View {
+    // Shared settings (observable - changes here immediately update ContentView)
+    @ObservedObject var settings: ObjectiveSettings
+    
     @Binding var objective: Int
     @Binding var deadline: Date
     @Binding var scheduleType: String
     @Binding var settingsLockedUntil: Date
     var onSave: (() -> Void)? = nil  // Callback to sync to backend
     @Environment(\.dismiss) private var dismiss
-    @State private var tempObjective: Int = 10
+    
+    // Temp editing states - use @AppStorage to persist between view opens
+    @AppStorage("tempPushupCount") private var tempPushupCount: Int = 50
+    @AppStorage("tempRunDistance") private var tempRunDistance: Double = 2.0
+    @AppStorage("tempScheduleType") private var tempScheduleType: String = "Daily"
     @State private var tempDeadline: Date = Date()
-    @State private var tempScheduleType: String = "Daily"
     @State private var lockDays: Double = 7
+    
+    // Track if we've initialized from bindings
+    @State private var hasInitializedFromBindings: Bool = false
+    
+    // Dropdown expansion states
+    @State private var isObjectiveExpanded: Bool = true
+    @State private var isScheduleExpanded: Bool = true
+    @State private var isLockExpanded: Bool = false
+    
+    // Saving states
+    @State private var isSavingPushups: Bool = false
+    @State private var isSavingRun: Bool = false
+    @State private var isSavingSchedule: Bool = false
+    
+    // Alerts
     @State private var showLockConfirmation: Bool = false
+    @State private var showStravaRequiredAlert: Bool = false
+    
+    // Success feedback
+    @State private var showSuccessBanner: Bool = false
+    @State private var successMessage: String = "Saved!"
+    
+    // Strava connection check
+    @AppStorage("stravaConnected") private var stravaConnected: Bool = false
+    @AppStorage("userId") private var userId: String = ""
 
     private let notificationManager = NotificationManager()
+    private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     
     var isLocked: Bool {
         settingsLockedUntil > Date()
@@ -588,10 +848,505 @@ struct ObjectiveSettingsView: View {
         return max(0, Int(ceil(interval / 86400)))
     }
     
+    var lockTimeRemaining: String {
+        let interval = settingsLockedUntil.timeIntervalSince(Date())
+        if interval <= 0 { return "Unlocked" }
+        
+        let hours = Int(interval / 3600)
+        let minutes = Int((interval.truncatingRemainder(dividingBy: 3600)) / 60)
+        
+        if hours >= 24 {
+            let days = Int(ceil(interval / 86400))
+            return "\(days) day\(days == 1 ? "" : "s") left"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m left"
+        } else {
+            return "\(minutes)m left"
+        }
+    }
+    
     var formattedDeadlineTime: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         return formatter.string(from: tempDeadline)
+    }
+    
+    var objectiveSummary: String {
+        var parts: [String] = []
+        if settings.pushupsIsSet {
+            parts.append("\(tempPushupCount) pushups")
+        }
+        if settings.runIsSet {
+            parts.append(String(format: "%.1f mi", tempRunDistance))
+        }
+        if parts.isEmpty {
+            return "Not Set"
+        }
+        return parts.joined(separator: " + ")
+    }
+    
+    var hasAnyObjectiveSet: Bool {
+        settings.pushupsIsSet || settings.runIsSet
+    }
+    
+    var scheduleSummary: String {
+        let scheduleText = tempScheduleType == "Daily" ? "Daily" : "Weekdays"
+        return "\(scheduleText) @ \(formattedDeadlineTime)"
+    }
+    
+    // MARK: - Extracted Subviews (fixes compiler type-check timeout)
+    
+    @ViewBuilder
+    private var pushupsRowView: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 18))
+                    .foregroundStyle(goldColor)
+                Text("Pushups")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(Color.black)
+                Spacer()
+                if settings.pushupsIsSet {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                        .font(.caption)
+                }
+            }
+            
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Target")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                    
+                    Menu {
+                        ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 100], id: \.self) { count in
+                            Button("\(count) pushups") { tempPushupCount = count }
+                        }
+                    } label: {
+                        HStack {
+                            Text("\(tempPushupCount)")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    if settings.pushupsIsSet { unsetPushups() } else { setPushups() }
+                }) {
+                    HStack(spacing: 4) {
+                        if isSavingPushups {
+                            ProgressView().scaleEffect(0.7)
+                        }
+                        Text(settings.pushupsIsSet ? "Unset" : "Set")
+                    }
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(settings.pushupsIsSet ? Color.red : Color.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(settings.pushupsIsSet ? Color.red.opacity(0.1) : goldColor))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.pushupsIsSet ? Color.red : Color.clear, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSavingPushups)
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .background(settings.pushupsIsSet ? Color.green.opacity(0.05) : Color.clear)
+        .cornerRadius(8)
+    }
+    
+    @ViewBuilder
+    private var runRowView: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "figure.run")
+                    .font(.system(size: 18))
+                    .foregroundStyle(stravaConnected ? goldColor : Color.gray)
+                Text("Run")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color.black)
+                Spacer()
+                if settings.runIsSet {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                        .font(.caption)
+                }
+            }
+            
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Distance")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                    
+                    Menu {
+                        ForEach([0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0], id: \.self) { miles in
+                            Button(String(format: "%.1f miles", miles)) { tempRunDistance = miles }
+                        }
+                    } label: {
+                        HStack {
+                            Text(String(format: "%.1f mi", tempRunDistance))
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(stravaConnected ? Color.black : Color.gray)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .disabled(!stravaConnected)
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    if !stravaConnected {
+                        showStravaRequiredAlert = true
+                        return
+                    }
+                    if settings.runIsSet { unsetRun() } else { setRun() }
+                }) {
+                    HStack(spacing: 4) {
+                        if isSavingRun {
+                            ProgressView().scaleEffect(0.7)
+                        }
+                        Text(settings.runIsSet ? "Unset" : "Set")
+                    }
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(settings.runIsSet ? Color.red : (stravaConnected ? Color.white : Color.gray))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(settings.runIsSet ? Color.red.opacity(0.1) : (stravaConnected ? goldColor : Color.gray.opacity(0.3))))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.runIsSet ? Color.red : Color.clear, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSavingRun)
+            }
+            
+            if !stravaConnected {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                    Text("Connect Strava in Profile → Account to track runs")
+                        .font(.system(.caption2, design: .rounded))
+                }
+                .foregroundStyle(Color.orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .background(settings.runIsSet ? Color.green.opacity(0.05) : Color.clear)
+        .cornerRadius(8)
+        .opacity(stravaConnected ? 1 : 0.7)
+    }
+    
+    // Check if schedule has been changed from saved values
+    private var scheduleHasChanges: Bool {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let currentTime = formatter.string(from: tempDeadline)
+        let savedTime = formatter.string(from: deadline)
+        return currentTime != savedTime || tempScheduleType.lowercased() != scheduleType.lowercased()
+    }
+    
+    private var scheduleButtonText: String {
+        if isSavingSchedule { return "" }
+        if !settings.scheduleIsSet { return "Set" }
+        if scheduleHasChanges { return "Update" }
+        return "Unset"
+    }
+    
+    private var scheduleButtonColor: Color {
+        if !settings.scheduleIsSet { return goldColor }
+        if scheduleHasChanges { return goldColor }
+        return Color.red.opacity(0.1)
+    }
+    
+    private var scheduleButtonTextColor: Color {
+        if !settings.scheduleIsSet { return Color.white }
+        if scheduleHasChanges { return Color.white }
+        return Color.red
+    }
+    
+    @ViewBuilder
+    private var scheduleContentView: some View {
+                        VStack(spacing: 16) {
+                            Picker("", selection: $tempScheduleType) {
+                                Text("Daily").tag("Daily")
+                Text("Weekdays").tag("Weekdays")
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+            
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Deadline Time")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                    
+                    DatePicker("", selection: $tempDeadline, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .tint(goldColor)
+                }
+                
+                Spacer()
+                
+                Button(action: {
+                    if !settings.scheduleIsSet || scheduleHasChanges {
+                        // Set or Update
+                        setSchedule()
+                    } else {
+                        // Unset
+                        unsetSchedule()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        if isSavingSchedule {
+                            ProgressView().scaleEffect(0.7)
+                        }
+                        Text(scheduleButtonText)
+                    }
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(scheduleButtonTextColor)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(scheduleButtonColor))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(scheduleButtonTextColor == Color.red ? Color.red : Color.clear, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSavingSchedule)
+                            }
+                            
+                            Text(tempScheduleType == "Daily" ? "Complete every day" : "Complete Monday through Friday")
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.top, 8)
+    }
+    
+    @ViewBuilder
+    private var lockSectionHeader: some View {
+        Button(action: { 
+            if !isLocked {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isLockExpanded.toggle()
+                }
+            }
+        }) {
+            HStack {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(isLocked ? Color.orange : goldColor)
+                
+                Text("Commitment Lock")
+                    .font(.system(.body, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.black)
+                
+                Spacer()
+                
+                if isLocked {
+                    Text(lockTimeRemaining)
+                                .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.orange)
+                } else {
+                    Text("Unlocked")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                }
+                
+                Image(systemName: isLockExpanded ? "chevron.up" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(Color.black.opacity(0.5))
+            }
+                                .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLocked)
+        .opacity(isLocked ? 0.6 : 1)
+    }
+    
+    @ViewBuilder
+    private var lockContentView: some View {
+        VStack(spacing: 16) {
+            // Quick Lock - until next deadline
+            Button(action: { lockUntilNextDeadline() }) {
+                HStack {
+                    Image(systemName: "bolt.fill")
+                        .foregroundStyle(goldColor)
+                    Text("Lock until next deadline")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    Spacer()
+                    Text(nextDeadlineDescription)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.5))
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(Color.black.opacity(0.3))
+                }
+                .foregroundStyle(Color.black)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Color.gray.opacity(0.08))
+                .cornerRadius(10)
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasAnyObjectiveSet || !settings.scheduleIsSet)
+            .opacity((!hasAnyObjectiveSet || !settings.scheduleIsSet) ? 0.5 : 1)
+            
+            // Divider
+            HStack {
+                Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1)
+                Text("or")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+                Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1)
+            }
+            
+            // Extended Lock
+            Text("\(Int(lockDays)) day\(Int(lockDays) == 1 ? "" : "s")")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(goldColor)
+            
+            Slider(value: $lockDays, in: 1...30, step: 1)
+                .tint(goldColor)
+            
+            Button(action: { showLockConfirmation = true }) {
+                HStack {
+                    Image(systemName: "lock.fill")
+                    Text("Lock for \(Int(lockDays)) day\(Int(lockDays) == 1 ? "" : "s")")
+                }
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(goldColor))
+            }
+            .buttonStyle(.plain)
+            .disabled(!hasAnyObjectiveSet || !settings.scheduleIsSet)
+            .opacity((!hasAnyObjectiveSet || !settings.scheduleIsSet) ? 0.5 : 1)
+            
+            if !hasAnyObjectiveSet || !settings.scheduleIsSet {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                    Text("Set at least one objective and schedule first")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                }
+                .foregroundStyle(Color.orange)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.15))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                        )
+                )
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    // Helper: Description of next deadline for Quick Lock button
+    private var nextDeadlineDescription: String {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        // Combine today's date with the deadline time
+        let deadlineComponents = calendar.dateComponents([.hour, .minute], from: tempDeadline)
+        var nextDeadline = calendar.date(bySettingHour: deadlineComponents.hour ?? 9,
+                                          minute: deadlineComponents.minute ?? 0,
+                                          second: 0, of: now) ?? now
+        
+        // If deadline already passed today, use tomorrow's
+        if nextDeadline <= now {
+            nextDeadline = calendar.date(byAdding: .day, value: 1, to: nextDeadline) ?? nextDeadline
+        }
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        let timeStr = formatter.string(from: nextDeadline)
+        
+        if calendar.isDateInToday(nextDeadline) {
+            return "Today \(timeStr)"
+        } else if calendar.isDateInTomorrow(nextDeadline) {
+            return "Tomorrow \(timeStr)"
+        } else {
+            formatter.dateFormat = "EEE h:mm a"
+            return formatter.string(from: nextDeadline)
+        }
+    }
+    
+    // Manual sync lock state from server
+    private func syncLockFromServer() {
+        guard !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "https://api.live-eos.com/users/\(userId)/settings-lock") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+            
+            DispatchQueue.main.async {
+                if let lockDateStr = json["settings_locked_until"] as? String, !lockDateStr.isEmpty {
+                    let isoFormatter = ISO8601DateFormatter()
+                    isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    if let lockDate = isoFormatter.date(from: lockDateStr) {
+                        self.settingsLockedUntil = lockDate
+                    } else {
+                        isoFormatter.formatOptions = [.withInternetDateTime]
+                        if let lockDate = isoFormatter.date(from: lockDateStr) {
+                            self.settingsLockedUntil = lockDate
+                        }
+                    }
+                } else {
+                    // Server says unlocked
+                    self.settingsLockedUntil = Date.distantPast
+                }
+            }
+        }.resume()
+    }
+    
+    // Quick lock until next deadline
+    private func lockUntilNextDeadline() {
+        let now = Date()
+        let calendar = Calendar.current
+        
+        // Combine today's date with the deadline time
+        let deadlineComponents = calendar.dateComponents([.hour, .minute], from: tempDeadline)
+        var nextDeadline = calendar.date(bySettingHour: deadlineComponents.hour ?? 9,
+                                          minute: deadlineComponents.minute ?? 0,
+                                          second: 0, of: now) ?? now
+        
+        // If deadline already passed today, use tomorrow's
+        if nextDeadline <= now {
+            nextDeadline = calendar.date(byAdding: .day, value: 1, to: nextDeadline) ?? nextDeadline
+        }
+        
+        // Set lock to next deadline
+        settingsLockedUntil = nextDeadline
+        syncLockToBackend()
+        dismiss()
     }
 
     var body: some View {
@@ -611,165 +1366,139 @@ struct ObjectiveSettingsView: View {
                                     Text("Settings Locked")
                                         .font(.system(.headline, design: .rounded, weight: .bold))
                                         .foregroundStyle(Color.black)
-                                    Text("\(daysUntilUnlock) day\(daysUntilUnlock == 1 ? "" : "s") remaining")
+                                    Text(lockTimeRemaining)
                                         .font(.system(.caption, design: .rounded))
                                         .foregroundStyle(Color.black.opacity(0.7))
                                 }
                                 Spacer()
-                            }
-                            .padding(.vertical, 8)
+                        }
+                        .padding(.vertical, 8)
                         }
                         .listRowBackground(Color.orange.opacity(0.15))
                     }
                     
-                    Section(header: Text("Daily Push-up Objective")
-                        .foregroundStyle(Color.white)) {
-                        Picker("", selection: $tempObjective) {
-                            ForEach(1...100, id: \.self) { count in
-                                Text("\(count) pushups")
-                                    .tag(count)
-                                    .foregroundStyle(Color.black)
+                    // MARK: - Objectives Section (Both Types)
+                    Section {
+                        // Header row (always visible) - uses onTapGesture to avoid Form button tap bleed
+                        HStack {
+                            Image(systemName: "target")
+                                .font(.system(size: 16))
+                                .foregroundStyle(goldColor)
+                            
+                            Text("Objectives")
+                                .font(.system(.body, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black)
+                            
+                            Spacer()
+                            
+                            if !isObjectiveExpanded {
+                                Text(objectiveSummary)
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(hasAnyObjectiveSet ? Color.green : Color.orange)
+                            }
+                            
+                            Image(systemName: isObjectiveExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(Color.black.opacity(0.5))
+                        }
+                        .padding(.vertical, 4)
+                        .opacity(isLocked ? 0.6 : 1)
+                        .onTapGesture {
+                            if !isLocked {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isObjectiveExpanded.toggle()
+                                }
                             }
                         }
-                        .pickerStyle(.wheel)
-                        .frame(height: 150)
-                        .labelsHidden()
-                        .disabled(isLocked)
-                        .opacity(isLocked ? 0.5 : 1)
+                        
+                        // Expanded content - BOTH objective types
+                        if isObjectiveExpanded && !isLocked {
+                            VStack(spacing: 20) {
+                                pushupsRowView
+                                Divider()
+                                runRowView
+                                
+                                if settings.pushupsIsSet && settings.runIsSet {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "info.circle")
+                                            .font(.caption2)
+                                        Text("Both objectives must be completed daily to succeed")
+                                            .font(.system(.caption2, design: .rounded))
+                                    }
+                                    .foregroundStyle(Color.blue)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 4)
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
                     }
                     .listRowBackground(Color.white)
 
-                    Section(header: Text("Schedule & Deadline")
-                        .foregroundStyle(Color.white)) {
-                        VStack(spacing: 16) {
-                            Picker("", selection: $tempScheduleType) {
-                                Text("Daily").tag("Daily")
-                                Text("Weekdays (Mon-Fri)").tag("Weekdays")
+                    // MARK: - Schedule & Deadline Section
+                    Section {
+                        // Header row
+                        Button(action: { 
+                            if !isLocked {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isScheduleExpanded.toggle()
+                                }
                             }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                            .disabled(isLocked)
-                            .opacity(isLocked ? 0.5 : 1)
-                            .onAppear {
-                                UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)
-                                UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
-                                UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.black], for: .normal)
+                        }) {
+                            HStack {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(goldColor)
+                                
+                                Text("Schedule & Deadline")
+                                    .font(.system(.body, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black)
+                                
+                                Spacer()
+                                
+                                if !isScheduleExpanded {
+                                    Text(settings.scheduleIsSet ? scheduleSummary : "Not Set")
+                                        .font(.system(.caption, design: .rounded))
+                                        .foregroundStyle(settings.scheduleIsSet ? Color.green : Color.orange)
+                                }
+                                
+                                Image(systemName: isScheduleExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.black.opacity(0.5))
                             }
-                            
-                            Text(tempScheduleType == "Daily" ? "Complete every day" : "Complete Monday through Friday")
-                                .font(.system(.caption, design: .rounded))
-                                .foregroundStyle(Color.black.opacity(0.8))
-                            
-                            Divider()
-                                .padding(.vertical, 4)
-                            
-                            // AM/PM Label above time picker
-                            Text("Select deadline time (AM/PM)")
-                                .font(.system(.caption, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black.opacity(0.6))
-                            
-                            DatePicker("", selection: $tempDeadline, displayedComponents: .hourAndMinute)
-                                .datePickerStyle(.wheel)
-                                .labelsHidden()
-                                .frame(height: 120)
-                                .tint(Color.black)
-                                .colorScheme(.light)
-                                .disabled(isLocked)
-                                .opacity(isLocked ? 0.5 : 1)
-                            
-                            // Show selected time clearly
-                            Text("Deadline: \(formattedDeadlineTime)")
-                                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 8)
+                        .buttonStyle(.plain)
+                        .disabled(isLocked)
+                        .opacity(isLocked ? 0.6 : 1)
+                        
+                        // Expanded content
+                        if isScheduleExpanded && !isLocked {
+                            scheduleContentView
+                        }
                     }
                     .listRowBackground(Color.white)
                     
-                    // Lock Settings Section
-                    Section(header: Text("Commitment Lock")
-                        .foregroundStyle(Color.white),
-                            footer: Text(isLocked ? 
-                                "Your settings are locked. You cannot change them until the lock expires." :
-                                "Lock your settings to prevent changes. This helps maintain your commitment.")
-                                .foregroundStyle(Color.white.opacity(0.95))) {
+                    // MARK: - Commitment Lock Section
+                    Section {
+                        // Header row
+                        lockSectionHeader
                         
-                        if isLocked {
-                            // Show locked state
-                            HStack {
-                                Image(systemName: "lock.fill")
-                                    .foregroundStyle(Color.orange)
-                                Text("Locked for \(daysUntilUnlock) more day\(daysUntilUnlock == 1 ? "" : "s")")
-                                    .font(.system(.body, design: .rounded))
-                                    .foregroundStyle(Color.black)
-                                Spacer()
-                                Text(settingsLockedUntil, style: .date)
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                            }
-                            .padding(.vertical, 4)
-                        } else {
-                            // Lock slider and button
-                            VStack(spacing: 16) {
-                                // Centered days display
-                                Text("\(Int(lockDays)) day\(Int(lockDays) == 1 ? "" : "s")")
-                                    .font(.system(.title2, design: .rounded, weight: .bold))
-                                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                
-                                // Slider with tick marks
-                                VStack(spacing: 4) {
-                                    Slider(value: $lockDays, in: 1...30, step: 1)
-                                        .tint(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                    
-                                    // Tick marks line
-                                    GeometryReader { geometry in
-                                        HStack(spacing: 0) {
-                                            ForEach(0..<30, id: \.self) { i in
-                                                Rectangle()
-                                                    .fill(Color.black.opacity(0.2))
-                                                    .frame(width: 1, height: i % 5 == 0 ? 8 : 4)
-                                                if i < 29 {
-                                                    Spacer()
-                                                }
-                                            }
-                                        }
-                                        .frame(width: geometry.size.width - 4)
-                                        .padding(.horizontal, 2)
-                                    }
-                                    .frame(height: 10)
-                                }
-                                
-                                Button(action: {
-                                    showLockConfirmation = true
-                                }) {
-                                    HStack {
-                                        Image(systemName: "lock.fill")
-                                        Text("Lock Settings")
-                                    }
-                                    .font(.system(.body, design: .rounded, weight: .semibold))
-                                    .foregroundStyle(Color.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                    )
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                            .padding(.vertical, 8)
+                        // Expanded content
+                        if isLockExpanded && !isLocked {
+                            lockContentView
                         }
                     }
                     .listRowBackground(Color.white)
 
-                    Section(footer: Text("You'll receive a notification if you haven't completed your objective by the deadline.")
+                    // Footer
+                    Section(footer: Text("You'll receive a notification if you haven't completed your objectives by the deadline. Miss any set objective = day failed.")
                         .foregroundStyle(Color.white.opacity(0.95))) {
                         EmptyView()
                     }
                 }
                 .scrollContentBackground(.hidden)
-                .tint(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                .tint(goldColor)
             }
             .navigationTitle("My Objective")
             .toolbar {
@@ -779,50 +1508,368 @@ struct ObjectiveSettingsView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        if !isLocked {
-                            objective = tempObjective
-                            deadline = tempDeadline
-                            scheduleType = tempScheduleType
-                            notificationManager.scheduleObjectiveReminder(
-                                deadline: deadline,
-                                objective: objective,
-                                scheduleType: scheduleType
-                            )
-                            onSave?()  // Sync to backend
-                        }
+                    Button("Done") {
                         dismiss()
                     }
                     .font(.system(.body, design: .rounded, weight: .medium))
-                    .disabled(isLocked)
                 }
             }
             .alert("Lock Your Settings?", isPresented: $showLockConfirmation) {
                 Button("Cancel", role: .cancel) { }
                 Button("Lock for \(Int(lockDays)) Days", role: .destructive) {
-                    // Save current settings first
-                    objective = tempObjective
-                    deadline = tempDeadline
-                    scheduleType = tempScheduleType
                     // Set lock expiry
                     settingsLockedUntil = Calendar.current.date(byAdding: .day, value: Int(lockDays), to: Date()) ?? Date()
-                    notificationManager.scheduleObjectiveReminder(
-                        deadline: deadline,
-                        objective: objective,
-                        scheduleType: scheduleType
-                    )
-                    onSave?()  // Sync to backend
+                    syncLockToBackend()
                     dismiss()
                 }
             } message: {
                 Text("Are you sure? You will NOT be able to change your objective settings or back out of your commitment for \(Int(lockDays)) days.")
             }
+            .alert("Strava Required", isPresented: $showStravaRequiredAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Connect Strava in your Profile to track run objectives. Go to Profile → Account → Strava.")
+            }
+            .overlay(alignment: .top) {
+                if showSuccessBanner {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.white)
+                        Text(successMessage)
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(
+                        Capsule()
+                            .fill(Color.green)
+                            .shadow(color: Color.black.opacity(0.2), radius: 8, y: 4)
+                    )
+                    .padding(.top, 60)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                showSuccessBanner = false
+                            }
+                        }
+                    }
+                }
+            }
         }
         .onAppear {
-            tempObjective = objective
-            tempDeadline = deadline
-            tempScheduleType = scheduleType
+            // Initialize temp values from bindings on first load
+            if !hasInitializedFromBindings {
+                tempDeadline = deadline
+                tempPushupCount = max(objective, tempPushupCount)  // Use higher of binding or persisted
+                hasInitializedFromBindings = true
+            }
+            loadObjectivesFromBackend()
         }
+    }
+    
+    // MARK: - Backend Sync Functions
+    
+    private func showSuccess(_ message: String = "Saved!") {
+        successMessage = message
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+            showSuccessBanner = true
+        }
+    }
+    
+    private func setPushups() {
+        isSavingPushups = true
+        print("💪 Setting pushups: \(tempPushupCount), userId: \(userId)")
+        
+        let body: [String: Any] = [
+            "pushups_count": tempPushupCount,
+            "pushups_enabled": true
+        ]
+        
+        saveObjectiveToBackend(body: body) { success in
+            DispatchQueue.main.async {
+                self.isSavingPushups = false
+                if success {
+                    self.settings.pushupsIsSet = true
+                    self.settings.pushupsEnabled = true
+                    self.objective = self.tempPushupCount
+                    self.showSuccess("Pushups set!")
+                    self.onSave?()
+                    print("✅ Pushups set successfully")
+                } else {
+                    print("❌ Failed to set pushups")
+                }
+            }
+        }
+    }
+    
+    private func unsetPushups() {
+        isSavingPushups = true
+        print("💪 Unsetting pushups, userId: \(userId)")
+        
+        let body: [String: Any] = [
+            "pushups_enabled": false
+        ]
+        
+        saveObjectiveToBackend(body: body) { success in
+            DispatchQueue.main.async {
+                self.isSavingPushups = false
+                if success {
+                    self.settings.pushupsIsSet = false
+                    self.settings.pushupsEnabled = false
+                    self.showSuccess("Pushups removed")
+                    print("✅ Pushups unset successfully")
+                } else {
+                    print("❌ Failed to unset pushups")
+                }
+            }
+        }
+    }
+    
+    private func setRun() {
+        isSavingRun = true
+        print("🏃 Setting run: \(tempRunDistance) miles, userId: \(userId)")
+        
+        let body: [String: Any] = [
+            "run_distance": tempRunDistance,
+            "run_enabled": true
+        ]
+        
+        saveObjectiveToBackend(body: body) { success in
+            DispatchQueue.main.async {
+                self.isSavingRun = false
+                if success {
+                    self.settings.runIsSet = true
+                    self.settings.runEnabled = true
+                    self.settings.runDistance = self.tempRunDistance
+                    self.showSuccess("Run set!")
+                    self.onSave?()
+                    print("✅ Run set successfully")
+                } else {
+                    print("❌ Failed to set run")
+                }
+            }
+        }
+    }
+    
+    private func unsetRun() {
+        isSavingRun = true
+        print("🏃 Unsetting run, userId: \(userId)")
+        
+        let body: [String: Any] = [
+            "run_enabled": false
+        ]
+        
+        saveObjectiveToBackend(body: body) { success in
+            DispatchQueue.main.async {
+                self.isSavingRun = false
+                if success {
+                    self.settings.runIsSet = false
+                    self.settings.runEnabled = false
+                    self.showSuccess("Run removed")
+                    print("✅ Run unset successfully")
+                } else {
+                    print("❌ Failed to unset run")
+                }
+            }
+        }
+    }
+    
+    private func setSchedule() {
+        isSavingSchedule = true
+        print("📅 Setting schedule: \(tempScheduleType), deadline: \(tempDeadline)")
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let deadlineString = formatter.string(from: tempDeadline)
+        
+        let body: [String: Any] = [
+            "objective_schedule": tempScheduleType.lowercased(),
+            "objective_deadline": deadlineString
+        ]
+        
+        saveObjectiveToBackend(body: body) { success in
+            DispatchQueue.main.async {
+                self.isSavingSchedule = false
+                if success {
+                    self.settings.scheduleIsSet = true
+                    self.deadline = self.tempDeadline
+                    self.scheduleType = self.tempScheduleType
+                    
+                    // Schedule notifications
+                    self.notificationManager.scheduleObjectiveReminder(
+                        deadline: self.deadline,
+                        objective: self.tempPushupCount,
+                        scheduleType: self.scheduleType
+                    )
+                    
+                    withAnimation {
+                        self.isScheduleExpanded = false
+                    }
+                    self.showSuccess("Schedule saved!")
+                    print("✅ Schedule set successfully")
+                } else {
+                    print("❌ Failed to set schedule")
+                }
+            }
+        }
+    }
+    
+    private func unsetSchedule() {
+        isSavingSchedule = true
+        print("📅 Unsetting schedule")
+        
+        // Reset schedule to defaults on backend
+        let body: [String: Any] = [
+            "objective_schedule": "daily",
+            "objective_deadline": "22:00"  // Default to 10 PM
+        ]
+        
+        saveObjectiveToBackend(body: body) { success in
+            DispatchQueue.main.async {
+                self.isSavingSchedule = false
+                if success {
+                    self.settings.scheduleIsSet = false
+                    self.tempScheduleType = "Daily"
+                    // Reset tempDeadline to 10 PM
+                    let components = DateComponents(hour: 22, minute: 0)
+                    if let defaultTime = Calendar.current.date(from: components) {
+                        self.tempDeadline = defaultTime
+                    }
+                    self.showSuccess("Schedule cleared")
+                    print("✅ Schedule unset successfully")
+                } else {
+                    print("❌ Failed to unset schedule")
+                }
+            }
+        }
+    }
+    
+    private func syncLockToBackend() {
+        let isoFormatter = ISO8601DateFormatter()
+        let lockDateString = isoFormatter.string(from: settingsLockedUntil)
+        
+        let body: [String: Any] = [
+            "settings_locked_until": lockDateString
+        ]
+        
+        saveObjectiveToBackend(body: body) { _ in }
+    }
+    
+    private func saveObjectiveToBackend(body: [String: Any], completion: @escaping (Bool) -> Void) {
+        guard !userId.isEmpty else {
+            print("⚠️ No userId, skipping save")
+            completion(false)
+            return
+        }
+        
+        guard let url = URL(string: "https://api.live-eos.com/objectives/settings/\(userId)") else {
+            completion(false)
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("❌ Save error: \(error)")
+                completion(false)
+                return
+            }
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                print("✅ Objective saved to backend")
+                completion(true)
+            } else {
+                print("❌ Save failed: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+                completion(false)
+            }
+        }.resume()
+    }
+    
+    private func loadObjectivesFromBackend() {
+        guard !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "https://api.live-eos.com/objectives/settings/\(userId)") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            
+            DispatchQueue.main.async {
+                print("📥 Loading objectives from backend...")
+                
+                // Load pushups
+                if let pushEnabled = json["pushups_enabled"] as? Bool {
+                    self.settings.pushupsIsSet = pushEnabled
+                    self.settings.pushupsEnabled = pushEnabled
+                    print("  - pushups_enabled: \(pushEnabled)")
+                }
+                if let pushCount = json["pushups_count"] as? Int, pushCount > 0 {
+                    self.tempPushupCount = pushCount
+                    if json["pushups_enabled"] == nil {
+                        // Legacy: if pushups_enabled doesn't exist but count > 0, assume set
+                        self.settings.pushupsIsSet = true
+                        self.settings.pushupsEnabled = true
+                    }
+                    print("  - pushups_count: \(pushCount)")
+                }
+                
+                // Load run
+                if let runEn = json["run_enabled"] as? Bool {
+                    self.settings.runIsSet = runEn
+                    self.settings.runEnabled = runEn
+                    print("  - run_enabled: \(runEn)")
+                }
+                if let runDist = json["run_distance"] as? Double, runDist > 0 {
+                    self.tempRunDistance = runDist
+                    self.settings.runDistance = runDist
+                    print("  - run_distance: \(runDist)")
+                }
+                
+                // Sync pushup objective to binding
+                if self.settings.pushupsIsSet {
+                    self.objective = self.tempPushupCount
+                }
+                
+                // Load schedule
+                if let schedule = json["objective_schedule"] as? String {
+                    self.tempScheduleType = schedule.capitalized
+                    self.scheduleType = schedule.capitalized  // Sync to binding
+                    print("  - schedule: \(schedule)")
+                }
+                if let deadlineStr = json["objective_deadline"] as? String, !deadlineStr.isEmpty {
+                    // Handle both "HH:mm" and "HH:mm:ss" formats from backend
+                    let cleanDeadline = String(deadlineStr.prefix(5)) // Extract "HH:mm" from "HH:mm:ss"
+                    let formatter = DateFormatter()
+                    formatter.dateFormat = "HH:mm"
+                    if let parsed = formatter.date(from: cleanDeadline) {
+                        self.tempDeadline = parsed
+                        self.deadline = parsed  // Sync to binding
+                        // Only mark schedule as set if there's actual objective data
+                        if self.settings.pushupsIsSet || self.settings.runIsSet {
+                            self.settings.scheduleIsSet = true
+                        }
+                        print("  ✅ Loaded schedule: \(self.tempScheduleType) @ \(cleanDeadline)")
+                    } else {
+                        print("  ⚠️ Failed to parse deadline: \(deadlineStr)")
+                    }
+                }
+                
+                // Collapse sections if set (better UX when data is loaded)
+                if self.settings.pushupsIsSet || self.settings.runIsSet {
+                    self.isObjectiveExpanded = false
+                }
+                if self.settings.scheduleIsSet {
+                    self.isScheduleExpanded = false
+                }
+                
+                print("📥 Load complete: pushups=\(self.settings.pushupsIsSet), run=\(self.settings.runIsSet), schedule=\(self.settings.scheduleIsSet)")
+            }
+        }.resume()
     }
 }
 
@@ -991,7 +2038,7 @@ final class NotificationManager {
 
         let content = UNMutableNotificationContent()
         content.title = "Push-up Objective Missed"
-        content.body = "You didn't complete your \(objective) push-ups today. Payout will be sent to your selected recipient."
+        content.body = "You didn't complete your \(objective) push-ups today. Your stakes will be forfeited to your designated recipient."
         content.sound = .default
 
         let calendar = Calendar.current
@@ -1038,9 +2085,8 @@ final class NotificationManager {
 final class DepositPaymentService: ObservableObject {
     @Published var paymentSheet: PaymentSheet?
 
-    func preparePaymentSheet(amount: Double, completion: @escaping (Error?) -> Void) {
+    func preparePaymentSheet(amount: Double, userId: String, completion: @escaping (Error?) -> Void) {
         let cents = max(1, Int((amount * 100).rounded()))
-        let userId = UserDefaults.standard.string(forKey: "userId") ?? ""
         
         print("💳 preparePaymentSheet - amount: \(cents) cents, userId: '\(userId)'")
         
@@ -1104,8 +2150,8 @@ final class DepositPaymentService: ObservableObject {
             // Allow delayed payment methods if available
             configuration.allowsDelayedPaymentMethods = true
             
-            // Return URL for app redirects (optional)
-            // configuration.returnURL = "eos-app://stripe-redirect"
+            // Return URL for app redirects (required for 3DS authentication)
+            configuration.returnURL = "eos-app://stripe-redirect"
 
             DispatchQueue.main.async {
                 self.paymentSheet = PaymentSheet(paymentIntentClientSecret: clientSecret,
@@ -1288,9 +2334,9 @@ struct ProfileView: View {
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
     @AppStorage("isSignedIn") private var isSignedIn: Bool = false
     
-    // Payout Destination Settings
-    @AppStorage("payoutType") private var payoutType: String = "charity"
-    @AppStorage("selectedCharity") private var selectedCharity: String = "GiveDirectly"
+    // Stakes Destination Settings
+    @AppStorage("payoutType") private var payoutType: String = "custom"
+    @AppStorage("selectedCharity") private var selectedCharity: String = "GiveDirectly"  // Hidden from UI for now (App Store 3.2.2)
     @AppStorage("customRecipientsData") private var customRecipientsData: Data = Data()
     @AppStorage("cachedRecipientsForUserId") private var cachedRecipientsForUserId: String = ""  // Track which user the cache belongs to
     @AppStorage("selectedRecipientId") private var selectedRecipientId: String = ""
@@ -1300,7 +2346,7 @@ struct ProfileView: View {
 
     @AppStorage("destinationCommitted") private var destinationCommitted: Bool = false
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
-    @AppStorage("committedDestination") private var committedDestination: String = "charity"
+    @AppStorage("committedDestination") private var committedDestination: String = "custom"
     @AppStorage("userId") private var userId: String = ""
     
     // Objective settings (synced with SettingsView via @AppStorage)
@@ -1330,14 +2376,25 @@ struct ProfileView: View {
     @State private var profileErrorMessage: String?
     @State private var isSavingProfile = false
     @State private var isAccountExpanded: Bool = false
+    
+    // Delete account states
+    @State private var showDeleteAccountAlert: Bool = false
+    @State private var deleteAccountPassword: String = ""
+    @State private var isDeletingAccount: Bool = false
+    @State private var deleteAccountError: String?
     @State private var customRecipients: [CustomRecipient] = []
     @State private var showingAddRecipient = false
-    @State private var showingCharityPicker = false
+    // Stakes acknowledgment states
+    @State private var acknowledgedVoluntary: Bool = false
+    @State private var acknowledgedNoRefund: Bool = false
+    @State private var acknowledgedOver18: Bool = false
     @State private var showSignInView = false
     @State private var showCreateAccountView = false
     @FocusState private var isPayoutAmountFocused: Bool
     @FocusState private var isDepositAmountFocused: Bool
+    @State private var showingCharityPicker = false
 
+    // Charity list - hidden from UI per App Store 3.2.2, kept for future use when nonprofit status acquired
     private let charities = [
         "GiveDirectly",
         "Doctors Without Borders",
@@ -1627,14 +2684,14 @@ struct ProfileView: View {
                                     .padding(.top, 4)
                                     
                                     Button(action: {
-                                        // Sign out
-                                        isSignedIn = false
-                                        profileUsername = ""
-                                        profileEmail = ""
-                                        profilePhone = ""
-                                        profilePassword = ""
-                                        profileCompleted = false
+                                        // Sign out - Nuclear clear ALL cached data
+                                        if let bundleID = Bundle.main.bundleIdentifier {
+                                            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+                                            UserDefaults.standard.synchronize()
+                                        }
+                                        // Reset UI state
                                         isAccountExpanded = false
+                                        profilePassword = ""
                                     }) {
                                         HStack {
                                             Image(systemName: "arrow.right.square")
@@ -1650,6 +2707,19 @@ struct ProfileView: View {
                                                 .stroke(Color.red, lineWidth: 1.5)
                                         )
                                     }
+                                    .buttonStyle(.plain)
+                                    
+                                    // Delete Account button
+                                    Button(action: {
+                                        deleteAccountPassword = ""
+                                        deleteAccountError = nil
+                                        showDeleteAccountAlert = true
+                                    }) {
+                                        Text("Delete Account")
+                                            .font(.system(.caption2, design: .rounded))
+                                            .foregroundStyle(Color.gray)
+                                    }
+                                    .padding(.top, 8)
                                     .buttonStyle(.plain)
                                     
                                     if let error = profileErrorMessage {
@@ -1672,57 +2742,11 @@ struct ProfileView: View {
                         .listRowBackground(Color.white)
                     }
                 
-                // Payout Destination Section
+                // Designated Recipient Section
                 Section {
                     VStack(alignment: .leading, spacing: 16) {
-                        // Type selector
-                        HStack(spacing: 12) {
-                            PayoutTypeButton(
-                                title: "Charity",
-                                icon: "heart.fill",
-                                isSelected: payoutType == "charity",
-                                action: { payoutType = "charity" }
-                            )
-                            PayoutTypeButton(
-                                title: "Custom",
-                                icon: "person.2.fill",
-                                isSelected: payoutType == "custom",
-                                action: { payoutType = "custom" }
-                            )
-                        }
-                        .padding(.vertical, 4)
-                        
-                        // Content based on selection
-                        if payoutType == "charity" {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Select charity")
-                                    .font(.system(.subheadline, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                                
-                                Button(action: { showingCharityPicker = true }) {
-                                    HStack {
-                                        Text(charities.contains(selectedCharity) ? selectedCharity : charities.first ?? "Select")
-                                            .font(.system(.body, design: .rounded))
-                                            .foregroundStyle(Color.black)
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.system(size: 14, weight: .medium))
-                                            .foregroundStyle(Color.gray)
-                                    }
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 12)
-                                    .background(Color.gray.opacity(0.1))
-                                    .cornerRadius(10)
-                                }
-                                .buttonStyle(.plain)
-                                .onAppear {
-                                    // Reset to valid charity if current selection is invalid
-                                    if !charities.contains(selectedCharity) {
-                                        selectedCharity = charities.first ?? "GiveDirectly"
-                                    }
-                                }
-                            }
-                        } else {
+                        // Recipient selector (charity removed per App Store guidelines)
+                        VStack(alignment: .leading, spacing: 12) {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
                                     Text("Recipients")
@@ -1777,7 +2801,7 @@ struct ProfileView: View {
                                 }
                             }
                         }
-                        
+
                         // Commit Destination Button - ALWAYS visible
                         // Disabled if custom selected but no active recipient
                         Button(action: commitDestination) {
@@ -1803,16 +2827,15 @@ struct ProfileView: View {
                     }
                     .listRowBackground(Color.white)
                 } header: {
-                    Text("Payout Destination")
+                    Text("Designated Recipient")
                         .foregroundStyle(Color.white.opacity(0.95))
                 } footer: {
-                    Text(destinationCommitted ? "Destination locked: \(payoutType == "charity" ? "Charity" : "Custom recipient")." : "Select where missed goal payouts will be sent.")
+                    Text(destinationCommitted ? "Recipient locked." : "Select who receives your forfeited stakes if you miss your goal.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.8))
                 }
                 
-                // Missed Goal Payout Amount - Separate prominent section
-                // Missed Goal Payout Amount - Separate prominent section
+                // Accountability Stakes Section
                 Section {
                     VStack(spacing: 16) {
                         // Show minimized committed bar OR full selector
@@ -1828,10 +2851,10 @@ struct ProfileView: View {
                                         .font(.title2)
                                         .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("$\(committedPayoutAmount, specifier: "%.0f") committed for payout")
+                                        Text("$\(committedPayoutAmount, specifier: "%.0f") stakes committed")
                                             .font(.system(.body, design: .rounded, weight: .semibold))
                                             .foregroundStyle(Color.black)
-                                        Text("Tap to change amount")
+                                        Text("Tap to change stakes amount")
                                             .font(.system(.caption, design: .rounded))
                                             .foregroundStyle(Color.black.opacity(0.5))
                                     }
@@ -1847,9 +2870,9 @@ struct ProfileView: View {
                             // Full payout selector
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Payout Amount")
+                                Text("Stakes Amount")
                                     .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                Text("Amount sent per missed goal")
+                                Text("Amount at risk per goal")
                                     .font(.system(.caption, design: .rounded))
                                     .foregroundStyle(Color.black.opacity(0.6))
                             }
@@ -1917,35 +2940,90 @@ struct ProfileView: View {
                             .buttonStyle(.plain)
                             }
                             
-                            // Commit Payout Button
+                            // Stakes acknowledgments - only show when setting stakes for first time
+                            if !payoutCommitted && missedGoalPayout > 0 {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("By setting stakes, I acknowledge:")
+                                        .font(.system(.caption, design: .rounded, weight: .medium))
+                                        .foregroundStyle(Color.black.opacity(0.7))
+                                        .padding(.top, 8)
+                                    
+                                    // Voluntary acknowledgment
+                                    Button(action: { acknowledgedVoluntary.toggle() }) {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: acknowledgedVoluntary ? "checkmark.square.fill" : "square")
+                                                .foregroundStyle(acknowledgedVoluntary ? Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : Color.gray)
+                                                .font(.body)
+                                            Text("Setting stakes is voluntary. I bear all risk of achieving my commitment.")
+                                                .font(.system(.caption2, design: .rounded))
+                                                .foregroundStyle(Color.black.opacity(0.8))
+                                                .multilineTextAlignment(.leading)
+                                            Spacer()
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    // No refund acknowledgment
+                                    Button(action: { acknowledgedNoRefund.toggle() }) {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: acknowledgedNoRefund ? "checkmark.square.fill" : "square")
+                                                .foregroundStyle(acknowledgedNoRefund ? Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : Color.gray)
+                                                .font(.body)
+                                            Text("Forfeited stakes are non-refundable. If I miss my goal, my stakes go to my designated recipient.")
+                                                .font(.system(.caption2, design: .rounded))
+                                                .foregroundStyle(Color.black.opacity(0.8))
+                                                .multilineTextAlignment(.leading)
+                                            Spacer()
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    
+                                    // Age acknowledgment
+                                    Button(action: { acknowledgedOver18.toggle() }) {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: acknowledgedOver18 ? "checkmark.square.fill" : "square")
+                                                .foregroundStyle(acknowledgedOver18 ? Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : Color.gray)
+                                                .font(.body)
+                                            Text("I am at least 18 years of age.")
+                                                .font(.system(.caption2, design: .rounded))
+                                                .foregroundStyle(Color.black.opacity(0.8))
+                                                .multilineTextAlignment(.leading)
+                                            Spacer()
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            
+                            // Set Stakes Button
                             Button(action: commitPayout) {
                                 HStack {
                                     Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
                                         .font(.body)
-                                    Text(payoutCommitted ? "Update Commitment" : "Commit Payout")
+                                    Text(payoutCommitted ? "Update Stakes" : "Set Your Stakes")
                                         .font(.system(.body, design: .rounded, weight: .semibold))
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(missedGoalPayout > 0 ? 
+                                        .fill(canSetStakes ? 
                                             Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : 
                                             Color.gray.opacity(0.3))
                                 )
-                                .foregroundStyle(missedGoalPayout > 0 ? Color.white : Color.black.opacity(0.4))
+                                .foregroundStyle(canSetStakes ? Color.white : Color.black.opacity(0.4))
                             }
                             .buttonStyle(.plain)
-                            .disabled(missedGoalPayout <= 0)
+                            .disabled(!canSetStakes)
                             .padding(.top, 4)
                         }
                     }
                     .listRowBackground(Color.white)
                 } header: {
-                    Text("Missed Goal Payout")
+                    Text("Accountability Stakes")
                         .foregroundStyle(Color.white.opacity(0.95))
                 } footer: {
-                    Text(payoutCommitted ? "Your payout is committed. Miss your goal and $\(Int(committedPayoutAmount)) goes to your selected destination." : "This amount will be deducted from your balance and sent to your selected destination each time you miss your daily goal.")
+                    Text(payoutCommitted ? "Stakes committed. Complete your goal to keep your money. Miss it and $\(Int(committedPayoutAmount)) goes to your designated recipient." : "Put your money where your mouth is. Set stakes to hold yourself accountable. Complete your goal and keep your money.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.8))
                 }
@@ -1990,6 +3068,7 @@ struct ProfileView: View {
                                         .font(.system(.body, design: .rounded, weight: .medium))
                                 }
                             }
+                            .buttonStyle(.borderless)
                             .disabled(depositAmount.isEmpty || isProcessingDeposit)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 8)
@@ -2001,30 +3080,28 @@ struct ProfileView: View {
                             .cornerRadius(8)
                         }
                         
-                        // Withdraw button - links to web portal (greyed out if settings locked)
+                        // Withdraw - links to web portal (uses onTapGesture to avoid Form button tap bleed with Deposit)
                         let isWithdrawLocked = settingsLockedUntil > Date()
                         
-                        Button(action: {
-                            if !isWithdrawLocked {
-                                if let url = URL(string: "https://live-eos.com/portal") {
-                                    UIApplication.shared.open(url)
+                        Text(isWithdrawLocked ? "🔒 Withdraw Locked" : "Withdraw")
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity)
+                            .background(isWithdrawLocked ? Color.gray.opacity(0.3) : Color.white)
+                            .foregroundStyle(isWithdrawLocked ? Color.gray : Color.black)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
+                            )
+                            .cornerRadius(8)
+                            .onTapGesture {
+                                if !isWithdrawLocked {
+                                    if let url = URL(string: "https://live-eos.com/portal") {
+                                        UIApplication.shared.open(url)
+                                    }
                                 }
                             }
-                        }) {
-                            Text(isWithdrawLocked ? "🔒 Withdraw Locked" : "Withdraw")
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity)
-                        .background(isWithdrawLocked ? Color.gray.opacity(0.3) : Color.white)
-                        .foregroundStyle(isWithdrawLocked ? Color.gray : Color.black)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
-                        )
-                        .cornerRadius(8)
-                        .disabled(isWithdrawLocked)
 
                         if let error = depositErrorMessage {
                             HStack {
@@ -2040,7 +3117,7 @@ struct ProfileView: View {
                     Text("Balance")
                         .foregroundStyle(Color.white.opacity(0.95))
                 } footer: {
-                    Text("Add funds to cover missed goal payouts")
+                    Text("Add funds to back your commitment")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.8))
                 }
@@ -2053,6 +3130,30 @@ struct ProfileView: View {
                             .foregroundStyle(Color.red)
                     }
                 }
+                
+                // Terms & Legal Section
+                Section {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            if let url = URL(string: "https://live-eos.com/terms") {
+                                UIApplication.shared.open(url)
+                            }
+                        }) {
+                            Text("Terms of Service")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                } footer: {
+                    Text("By using EOS, you agree to our Terms of Service and Commitment Contract.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                }
+                .listRowBackground(Color.clear)
             }
                 }
                 .listRowBackground(Color.white)
@@ -2115,6 +3216,7 @@ struct ProfileView: View {
                     profileCompleted: $profileCompleted
                 )
             }
+            // Charity picker - hidden from UI per App Store 3.2.2, kept for future use
             .sheet(isPresented: $showingCharityPicker) {
                 NavigationView {
                     List {
@@ -2146,6 +3248,23 @@ struct ProfileView: View {
                     }
                 }
                 .presentationDetents([.medium, .large])
+            }
+            .alert("Delete Account", isPresented: $showDeleteAccountAlert) {
+                SecureField("Enter your password", text: $deleteAccountPassword)
+                Button("Cancel", role: .cancel) {
+                    deleteAccountPassword = ""
+                    deleteAccountError = nil
+                }
+                Button("Delete", role: .destructive) {
+                    deleteAccount()
+                }
+                .disabled(deleteAccountPassword.isEmpty)
+            } message: {
+                if let error = deleteAccountError {
+                    Text(error)
+                } else {
+                    Text("This will permanently delete all your data including account info, objectives, sessions, and transaction history. This action cannot be undone.")
+                }
             }
             .onChange(of: isSignedIn) { oldValue, newValue in
                 if newValue {
@@ -2194,17 +3313,17 @@ struct ProfileView: View {
             return "Recipient Not Active"
         }
         if !destinationCommitted {
-            return "Lock Destination"
+            return "Set Recipient"
         }
         // Check if user changed destination type or recipient
         let destChanged = payoutType.lowercased() != committedDestination.lowercased()
         let recipientChanged = payoutType == "custom" && selectedRecipientId != committedRecipientId && !selectedRecipientId.isEmpty
         if destChanged || recipientChanged {
-            return "Change Payout Lock"
+            return "Update Recipient"
         }
-        return "Destination Locked"
+        return "Recipient Set"
     }
-    
+
     /// Returns true if there's an active recipient selected (for custom payout)
     private var hasActiveRecipient: Bool {
         // If not custom, this check doesn't apply
@@ -2222,13 +3341,18 @@ struct ProfileView: View {
     
     /// Returns true if the commit button should be disabled
     private var isCommitButtonDisabled: Bool {
-        // Charity is always allowed
-        if payoutType.lowercased() == "charity" { return false }
-        
-        // Custom requires an active recipient
+        // Requires an active recipient to commit stakes
         return !hasActiveRecipient
     }
-
+    
+    /// Returns true if user can set stakes (either already committed, or has acknowledged all terms)
+    private var canSetStakes: Bool {
+        guard missedGoalPayout > 0 else { return false }
+        // If already committed, they can update without re-acknowledging
+        if payoutCommitted { return true }
+        // First time: must check all acknowledgment boxes
+        return acknowledgedVoluntary && acknowledgedNoRefund && acknowledgedOver18
+    }
     
 
     private func commitPayout() {
@@ -2317,7 +3441,8 @@ struct ProfileView: View {
                     self.activeRecipientId = recipient["id"] as? String ?? ""
                 }
                 if let dest = json["destination"] as? String {
-                    self.payoutType = dest == "charity" ? "charity" : "custom"
+                    // Default to custom - charity no longer supported per App Store guidelines
+                    self.payoutType = "custom"
                 }
             }
         }.resume()
@@ -2521,7 +3646,7 @@ struct ProfileView: View {
 
         isProcessingDeposit = true
 
-        depositPaymentService.preparePaymentSheet(amount: amount) { error in
+        depositPaymentService.preparePaymentSheet(amount: amount, userId: userId) { error in
             if let error = error {
                 DispatchQueue.main.async {
                     self.isProcessingDeposit = false
@@ -2553,7 +3678,7 @@ struct ProfileView: View {
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
-    
+
     private func saveProfile() {
         profileErrorMessage = nil
         let trimmedName = profileUsername.trimmingCharacters(in: .whitespaces)
@@ -2648,12 +3773,97 @@ struct ProfileView: View {
                         print("✅ userId saved: \(id)")
                     }
                 }
-                
+
                 self.profileCompleted = true
                 self.isSignedIn = true
                 self.profilePassword = ""
                 self.profileErrorMessage = nil
                 self.isAccountExpanded = false
+            }
+        }.resume()
+    }
+    
+    // MARK: - Delete Account
+    
+    private func deleteAccount() {
+        guard !deleteAccountPassword.isEmpty else {
+            deleteAccountError = "Password is required"
+            showDeleteAccountAlert = true
+            return
+        }
+        
+        guard !userId.isEmpty else {
+            deleteAccountError = "No user ID found"
+            showDeleteAccountAlert = true
+            return
+        }
+        
+        isDeletingAccount = true
+        
+        let body: [String: Any] = [
+            "userId": userId,
+            "email": profileEmail,
+            "password": deleteAccountPassword
+        ]
+        
+        guard let url = URL(string: "/users/delete-account", relativeTo: StripeConfig.backendURL) else {
+            deleteAccountError = "Invalid backend URL"
+            isDeletingAccount = false
+            showDeleteAccountAlert = true
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isDeletingAccount = false
+                
+                if let error = error {
+                    self.deleteAccountError = "Failed: \(error.localizedDescription)"
+                    self.showDeleteAccountAlert = true
+                    return
+                }
+                
+                guard let http = response as? HTTPURLResponse else {
+                    self.deleteAccountError = "No response from server"
+                    self.showDeleteAccountAlert = true
+                    return
+                }
+                
+                if http.statusCode == 401 {
+                    self.deleteAccountError = "Incorrect password"
+                    self.showDeleteAccountAlert = true
+                    return
+                }
+                
+                if !(200..<300).contains(http.statusCode) {
+                    if let data = data,
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let errorMsg = json["error"] as? String {
+                        self.deleteAccountError = errorMsg
+                    } else {
+                        self.deleteAccountError = "Failed to delete account (status \(http.statusCode))"
+                    }
+                    self.showDeleteAccountAlert = true
+                    return
+                }
+                
+                // Success - clear all local data and sign out
+                print("✅ Account deleted successfully")
+                if let bundleID = Bundle.main.bundleIdentifier {
+                    UserDefaults.standard.removePersistentDomain(forName: bundleID)
+                    UserDefaults.standard.synchronize()
+                }
+                
+                // Reset UI state
+                self.isAccountExpanded = false
+                self.deleteAccountPassword = ""
+                self.deleteAccountError = nil
+                self.dismiss()
             }
         }.resume()
     }
@@ -2831,7 +4041,7 @@ struct AddRecipientSheet: View {
                                         .multilineTextAlignment(.leading)
                                         .foregroundStyle(.white)
                                         .padding(12)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                                         .background(Color.blue)
                                         .clipShape(RoundedRectangle(cornerRadius: 16))
                                 }
@@ -2847,7 +4057,7 @@ struct AddRecipientSheet: View {
                             .font(.system(.caption, design: .rounded, weight: .medium))
                         Text("• Share the invite link + code above")
                             .font(.system(.caption2, design: .rounded))
-                        Text("• They will receive your committed missed goal payout")
+                        Text("• They will receive your forfeited stakes if you miss")
                             .font(.system(.caption2, design: .rounded))
                     }
                     .padding(.top, 4)
@@ -2894,9 +4104,9 @@ struct AddRecipientSheet: View {
                             .font(.system(.caption, design: .rounded, weight: .medium))
                         Text("• A unique 8-character invite code")
                             .font(.system(.caption2, design: .rounded))
-                        Text("• Link to set up payout details")
+                        Text("• Link to set up receiving details")
                             .font(.system(.caption2, design: .rounded))
-                        Text("• Notification that they'll receive $\(String(format: "%.2f", missedGoalPayout)) per missed goal")
+                        Text("• Notification that your $\(String(format: "%.2f", missedGoalPayout)) stakes go to them if you miss")
                             .font(.system(.caption2, design: .rounded))
                     }
                     .padding(.top, 4)
@@ -3168,24 +4378,50 @@ struct SignInView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var errorMessage: String?
-    // AppStorage for payout settings (populated from server on sign in)
+    
+    // === ALL AppStorage populated from server on sign in ===
+    
+    // User identity
+    @AppStorage("userId") private var userId: String = ""
     @AppStorage("profileCashHoldings") private var profileCashHoldings: Double = 0
+    @AppStorage("userTimezone") private var userTimezone: String = "America/Los_Angeles"
+    
+    // Payout settings
     @AppStorage("missedGoalPayout") private var missedGoalPayout: Double = 0.0
     @AppStorage("payoutCommitted") private var payoutCommitted: Bool = false
     @AppStorage("committedPayoutAmount") private var committedPayoutAmount: Double = 0.0
-    @AppStorage("payoutType") private var payoutType: String = "charity"
+    @AppStorage("payoutType") private var payoutType: String = "custom"  // Charity removed per App Store
     @AppStorage("destinationCommitted") private var destinationCommitted: Bool = false
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
     @AppStorage("committedDestination") private var committedDestination: String = "charity"
-    @AppStorage("userId") private var userId: String = ""
+    
+    // Lock status
     @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
-    // Objective settings (populated from server on sign in)
+    
+    // Objective settings
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
     @AppStorage("objectiveDeadline") private var objectiveDeadline: Date = {
         let components = DateComponents(hour: 22, minute: 0)
         return Calendar.current.date(from: components) ?? Date()
     }()
+    @AppStorage("objectiveType") private var objectiveType: String = "pushups"
+    
+    // Multi-objective settings
+    @AppStorage("pushupsEnabled") private var pushupsEnabled: Bool = true
+    @AppStorage("runEnabled") private var runEnabled: Bool = false
+    @AppStorage("runDistance") private var runDistance: Double = 2.0
+    
+    // Strava
+    @AppStorage("stravaConnected") private var stravaConnected: Bool = false
+    @AppStorage("stravaAthleteName") private var stravaAthleteName: String = ""
+    
+    // Today's progress
+    @AppStorage("todayPushUpCount") private var todayPushUpCount: Int = 0
+    @AppStorage("hasCompletedTodayPushUps") private var hasCompletedTodayPushUps: Bool = false
+    @AppStorage("todayRunDistance") private var todayRunDistance: Double = 0.0
+    @AppStorage("hasCompletedTodayRun") private var hasCompletedTodayRun: Bool = false
+    
     @State private var isLoading = false
     
     var body: some View {
@@ -3344,10 +4580,19 @@ struct SignInView: View {
                     return
                 }
                 
-                                // Parse user data from response and populate all profile fields
+                // Parse user data from response and populate ALL profile fields
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let user = json["user"] as? [String: Any] {
-                    // Basic profile fields
+                    
+                    // === IDENTITY ===
+                    if let id = user["id"] as? String {
+                        self.userId = id
+                        UserDefaults.standard.set(id, forKey: "userId")
+                    } else if let id = user["id"] as? Int {
+                        self.userId = String(id)
+                        UserDefaults.standard.set(String(id), forKey: "userId")
+                    }
+                    
                     if let fullName = user["full_name"] as? String, !fullName.isEmpty {
                         self.profileUsername = fullName
                     }
@@ -3360,65 +4605,162 @@ struct SignInView: View {
             self.profileEmail = self.email
                     }
                     
-                    // User ID (can be String or Int from backend)
-                    if let id = user["id"] as? String {
-                        self.userId = id
-                        UserDefaults.standard.set(id, forKey: "userId")
-                    } else if let id = user["id"] as? Int {
-                        self.userId = String(id)
-                        UserDefaults.standard.set(String(id), forKey: "userId")
-                    }
-                    
-                    // Balance
+                    // === BALANCE ===
                     if let balanceCents = user["balance_cents"] as? Int {
                         self.profileCashHoldings = Double(balanceCents) / 100.0
+                    } else {
+                        self.profileCashHoldings = 0
                     }
                     
-                    // Payout settings
+                    // === TIMEZONE ===
+                    if let tz = user["timezone"] as? String, !tz.isEmpty {
+                        self.userTimezone = tz
+                    }
+                    
+                    // === PAYOUT SETTINGS ===
                     if let missedPayout = user["missed_goal_payout"] as? Double {
                         self.missedGoalPayout = missedPayout
                         self.committedPayoutAmount = missedPayout
+                    } else {
+                        self.missedGoalPayout = 0
+                        self.committedPayoutAmount = 0
                     }
                     if let payoutCommit = user["payout_committed"] as? Bool {
                         self.payoutCommitted = payoutCommit
+                    } else {
+                        self.payoutCommitted = false
                     }
                     if let destination = user["payout_destination"] as? String {
-                        self.payoutType = destination.lowercased()
+                        // Force to custom - charity no longer supported
+                        self.payoutType = "custom"
+                    } else {
+                        self.payoutType = "custom"
                     }
                     if let destCommit = user["destination_committed"] as? Bool {
                         self.destinationCommitted = destCommit
+                    } else {
+                        self.destinationCommitted = false
                     }
                     if let commitDest = user["committed_destination"] as? String {
                         self.committedDestination = commitDest
                     }
                     
-                    // Objective settings
+                    // === OBJECTIVE SETTINGS ===
+                    if let objType = user["objective_type"] as? String {
+                        self.objectiveType = objType
+                    } else {
+                        self.objectiveType = "pushups"
+                    }
                     if let objCount = user["objective_count"] as? Int {
                         self.pushupObjective = objCount
+                    } else if let pushCount = user["pushups_count"] as? Int {
+                        self.pushupObjective = pushCount
+                    } else if let pushCount = user["pushups_count"] as? Double {
+                        self.pushupObjective = Int(pushCount)
                     }
                     if let objSchedule = user["objective_schedule"] as? String {
                         self.scheduleType = objSchedule.capitalized
+                    } else {
+                        self.scheduleType = "Daily"
                     }
-                    if let objDeadline = user["objective_deadline"] as? String {
-                        // Parse "HH:mm" format to Date
+                    if let objDeadline = user["objective_deadline"] as? String, !objDeadline.isEmpty {
+                        // Handle both "HH:mm" and "HH:mm:ss" formats from backend
+                        let cleanDeadline = String(objDeadline.prefix(5))
                         let formatter = DateFormatter()
                         formatter.dateFormat = "HH:mm"
-                        if let time = formatter.date(from: objDeadline) {
+                        if let time = formatter.date(from: cleanDeadline) {
                             self.objectiveDeadline = time
                         }
                     }
                     
-                    // Settings lock date
-                    if let lockDateStr = user["settings_locked_until"] as? String {
-                        let isoFormatter = ISO8601DateFormatter()
-                        if let lockDate = isoFormatter.date(from: lockDateStr) {
-                            self.settingsLockedUntil = lockDate
-                        }
+                    // === MULTI-OBJECTIVE ===
+                    if let pushEnabled = user["pushups_enabled"] as? Bool {
+                        self.pushupsEnabled = pushEnabled
+                    } else {
+                        self.pushupsEnabled = true
+                    }
+                    if let runEn = user["run_enabled"] as? Bool {
+                        self.runEnabled = runEn
+                    } else {
+                        self.runEnabled = false
+                    }
+                    if let runDist = user["run_distance"] as? Double {
+                        self.runDistance = runDist
+                    } else if let runDist = user["run_distance"] as? Int {
+                        self.runDistance = Double(runDist)
                     }
                     
+                    // === STRAVA ===
+                    if let stravaConn = user["strava_connected"] as? Bool {
+                        self.stravaConnected = stravaConn
+                    } else {
+                        self.stravaConnected = false
+                    }
+                    // Reset athlete name if not connected
+                    if !self.stravaConnected {
+                        self.stravaAthleteName = ""
+                    }
+                    
+                    // === SETTINGS LOCK ===
+                    if let lockDateStr = user["settings_locked_until"] as? String, !lockDateStr.isEmpty {
+                        let isoFormatter = ISO8601DateFormatter()
+                        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        if let lockDate = isoFormatter.date(from: lockDateStr) {
+                            self.settingsLockedUntil = lockDate
+                        } else {
+                            isoFormatter.formatOptions = [.withInternetDateTime]
+                            if let lockDate = isoFormatter.date(from: lockDateStr) {
+                                self.settingsLockedUntil = lockDate
+                            } else {
+                                self.settingsLockedUntil = Date.distantPast
+                            }
+                        }
+                    } else {
+                        self.settingsLockedUntil = Date.distantPast
+                    }
+                    
+                    // === TODAY'S PROGRESS ===
+                    if let todayProgress = user["today_progress"] as? [String: Any] {
+                        // Pushups progress
+                        if let pushups = todayProgress["pushups"] as? [String: Any] {
+                            if let completed = pushups["completed"] as? Int {
+                                self.todayPushUpCount = completed
+                            }
+                            if let status = pushups["status"] as? String {
+                                self.hasCompletedTodayPushUps = (status == "completed")
+                            }
+                        } else {
+                            self.todayPushUpCount = 0
+                            self.hasCompletedTodayPushUps = false
+                        }
+                        
+                        // Run progress
+                        if let run = todayProgress["run"] as? [String: Any] {
+                            if let completed = run["completed"] as? Double {
+                                self.todayRunDistance = completed
+                            } else if let completed = run["completed"] as? Int {
+                                self.todayRunDistance = Double(completed)
+                            }
+                            if let status = run["status"] as? String {
+                                self.hasCompletedTodayRun = (status == "completed")
+                            }
+                        } else {
+                            self.todayRunDistance = 0.0
+                            self.hasCompletedTodayRun = false
+                        }
+                    } else {
+                        self.todayPushUpCount = 0
+                        self.hasCompletedTodayPushUps = false
+                        self.todayRunDistance = 0.0
+                        self.hasCompletedTodayRun = false
+                    }
+                    
+                    // === COMPLETE SIGN IN ===
             self.isSignedIn = true
                     self.profileCompleted = true
             self.dismiss()
+                    
+                    print("✅ Sign-in complete - loaded all user data")
                 } else {
                     self.errorMessage = "Failed to parse user data"
         }

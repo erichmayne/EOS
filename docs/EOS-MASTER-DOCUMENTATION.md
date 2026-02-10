@@ -1,24 +1,75 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: February 1, 2026
-> Version: 2.7 - App Store Submitted
+> Last Updated: February 8, 2026
+> Version: 2.8 - App Store Rejection Fixes Applied
 
 ---
 
-## 🆕 Latest Updates (Jan 30, 2026)
+## 🆕 Latest Updates (Feb 5-8, 2026) - App Store Rejection Response
 
-### Recipient Linking Architecture Fix
+### App Store Rejection (Feb 5, 2026)
+Apple rejected v1.0 for three guideline violations:
+1. **3.2.2** - Charitable donations in-app without nonprofit status
+2. **5.1.1(v)** - No account deletion feature
+3. **3.2.2** - "Penalty-based payment" language
+
+### All Fixes Applied (Working & Deployed)
+
+#### 1. Account Deletion Feature (Guideline 5.1.1(v)) ✅
+- Added "Delete Account" button in Profile → Account section
+- Requires password confirmation + "DELETE" text entry
+- Purges all user data from: `users`, `user_objectives`, `objective_sessions`, `invite_relationships`, `transactions`, `withdrawal_requests`
+- Backend endpoint: `POST /users/delete-account` (in `server.js`)
+- Clears all local `UserDefaults` and signs user out
+
+#### 2. Commitment Contract Reframing (Guideline 3.2.2 - Penalties) ✅
+All "penalty" language replaced with commitment contract framing:
+- "Missed Goal Payout" → "Accountability Stakes"
+- "Commit Payout" → "Set Your Stakes"
+- "Payout Destination" → "Designated Recipient"
+- "will be deducted" → "Complete your goal to keep your money"
+- Added **three acknowledgment checkboxes** before setting stakes:
+  1. "I am voluntarily placing these stakes"
+  2. "I understand stakes are non-refundable if I miss my goal"
+  3. "I am 18 years of age or older"
+- `canSetStakes` computed property enforces all checkboxes checked
+- Created `docs/COMMITMENT-CONTRACT-TERMS.md` with full legal terms
+- Updated `web/terms.html` with commitment contract language
+- Added Terms of Service link at bottom of Profile page (opens `https://live-eos.com/terms`)
+
+#### 3. Charity Code Hidden (Guideline 3.2.2 - Donations) ✅
+- All charity references **removed from UI** and App Store metadata
+- Charity code **preserved in codebase** for future use (nonprofit status)
+- `@AppStorage("selectedCharity")` and charity list kept in code but not rendered
+- `.sheet(isPresented: $showingCharityPicker)` block kept but never triggered
+- Website (`branding/eos-website-improved.html`) updated to remove charity references
+- "Donated to Charities" metric changed to "Stakes Committed" on website
+
+#### 4. App Store Metadata Updated ✅
+- `docs/APP-STORE-METADATA.md` rewritten with commitment contract framing
+- App Review Notes reference StickK as approved precedent
+- Account deletion feature explicitly documented for reviewers
+- No charity or penalty language anywhere in submission
+
+#### 5. Website Terms & Branding Deployed ✅
+- `web/terms.html` - Full Terms of Service & Commitment Contract
+- `branding/eos-website-improved.html` - Updated marketing site
+- Both deployed to `/var/www/live-eos/` on server via `scp`
+
+### Previous Updates (Jan 30, 2026)
+
+#### Recipient Linking Architecture Fix
 - **Root cause identified**: iOS was expecting `Int` for invite IDs, but database uses UUID strings
 - **Backend bug**: `/users/:userId/invites` was querying wrong table (`users` instead of `recipients`)
 - **Status check bug**: Duplicate detection checked for `status === 'active'` but we set `'accepted'`
 - **Added**: Detailed recipient linking architecture docs (see Database Schema section)
 
-### Key Fixes Applied
+#### Key Fixes Applied
 1. iOS `syncInviteStatuses()` now handles UUID strings for invite IDs
 2. Backend `/users/:userId/invites` now correctly queries `recipients` table
 3. Backend `/recipient-signup` status check fixed (`'accepted'` not `'active'`)
 4. Added extensive logging to recipient signup flow
 
-### Previous Fixes (Jan 29)
+#### Previous Fixes (Jan 29)
 - **payoutType casing bug**: Fixed server returning "Charity" vs UI expecting "charity"
 - **Live Stripe key**: Added `pk_live_...` to iOS app
 - Stripe CLI installed for testing
@@ -2248,6 +2299,77 @@ open /Users/emayne/morning-would/Eos.xcodeproj
 
 ## 🔄 Update Log
 
+### February 5-8, 2026 - v2.8 (App Store Rejection Fixes)
+
+#### App Store Rejection Response
+Apple rejected the initial v1.0 submission. All three violations addressed:
+
+#### New Feature: Account Deletion
+- **UI**: Small "Delete Account" button in Profile → Account dropdown
+- **Flow**: Requires password + typing "DELETE" to confirm
+- **Backend**: `POST /users/delete-account` purges from all tables (`users`, `user_objectives`, `objective_sessions`, `invite_relationships`, `transactions`, `withdrawal_requests`)
+- **Client**: Clears all `UserDefaults`, signs out
+
+#### New Feature: Stakes Acknowledgment Checkboxes
+- Three `@State` booleans: `acknowledgedVoluntary`, `acknowledgedNoRefund`, `acknowledgedOver18`
+- Toggle buttons appear before "Set Your Stakes" when `missedGoalPayout > 0` and not yet committed
+- `canSetStakes` computed property gates the commit button
+
+#### UI Copy Overhaul (Commitment Contract Framing)
+All penalty/charity language replaced throughout `ContentView.swift`:
+| Old | New |
+|-----|-----|
+| Missed Goal Payout | Accountability Stakes |
+| Commit Payout | Set Your Stakes |
+| Payout Destination | Designated Recipient |
+| will be deducted | Complete your goal to keep your money |
+| Payout Amount | Stakes Amount |
+
+#### Charity Code Status
+- **In code**: Charity list, picker sheet, `@AppStorage` all preserved
+- **In UI**: Hidden - picker never triggers, charity options not shown
+- **In metadata**: All references removed
+- **Reason**: App Store 3.2.2 - need Benevity/Candid nonprofit approval for in-app donations
+- **Future**: Re-enable when nonprofit status acquired
+
+#### Terms of Service
+- Created `docs/COMMITMENT-CONTRACT-TERMS.md`
+- Updated `web/terms.html` with full Terms of Service & Commitment Contract
+- Added Terms link at bottom of Profile page (opens `https://live-eos.com/terms`)
+- Footer text: "By using EOS, you agree to our Terms of Service and Commitment Contract."
+
+#### Website Updates (Deployed to `/var/www/live-eos/`)
+- `terms.html` - New terms page
+- `index.html` - Updated marketing site, charity refs removed, "Stakes Committed" metric
+
+#### App Store Metadata
+- `docs/APP-STORE-METADATA.md` fully rewritten
+- References StickK as approved precedent for commitment contracts
+- Account deletion documented in App Review Notes
+- Zero charity/penalty language
+
+#### Deposit Button Fix
+- Deposit and Withdraw buttons in Balance section had Form tap bleed
+- Withdraw `Button` converted to `Text` + `.onTapGesture` to isolate from Deposit button
+- Deposit button retains `.buttonStyle(.borderless)` as the only `Button` in the section
+
+#### Objective Settings Button Fix (In Progress)
+- Objectives header `Button` converted to `HStack` + `.onTapGesture` to prevent tap bleed with Set/Unset buttons
+- Removed `withAnimation` wrappers from `setPushups()`/`unsetPushups()`/`setRun()`/`unsetRun()` success paths to match working `setSchedule()` pattern
+- **Status**: Changes applied but not yet validated with signed-in user on simulator
+
+#### Key Files Changed
+| File | Changes |
+|------|---------|
+| `ContentView.swift` | Account deletion, stakes acknowledgments, UI copy overhaul, charity hidden, terms link, deposit/withdraw fix, objective button fix |
+| `server.js` (remote) | `POST /users/delete-account` endpoint |
+| `web/terms.html` | Full Terms of Service & Commitment Contract |
+| `branding/eos-website-improved.html` | Marketing site - charity refs removed |
+| `docs/APP-STORE-METADATA.md` | Rewritten for resubmission |
+| `docs/COMMITMENT-CONTRACT-TERMS.md` | New - legal terms document |
+
+---
+
 ### January 28, 2026 - v2.4 (PM2 + Code-Only Invites)
 
 #### PM2 Process Manager - Installed & Configured ✅
@@ -2398,9 +2520,11 @@ open /Users/emayne/morning-would/Eos.xcodeproj
 - [ ] Email system (SendGrid integration)
 - [ ] Password reset flow
 - [ ] JWT authentication
-- [ ] Multi-objective support
-- [ ] Push notifications
-- [ ] App Store submission
+- [x] Multi-objective support (pushups + run)
+- [x] Push notifications (objective reminders)
+- [x] App Store submission (submitted, rejected, fixes applied)
+- [ ] Charity donations (code ready, need nonprofit status for Benevity/Candid approval)
+- [ ] Strava production access (currently dev mode, 1 athlete limit)
 
 ### Documentation Gaps
 - [ ] Stripe webhook setup guide
