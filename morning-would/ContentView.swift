@@ -952,16 +952,20 @@ struct ObjectiveSettingsView: View {
                 // onTapGesture (not Button) avoids Form button tap bleed,
                 // and the set/unset functions use optimistic updates (synchronous
                 // state change) so the UI reflects immediately.
-                Text(settings.pushupsIsSet ? "Unset" : "Set")
+                Text(pushupsButtonText)
                     .font(.system(.caption, design: .rounded, weight: .semibold))
-                    .foregroundStyle(settings.pushupsIsSet ? Color.red : Color.white)
+                    .foregroundStyle(pushupsButtonTextColor)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(settings.pushupsIsSet ? Color.red.opacity(0.1) : goldColor))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.pushupsIsSet ? Color.red : Color.clear, lineWidth: 1))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(pushupsButtonColor))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(pushupsButtonTextColor == Color.red ? Color.red : Color.clear, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if settings.pushupsIsSet { unsetPushups() } else { setPushups() }
+                        if !settings.pushupsIsSet || pushupsHasChanges {
+                            setPushups()  // Set or Update
+                        } else {
+                            unsetPushups()
+                        }
                     }
             }
         }
@@ -1017,20 +1021,24 @@ struct ObjectiveSettingsView: View {
                 
                 Spacer()
                 
-                Text(settings.runIsSet ? "Unset" : "Set")
+                Text(runButtonText)
                     .font(.system(.caption, design: .rounded, weight: .semibold))
-                    .foregroundStyle(settings.runIsSet ? Color.red : (stravaConnected ? Color.white : Color.gray))
+                    .foregroundStyle(runButtonTextColor)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(settings.runIsSet ? Color.red.opacity(0.1) : (stravaConnected ? goldColor : Color.gray.opacity(0.3))))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.runIsSet ? Color.red : Color.clear, lineWidth: 1))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(runButtonColor))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(runButtonTextColor == Color.red ? Color.red : Color.clear, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture {
                         if !stravaConnected {
                             showStravaRequiredAlert = true
                             return
                         }
-                        if settings.runIsSet { unsetRun() } else { setRun() }
+                        if !settings.runIsSet || runHasChanges {
+                            setRun()  // Set or Update
+                        } else {
+                            unsetRun()
+                        }
                     }
             }
             
@@ -1050,6 +1058,52 @@ struct ObjectiveSettingsView: View {
         .background(settings.runIsSet ? Color.green.opacity(0.05) : Color.clear)
         .cornerRadius(8)
         .opacity(stravaConnected ? 1 : 0.7)
+    }
+    
+    // Check if pushups target has been changed from saved value
+    private var pushupsHasChanges: Bool {
+        settings.pushupsIsSet && tempPushupCount != objective
+    }
+    
+    private var pushupsButtonText: String {
+        if !settings.pushupsIsSet { return "Set" }
+        if pushupsHasChanges { return "Update" }
+        return "Unset"
+    }
+    
+    private var pushupsButtonColor: Color {
+        if !settings.pushupsIsSet { return goldColor }
+        if pushupsHasChanges { return goldColor }
+        return Color.red.opacity(0.1)
+    }
+    
+    private var pushupsButtonTextColor: Color {
+        if !settings.pushupsIsSet { return Color.white }
+        if pushupsHasChanges { return Color.white }
+        return Color.red
+    }
+    
+    // Check if run distance has been changed from saved value
+    private var runHasChanges: Bool {
+        settings.runIsSet && tempRunDistance != settings.runDistance
+    }
+    
+    private var runButtonText: String {
+        if !settings.runIsSet { return "Set" }
+        if runHasChanges { return "Update" }
+        return "Unset"
+    }
+    
+    private var runButtonColor: Color {
+        if !settings.runIsSet { return stravaConnected ? goldColor : Color.gray.opacity(0.3) }
+        if runHasChanges { return goldColor }
+        return Color.red.opacity(0.1)
+    }
+    
+    private var runButtonTextColor: Color {
+        if !settings.runIsSet { return stravaConnected ? Color.white : Color.gray }
+        if runHasChanges { return Color.white }
+        return Color.red
     }
     
     // Check if schedule has been changed from saved values
