@@ -1,10 +1,78 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: February 8, 2026
-> Version: 2.8 - App Store Rejection Fixes Applied
+> Last Updated: February 10, 2026
+> Version: 3.0 - Strava Production, Deauth & UI Overhaul
 
 ---
 
-## 🆕 Latest Updates (Feb 5-8, 2026) - App Store Rejection Response
+## 🆕 Latest Updates (Feb 10, 2026) - Strava Production & UI Overhaul
+
+### Strava Production Readiness
+- **Deauthorization webhook handler**: Backend now processes `athlete.update` events with `updates.authorized === 'false'` — required by Strava API terms. Unlinks user and deletes `strava_connections` record.
+- **Full disconnect with API revocation**: `DELETE /strava/disconnect/:userId` now calls Strava's `POST /oauth/deauthorize` to revoke the access token on Strava's side (handles expired tokens by refreshing first), then deletes the `strava_connections` DB record.
+- **Official branding assets**: Added Strava's official "Connect with Strava" button (orange, 1x + 2x PNG) and "Powered by Strava" logo (orange horizontal) to Xcode asset catalog per brand guidelines.
+- **Strava icon**: Added the official Strava arrow/chevron icon mark to the Profile Strava section header.
+- **App review form submitted**: Description, callback domain, support URL, and branding screenshots provided to Strava for production API access review.
+
+### iOS UI Updates (ContentView.swift)
+- **Official Strava button**: Profile Strava section now uses the official `Image("btn_strava_connectwith_orange")` asset at 48px height per Strava brand guidelines (replaces generic orange button).
+- **Powered by Strava**: Displays the official "Powered by Strava" logo (14px, subtle opacity) when connected.
+- **Disconnect confirmation**: Tapping "Disconnect Strava" now shows a confirmation alert before proceeding.
+- **Strava icon in header**: Official Strava arrow/chevron icon replaces the SF Symbol runner icon.
+- **Lock button UI improvements**: "Lock until next deadline" button restyled with gold background and white text; confirmation alerts added for both lock buttons.
+- **Recipient section locking**: When settings are locked, recipient selection is disabled — "Add" button becomes "Locked" text, selection and delete are blocked, "Commit Destination" shows locked state.
+- **Accountability stakes locking**: When settings are locked, entire stakes section replaced with static summary showing lock icon, committed amount, and "Locked until commitment period ends" text.
+- **Dynamic notification content**: `NotificationManager.scheduleObjectiveReminder` now accepts objective details and builds dynamic notification body (e.g., "You didn't complete your 4.0 mile run before the deadline...").
+- **Foreground refresh**: App now refreshes today's progress (run distance, completion status) on `.onAppear` and when returning from background.
+- **Compiler performance**: Extracted large view sections into computed properties (`accountExpandedContent`, `stravaConnectionSection`, `stravaConnectedContent`, `stravaDisconnectedContent`, `recipientSection`, `stakesSection`, `stakesFullSelector`, `stakesAcknowledgments`) to resolve "unable to type-check" compiler errors.
+
+### Backend Fixes (server.js)
+- **Ghost pushups fix**: Legacy fallback in `/objectives/settings/:userId`, `/signin`, and `create-daily-sessions` now only uses `users.objective_count` if user has *no* entries in `user_objectives` table (prevents re-enabling disabled objectives).
+- **Strava webhook token refresh**: Webhook handler checks `token_expires_at` and uses `refresh_token` to obtain new access token if expired before fetching activity details.
+- **Strava webhook session handling**: Uses check-then-insert/update pattern with correct `objective_type: 'run'`, raw miles for counts, and proper `onConflict` on `(user_id, session_date, objective_type)`.
+- **Multi-objective today endpoint**: `GET /objectives/today/:userId` returns all sessions for the day as `sessions` array (supports both pushups and run).
+- **Multi-objective daily sessions cron**: `create-daily-sessions` refactored to use `user_objectives` table first, falling back to legacy `users` fields only if no objectives exist.
+- **Removed broken endpoint**: `/users/:userId/deduct-balance` removed (used invalid Supabase methods).
+- **Duplicate route removed**: Duplicate `/verify-invite/:code` cleaned up; surviving route enhanced with explicit joins and dynamic `payoutAmount`.
+- **`app.listen()` moved to end of file**: Ensures all routes are registered before the server starts accepting traffic.
+- **Delete account endpoint recovered**: `POST /users/delete-account` re-added after accidental overwrite during previous deployment.
+
+### Database Migration
+- `objective_sessions` unique constraint changed from `UNIQUE(user_id, session_date)` to `UNIQUE(user_id, session_date, objective_type)` to support multiple objective types per day.
+
+### Website
+- **Contact links fixed**: "Help Center" and "Contact Us" in footer now link to `mailto:connect@live-eos.com` (were dead `#` links). Privacy Policy and Terms link to `/terms.html`.
+
+### Deployment
+- Backend (`server.js`) deployed to `159.26.94.94:/home/user/morning-would-payments/`
+- Website (`eos-website-improved.html`) deployed to `/var/www/live-eos/index.html`
+- PM2 processes restarted and confirmed online.
+
+---
+
+## Previous Updates (Feb 9, 2026) - Objective Settings & Backend Fix
+
+### Objective Set/Unset Buttons Fixed (ContentView.swift)
+- **Root cause**: Two issues — (1) SwiftUI Form button tap bleed with multiple buttons in one Section, (2) `@Published` state changes from `DispatchQueue.main.async` in URLSession callbacks missing SwiftUI's render transaction
+- **Fix**: Converted pushups/run Set/Unset buttons from `Button` to `Text` + `.onTapGesture` (prevents tap bleed), switched to **optimistic updates** (state changes synchronously during gesture handler, backend saves in background)
+- **Update button**: Pushups and run buttons now show "Update" (gold) when the user changes the target value while already set, matching the existing deadline button behavior
+- **Race condition guard**: Added `hasOptimisticUpdate` flag that prevents `.onAppear`'s `loadObjectivesFromBackend()` GET response from overwriting in-flight optimistic state
+- **`onSave` callback**: Moved to fire only after backend confirmation (was previously racing with the save POST)
+
+### Backend Fix: Empty Update Crash (server.js)
+- **Root cause**: `POST /objectives/settings/:userId` with only `pushups_enabled`/`pushups_count` fields built an empty `updateData` object for the `users` table. Supabase/PostgREST rejects `.update({})` with 400 error. This was **always failing silently** — old iOS code just printed the error without reverting.
+- **Fix**: Skip `users` table update when `updateData` is empty; fetch current user data with SELECT instead for session logic
+- **Null safety**: Added guard for non-existent users to prevent crash in session upsert logic
+
+### Deposit Button Fixed (ContentView.swift)
+- **Root cause**: SwiftUI Form button tap bleed — Deposit `Button` and Withdraw `Text` + `.onTapGesture` in same Section fired simultaneously
+- **Fix**: Converted Deposit to `HStack` + `.contentShape(Rectangle())` + `.onTapGesture`, added `.contentShape(Rectangle())` to Withdraw text to precisely define tap targets
+
+### Dead Code Cleaned
+- Removed unused `isSavingPushups` and `isSavingRun` @State variables (replaced by optimistic update pattern)
+
+---
+
+## Previous Updates (Feb 5-8, 2026) - App Store Rejection Response
 
 ### App Store Rejection (Feb 5, 2026)
 Apple rejected v1.0 for three guideline violations:
@@ -2299,6 +2367,29 @@ open /Users/emayne/morning-would/Eos.xcodeproj
 
 ## 🔄 Update Log
 
+### February 9, 2026 - v2.9 (Objective Settings & Backend Fix)
+
+#### SwiftUI Form Button Fixes
+- **Pushups/Run Set/Unset**: Converted from `Button` to `Text` + `.onTapGesture` to prevent Form tap bleed in multi-button Sections
+- **Deposit Button**: Converted from `Button` to `HStack` + `.onTapGesture` to prevent simultaneous Withdraw trigger
+- **Optimistic Updates**: All set/unset functions now update UI synchronously during the gesture handler; backend saves in background with automatic revert on failure
+- **Race Condition Guard**: `hasOptimisticUpdate` @State flag prevents `.onAppear` `loadObjectivesFromBackend()` from overwriting in-flight optimistic state
+- **"Update" Button State**: Pushups and run buttons now show "Update" (gold) when target value is changed while already set, matching deadline button UX
+
+#### Backend: POST /objectives/settings/:userId
+- Fixed crash when only `pushups_enabled`/`pushups_count` or `run_enabled`/`run_distance` sent (empty `updateData` caused PostgREST 400 on `.update({})`)
+- Now skips `users` table update when no user-level fields present; fetches user data via SELECT for session logic
+- Added null-user guard for session upsert
+
+#### Dead Code Removed
+- `isSavingPushups`, `isSavingRun` @State variables (replaced by optimistic update pattern)
+
+#### Architecture Notes
+- `objectiveSaveGeneration` + `.id()` retained as safety net for view recreation (belt-and-suspenders with optimistic updates)
+- PM2 process name on server is now `server` (id: 2); old `eos-backend` (id: 1) is stopped
+
+---
+
 ### February 5-8, 2026 - v2.8 (App Store Rejection Fixes)
 
 #### App Store Rejection Response
@@ -2348,21 +2439,28 @@ All penalty/charity language replaced throughout `ContentView.swift`:
 - Account deletion documented in App Review Notes
 - Zero charity/penalty language
 
-#### Deposit Button Fix
+#### Deposit Button Fix ✅
 - Deposit and Withdraw buttons in Balance section had Form tap bleed
-- Withdraw `Button` converted to `Text` + `.onTapGesture` to isolate from Deposit button
-- Deposit button retains `.buttonStyle(.borderless)` as the only `Button` in the section
+- Deposit `Button` converted to `HStack` + `.contentShape(Rectangle())` + `.onTapGesture` to isolate from Withdraw
+- Withdraw `Text` also given `.contentShape(Rectangle())` for precise tap target
 
-#### Objective Settings Button Fix (In Progress)
-- Objectives header `Button` converted to `HStack` + `.onTapGesture` to prevent tap bleed with Set/Unset buttons
-- Removed `withAnimation` wrappers from `setPushups()`/`unsetPushups()`/`setRun()`/`unsetRun()` success paths to match working `setSchedule()` pattern
-- **Status**: Changes applied but not yet validated with signed-in user on simulator
+#### Objective Settings Button Fix ✅
+- Pushups/Run Set/Unset buttons converted from `Button` to `Text` + `.onTapGesture` (prevents Form tap bleed)
+- Switched to **optimistic updates** — state changes synchronously during gesture, backend saves in background with revert on failure
+- Added `hasOptimisticUpdate` flag to block stale `loadObjectivesFromBackend()` GET responses from overwriting optimistic state
+- Added "Update" button state (gold) when user changes target value while already set (matches deadline button UX)
+- Removed dead `isSavingPushups`/`isSavingRun` @State variables
+
+#### Backend Fix: Empty Update in /objectives/settings ✅
+- `POST /objectives/settings/:userId` crashed with 400 when only pushups/run fields sent (empty `updateData` for users table)
+- Now skips users-table update when `updateData` is empty; fetches user data with SELECT instead
+- Added null safety for non-existent users in session logic
 
 #### Key Files Changed
 | File | Changes |
 |------|---------|
-| `ContentView.swift` | Account deletion, stakes acknowledgments, UI copy overhaul, charity hidden, terms link, deposit/withdraw fix, objective button fix |
-| `server.js` (remote) | `POST /users/delete-account` endpoint |
+| `ContentView.swift` | Account deletion, stakes acknowledgments, UI copy overhaul, charity hidden, terms link, deposit/withdraw fix, objective button fix, optimistic updates, Update button state |
+| `server.js` (local + remote) | `POST /users/delete-account` endpoint, empty-update fix in `/objectives/settings` |
 | `web/terms.html` | Full Terms of Service & Commitment Contract |
 | `branding/eos-website-improved.html` | Marketing site - charity refs removed |
 | `docs/APP-STORE-METADATA.md` | Rewritten for resubmission |

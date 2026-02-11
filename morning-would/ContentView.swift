@@ -454,14 +454,19 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             checkAndResetDaily()
+            refreshTodayProgress()
         }
         .onAppear {
             checkAndResetDaily()
+            refreshTodayProgress()
             notificationManager.requestPermissions()
-            if shouldShowObjective && !objectiveMet {
+            if shouldShowObjective && hasAnyObjective && !objectiveMet {
                 notificationManager.scheduleObjectiveReminder(
                     deadline: objectiveDeadline,
-                    objective: pushupObjective,
+                    pushupsEnabled: objectiveSettings.pushupsEnabled,
+                    pushupTarget: pushupObjective,
+                    runEnabled: objectiveSettings.runEnabled,
+                    runDistance: objectiveSettings.runDistance,
                     scheduleType: scheduleType
                 )
             }
@@ -479,11 +484,43 @@ struct ContentView: View {
         if !calendar.isDateInToday(lastReset) {
             hasCompletedTodayPushUps = false
             todayPushUpCount = 0
+            todayRunDistance = 0.0
+            hasCompletedTodayRun = false
             UserDefaults.standard.set(Date(), forKey: lastResetKey)
         }
         
         // Also sync lock state from server (in case it was reset after missed objective)
         syncLockStateFromServer()
+    }
+    
+    /// Fetch today's objective progress from server (run distance from Strava, etc.)
+    private func refreshTodayProgress() {
+        guard !userId.isEmpty else { return }
+        guard let url = URL(string: "https://api.live-eos.com/objectives/today/\(userId)") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sessions = json["sessions"] as? [[String: Any]] else { return }
+            
+            DispatchQueue.main.async {
+                for session in sessions {
+                    guard let objType = session["objective_type"] as? String else { continue }
+                    let completedCount = session["completed_count"] as? Double
+                        ?? (session["completed_count"] as? Int).map { Double($0) }
+                        ?? 0.0
+                    let status = session["status"] as? String ?? "pending"
+                    
+                    if objType == "run" {
+                        self.todayRunDistance = completedCount
+                        self.hasCompletedTodayRun = (status == "completed")
+                    } else if objType == "pushups" {
+                        self.todayPushUpCount = Int(completedCount)
+                        self.hasCompletedTodayPushUps = (status == "completed")
+                    }
+                }
+            }
+        }.resume()
     }
     
     private func syncLockStateFromServer() {
@@ -827,13 +864,12 @@ struct ObjectiveSettingsView: View {
     // because an optimistic update was applied and hasn't been persisted yet.
     @State private var hasOptimisticUpdate: Bool = false
     
-    // Saving states
-    @State private var isSavingPushups: Bool = false
-    @State private var isSavingRun: Bool = false
+    // Saving state (schedule still uses async pattern; pushups/run use optimistic updates)
     @State private var isSavingSchedule: Bool = false
     
     // Alerts
     @State private var showLockConfirmation: Bool = false
+    @State private var showQuickLockConfirmation: Bool = false
     @State private var showStravaRequiredAlert: Bool = false
     
     // Success feedback
@@ -1236,25 +1272,21 @@ struct ObjectiveSettingsView: View {
     private var lockContentView: some View {
         VStack(spacing: 16) {
             // Quick Lock - until next deadline
-            Button(action: { lockUntilNextDeadline() }) {
-                HStack {
+            Button(action: { showQuickLockConfirmation = true }) {
+                HStack(spacing: 10) {
                     Image(systemName: "bolt.fill")
-                        .foregroundStyle(goldColor)
+                        .font(.system(size: 14))
                     Text("Lock until next deadline")
-                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
                     Spacer()
                     Text(nextDeadlineDescription)
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundStyle(Color.black.opacity(0.5))
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(Color.black.opacity(0.3))
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.7))
                 }
-                .foregroundStyle(Color.black)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(Color.gray.opacity(0.08))
-                .cornerRadius(10)
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(RoundedRectangle(cornerRadius: 10).fill(goldColor))
             }
             .buttonStyle(.plain)
             .disabled(!hasAnyObjectiveSet || !settings.scheduleIsSet)
@@ -1580,6 +1612,14 @@ struct ObjectiveSettingsView: View {
             } message: {
                 Text("Are you sure? You will NOT be able to change your objective settings or back out of your commitment for \(Int(lockDays)) days.")
             }
+            .alert("Lock Until Next Deadline?", isPresented: $showQuickLockConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Lock until \(nextDeadlineDescription)", role: .destructive) {
+                    lockUntilNextDeadline()
+                }
+            } message: {
+                Text("Your settings will be locked and cannot be changed until \(nextDeadlineDescription). This keeps you committed to your goals.")
+            }
             .alert("Strava Required", isPresented: $showStravaRequiredAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -1774,7 +1814,10 @@ struct ObjectiveSettingsView: View {
                     // Schedule notifications
                     self.notificationManager.scheduleObjectiveReminder(
                         deadline: self.deadline,
-                        objective: self.tempPushupCount,
+                        pushupsEnabled: self.settings.pushupsEnabled,
+                        pushupTarget: self.tempPushupCount,
+                        runEnabled: self.settings.runEnabled,
+                        runDistance: self.settings.runDistance,
                         scheduleType: self.scheduleType
                     )
                     
@@ -2117,13 +2160,27 @@ final class NotificationManager {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func scheduleObjectiveReminder(deadline: Date, objective: Int, scheduleType: String) {
+    func scheduleObjectiveReminder(deadline: Date, pushupsEnabled: Bool = false, pushupTarget: Int = 0, runEnabled: Bool = false, runDistance: Double = 0, scheduleType: String) {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: centerIdentifiers(for: scheduleType))
 
+        // Build objective-specific message
+        var goals: [String] = []
+        if pushupsEnabled && pushupTarget > 0 {
+            goals.append("\(pushupTarget) pushups")
+        }
+        if runEnabled && runDistance > 0 {
+            goals.append(String(format: "%.1f mile run", runDistance))
+        }
+        
         let content = UNMutableNotificationContent()
-        content.title = "Push-up Objective Missed"
-        content.body = "You didn't complete your \(objective) push-ups today. Your stakes will be forfeited to your designated recipient."
+        if goals.isEmpty {
+            content.title = "Objective Missed"
+            content.body = "You didn't complete today's objective before the deadline. Your stakes will be forfeited."
+        } else {
+            content.title = "Objective Missed"
+            content.body = "You didn't complete your \(goals.joined(separator: " + ")) before the deadline. Your stakes will be forfeited to your designated recipient."
+        }
         content.sound = .default
 
         let calendar = Calendar.current
@@ -2446,9 +2503,14 @@ struct ProfileView: View {
     @AppStorage("stravaAthleteName") private var stravaAthleteName: String = ""
     @AppStorage("objectiveType") private var objectiveType: String = "pushups"
     
+    private var isSettingsLocked: Bool {
+        settingsLockedUntil > Date()
+    }
+    
     @State private var showDestinationSelector: Bool = false
     @State private var isStravaExpanded: Bool = false
     @State private var isCheckingStrava: Bool = false
+    @State private var showDisconnectStravaConfirm: Bool = false
     @State private var activeRecipientName: String = ""
     @State private var activeRecipientId: String = ""
     @State private var depositAmount: String = ""
@@ -2583,242 +2645,7 @@ struct ProfileView: View {
                             .buttonStyle(.plain)
                             
                             if isAccountExpanded {
-                                VStack(spacing: 10) {
-                                    if !profileCompleted {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "info.circle.fill")
-                                                .font(.caption2)
-                                                .foregroundStyle(Color.orange)
-                                            Text("Save profile to send invites")
-                                                .font(.system(.caption2, design: .rounded))
-                                                .foregroundStyle(Color.orange)
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    
-                                    VStack(spacing: 8) {
-                                        HStack {
-                                            Image(systemName: "person")
-                                                .font(.caption)
-                                                .foregroundStyle(Color.black.opacity(0.6))
-                                                .frame(width: 20)
-                                            TextField("Name", text: $profileUsername)
-                                                .font(.system(.subheadline, design: .rounded))
-                                                .foregroundStyle(Color.black)
-                                        }
-                                        Divider()
-                                        
-                                        HStack {
-                                            Image(systemName: "envelope")
-                                                .font(.caption)
-                                                .foregroundStyle(Color.black.opacity(0.6))
-                                                .frame(width: 20)
-                                            TextField("Email", text: $profileEmail)
-                                                .font(.system(.subheadline, design: .rounded))
-                                                .keyboardType(.emailAddress)
-                                                .autocapitalization(.none)
-                                                .foregroundStyle(Color.black)
-                                        }
-                                        Divider()
-                                        
-                                        HStack {
-                                            Image(systemName: "lock")
-                                                .font(.caption)
-                                                .foregroundStyle(Color.black.opacity(0.6))
-                                                .frame(width: 20)
-                                            SecureField("Password", text: $profilePassword, prompt: Text("Password").foregroundColor(Color.black.opacity(0.5)))
-                                                .font(.system(.subheadline, design: .rounded))
-                                                .foregroundStyle(Color.black)
-                                        }
-                                    }
-                                    .padding(.vertical, 4)
-                                    
-                                    Button(action: saveProfile) {
-                                        HStack {
-                                            if isSavingProfile {
-                                                ProgressView()
-                                                    .scaleEffect(0.7)
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            } else {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .font(.caption)
-                                            }
-                                            Text("Update")
-                                                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                                        }
-                                        .foregroundStyle(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
-                                                    .opacity(isSavingProfile || !isProfileValid ? 0.6 : 1.0))
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(isSavingProfile || !isProfileValid)
-                                    
-                                    // Strava Connection Section
-                                    Divider()
-                                        .padding(.vertical, 8)
-                                    
-                                    Button(action: { isStravaExpanded.toggle() }) {
-                                        HStack {
-                                            Image(systemName: "figure.run")
-                                                .font(.system(size: 16))
-                                                .foregroundStyle(Color.orange)
-                                            
-                                            Text("Strava")
-                                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                                .foregroundStyle(Color.black)
-                                            
-                                            Spacer()
-                                            
-                                            if stravaConnected {
-                                                Text("Connected")
-                                                    .font(.system(.caption2, design: .rounded))
-                                                    .foregroundStyle(Color.green)
-                                            }
-                                            
-                                            Image(systemName: isStravaExpanded ? "chevron.up" : "chevron.down")
-                                                .font(.caption2)
-                                                .foregroundStyle(Color.black.opacity(0.5))
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    if isStravaExpanded {
-                                        VStack(spacing: 12) {
-                                            if stravaConnected {
-                                                // Connected state
-                                                HStack {
-                                                    Image(systemName: "checkmark.circle.fill")
-                                                        .foregroundStyle(Color.green)
-                                                    VStack(alignment: .leading, spacing: 2) {
-                                                        Text("Connected to Strava")
-                                                            .font(.system(.caption, design: .rounded, weight: .medium))
-                                                            .foregroundStyle(Color.black)
-                                                        if !stravaAthleteName.isEmpty {
-                                                            Text(stravaAthleteName)
-                                                                .font(.system(.caption2, design: .rounded))
-                                                                .foregroundStyle(Color.gray)
-                                                        }
-                                                    }
-                                                    Spacer()
-                                                }
-                                                
-                                                Button(action: disconnectStrava) {
-                                                    Text("Disconnect")
-                                                        .font(.system(.caption, design: .rounded, weight: .medium))
-                                                        .foregroundStyle(Color.red)
-                                                        .frame(maxWidth: .infinity)
-                                                        .padding(.vertical, 8)
-                                                        .background(
-                                                            RoundedRectangle(cornerRadius: 6)
-                                                                .stroke(Color.red.opacity(0.5), lineWidth: 1)
-                                                        )
-                                                }
-                                                .buttonStyle(.plain)
-                                            } else {
-                                                // Not connected state
-                                                Text("Connect Strava to track run objectives automatically")
-                                                    .font(.system(.caption2, design: .rounded))
-                                                    .foregroundStyle(Color.gray)
-                                                    .multilineTextAlignment(.leading)
-                                                
-                                                Button(action: connectStrava) {
-                                                    HStack {
-                                                        if isCheckingStrava {
-                                                            ProgressView()
-                                                                .scaleEffect(0.7)
-                                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                        } else {
-                                                            Image(systemName: "link")
-                                                                .font(.caption)
-                                                        }
-                                                        Text("Connect Strava")
-                                                            .font(.system(.caption, design: .rounded, weight: .semibold))
-                                                    }
-                                                    .foregroundStyle(.white)
-                                                    .frame(maxWidth: .infinity)
-                                                    .padding(.vertical, 10)
-                                                    .background(
-                                                        RoundedRectangle(cornerRadius: 8)
-                                                            .fill(Color.orange)
-                                                    )
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                        .padding(.top, 4)
-                                    }
-                                    
-                                    Divider()
-                                        .padding(.vertical, 8)
-                                    
-                                    // Change password link
-                                    Button(action: {
-                                        if let url = URL(string: "https://live-eos.com/forgot-password") {
-                                            UIApplication.shared.open(url)
-                                        }
-                                    }) {
-                                        Text("Change password")
-                                            .font(.system(.caption, design: .rounded))
-                                            .foregroundStyle(Color.gray)
-                                    }
-                                    .padding(.top, 4)
-                                    
-                                    Button(action: {
-                                        // Sign out - Nuclear clear ALL cached data
-                                        if let bundleID = Bundle.main.bundleIdentifier {
-                                            UserDefaults.standard.removePersistentDomain(forName: bundleID)
-                                            UserDefaults.standard.synchronize()
-                                        }
-                                        // Reset UI state
-                                        isAccountExpanded = false
-                                        profilePassword = ""
-                                    }) {
-                                        HStack {
-                                            Image(systemName: "arrow.right.square")
-                                                .font(.caption)
-                                            Text("Sign Out")
-                                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                        }
-                                        .foregroundStyle(Color.red)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(Color.red, lineWidth: 1.5)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    // Delete Account button
-                                    Button(action: {
-                                        deleteAccountPassword = ""
-                                        deleteAccountError = nil
-                                        showDeleteAccountAlert = true
-                                    }) {
-                                        Text("Delete Account")
-                                            .font(.system(.caption2, design: .rounded))
-                                            .foregroundStyle(Color.gray)
-                                    }
-                                    .padding(.top, 8)
-                                    .buttonStyle(.plain)
-                                    
-                                    if let error = profileErrorMessage {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.caption2)
-                                            Text(error)
-                                                .font(.system(.caption2, design: .rounded))
-                                        }
-                                        .foregroundStyle(Color.red)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                                .padding(.top, 8)
+                                accountExpandedContent
                             }
                         } header: {
                             Text("Account")
@@ -2827,291 +2654,9 @@ struct ProfileView: View {
                         .listRowBackground(Color.white)
                     }
                 
-                // Designated Recipient Section
-                Section {
-                    VStack(alignment: .leading, spacing: 16) {
-                        // Recipient selector (charity removed per App Store guidelines)
-                        VStack(alignment: .leading, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack {
-                                    Text("Recipients")
-                                        .font(.system(.subheadline, design: .rounded))
-                                        .foregroundStyle(Color.black.opacity(0.6))
-                                    Spacer()
-                                    Button(action: { showingAddRecipient = true }) {
-                                        Label("Add", systemImage: "plus.circle.fill")
-                                            .font(.system(.caption, design: .rounded))
-                                    }
-                                }
-                                
-                                if customRecipients.isEmpty {
-                                    HStack {
-                                        Image(systemName: "person.crop.circle.badge.plus")
-                                            .foregroundStyle(Color.black.opacity(0.6))
-                                        Text("No recipients yet")
-                                            .font(.system(.caption, design: .rounded))
-                                            .foregroundStyle(Color.black.opacity(0.6))
-                                    }
-                                    .padding(.vertical, 8)
-                                } else {
-                                    VStack(spacing: 8) {
-                                        ForEach(Array(customRecipients.enumerated()), id: \.element.id) { index, recipient in
-                                            HStack(spacing: 12) {
-                                                RecipientRow(
-                                                    recipient: recipient,
-                                                    isSelected: selectedRecipientId == recipient.id,
-                                                    onSelect: { 
-                                                        // Only allow selecting active or available recipients
-                                                        if recipient.status == "active" || recipient.status == "available" {
-                                                            selectRecipient(recipient.id)
-                                                        }
-                                                    }
-                                                )
-                                                
-                                                // Delete button (always visible)
-                                                Button(action: {
-                                                    withAnimation(.easeOut(duration: 0.3)) {
-                                                        deleteRecipient(at: index)
-                                                    }
-                                                }) {
-                                                    Image(systemName: "trash.circle.fill")
-                                                        .font(.title2)
-                                                        .foregroundStyle(Color.red.opacity(0.8))
-                                                }
-                                                .buttonStyle(BorderlessButtonStyle())
-                                            }
-                                        }
-                                    }
-                                    .padding(.vertical, 4)
-                                }
-                            }
-                        }
-
-                        // Commit Destination Button - ALWAYS visible
-                        // Disabled if custom selected but no active recipient
-                        Button(action: commitDestination) {
-                            HStack {
-                                Image(systemName: isCommitButtonDisabled ? "exclamationmark.circle.fill" : (destinationCommitted ? "checkmark.circle.fill" : "lock.fill"))
-                                    .font(.body)
-                                Text(lockButtonText)
-                                    .font(.system(.body, design: .rounded, weight: .semibold))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(isCommitButtonDisabled 
-                                        ? Color.gray.opacity(0.3) 
-                                        : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                            )
-                            .foregroundStyle(isCommitButtonDisabled ? .gray : .white)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isCommitButtonDisabled)
-                        .padding(.top, 8)
-                    }
-                    .listRowBackground(Color.white)
-                } header: {
-                    Text("Designated Recipient")
-                        .foregroundStyle(Color.white.opacity(0.95))
-                } footer: {
-                    Text(destinationCommitted ? "Recipient locked." : "Select who receives your forfeited stakes if you miss your goal.")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
+                recipientSection
                 
-                // Accountability Stakes Section
-                Section {
-                    VStack(spacing: 16) {
-                        // Show minimized committed bar OR full selector
-                        if payoutCommitted && !showPayoutSelector {
-                            // Minimized committed bar - tap to expand
-                            Button(action: {
-                                withAnimation(.easeInOut(duration: 0.25)) {
-                                    showPayoutSelector = true
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.title2)
-                                        .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("$\(committedPayoutAmount, specifier: "%.0f") stakes committed")
-                                            .font(.system(.body, design: .rounded, weight: .semibold))
-                                            .foregroundStyle(Color.black)
-                                        Text("Tap to change stakes amount")
-                                            .font(.system(.caption, design: .rounded))
-                                            .foregroundStyle(Color.black.opacity(0.5))
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.down")
-                                        .font(.caption)
-                                        .foregroundStyle(Color.black.opacity(0.4))
-                                }
-                                .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            // Full payout selector
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Stakes Amount")
-                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                Text("Amount at risk per goal")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                            }
-                            Spacer()
-                            HStack(spacing: 4) {
-                                Text("$")
-                                    .font(.system(.title2, design: .rounded, weight: .bold))
-                                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                TextField("0.00", value: $missedGoalPayout, format: .number)
-                                    .font(.system(.title2, design: .rounded, weight: .bold))
-                                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 80)
-                                    .multilineTextAlignment(.trailing)
-                                    .focused($isPayoutAmountFocused)
-                            }
-                        }
-                        
-                        // Quick select amounts
-                        VStack(spacing: 12) {
-                            HStack(spacing: 10) {
-                                ForEach([10.0, 50.0, 100.0], id: \.self) { amount in
-                                    Button(action: { 
-                                        missedGoalPayout = amount
-                                            isPayoutAmountFocused = false
-                                    }) {
-                                        Text("$\(Int(amount))")
-                                            .font(.system(.body, design: .rounded, weight: .semibold))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .fill(missedGoalPayout == amount ? 
-                                                        Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : 
-                                                        Color.gray.opacity(0.25))
-                                            )
-                                            .foregroundStyle(Color.black)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            
-                            Button(action: { 
-                                if missedGoalPayout == 10 || missedGoalPayout == 50 || missedGoalPayout == 100 {
-                                        missedGoalPayout = 0
-                                }
-                                    isPayoutAmountFocused = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "pencil.circle.fill")
-                                        .font(.body)
-                                    Text("Custom Amount")
-                                        .font(.system(.body, design: .rounded, weight: .medium))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(missedGoalPayout != 10 && missedGoalPayout != 50 && missedGoalPayout != 100 && missedGoalPayout != 0 ? 
-                                            Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : 
-                                            Color.gray.opacity(0.25))
-                                )
-                                .foregroundStyle(Color.black)
-                            }
-                            .buttonStyle(.plain)
-                            }
-                            
-                            // Stakes acknowledgments - only show when setting stakes for first time
-                            if !payoutCommitted && missedGoalPayout > 0 {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("By setting stakes, I acknowledge:")
-                                        .font(.system(.caption, design: .rounded, weight: .medium))
-                                        .foregroundStyle(Color.black.opacity(0.7))
-                                        .padding(.top, 8)
-                                    
-                                    // Voluntary acknowledgment
-                                    Button(action: { acknowledgedVoluntary.toggle() }) {
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Image(systemName: acknowledgedVoluntary ? "checkmark.square.fill" : "square")
-                                                .foregroundStyle(acknowledgedVoluntary ? Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : Color.gray)
-                                                .font(.body)
-                                            Text("Setting stakes is voluntary. I bear all risk of achieving my commitment.")
-                                                .font(.system(.caption2, design: .rounded))
-                                                .foregroundStyle(Color.black.opacity(0.8))
-                                                .multilineTextAlignment(.leading)
-                                            Spacer()
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    // No refund acknowledgment
-                                    Button(action: { acknowledgedNoRefund.toggle() }) {
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Image(systemName: acknowledgedNoRefund ? "checkmark.square.fill" : "square")
-                                                .foregroundStyle(acknowledgedNoRefund ? Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : Color.gray)
-                                                .font(.body)
-                                            Text("Forfeited stakes are non-refundable. If I miss my goal, my stakes go to my designated recipient.")
-                                                .font(.system(.caption2, design: .rounded))
-                                                .foregroundStyle(Color.black.opacity(0.8))
-                                                .multilineTextAlignment(.leading)
-                                            Spacer()
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    // Age acknowledgment
-                                    Button(action: { acknowledgedOver18.toggle() }) {
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Image(systemName: acknowledgedOver18 ? "checkmark.square.fill" : "square")
-                                                .foregroundStyle(acknowledgedOver18 ? Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : Color.gray)
-                                                .font(.body)
-                                            Text("I am at least 18 years of age.")
-                                                .font(.system(.caption2, design: .rounded))
-                                                .foregroundStyle(Color.black.opacity(0.8))
-                                                .multilineTextAlignment(.leading)
-                                            Spacer()
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            
-                            // Set Stakes Button
-                            Button(action: commitPayout) {
-                                HStack {
-                                    Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
-                                        .font(.body)
-                                    Text(payoutCommitted ? "Update Stakes" : "Set Your Stakes")
-                                        .font(.system(.body, design: .rounded, weight: .semibold))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(canSetStakes ? 
-                                            Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)) : 
-                                            Color.gray.opacity(0.3))
-                                )
-                                .foregroundStyle(canSetStakes ? Color.white : Color.black.opacity(0.4))
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!canSetStakes)
-                            .padding(.top, 4)
-                        }
-                    }
-                    .listRowBackground(Color.white)
-                } header: {
-                    Text("Accountability Stakes")
-                        .foregroundStyle(Color.white.opacity(0.95))
-                } footer: {
-                    Text(payoutCommitted ? "Stakes committed. Complete your goal to keep your money. Miss it and $\(Int(committedPayoutAmount)) goes to your designated recipient." : "Put your money where your mouth is. Set stakes to hold yourself accountable. Complete your goal and keep your money.")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
+                stakesSection
 
                 // Balance Section
                 Section {
@@ -3357,6 +2902,14 @@ struct ProfileView: View {
                     Text("This will permanently delete all your data including account info, objectives, sessions, and transaction history. This action cannot be undone.")
                 }
             }
+            .alert("Disconnect Strava?", isPresented: $showDisconnectStravaConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Disconnect", role: .destructive) {
+                    disconnectStrava()
+                }
+            } message: {
+                Text("This will unlink your Strava account. Run objectives will no longer be tracked automatically. You can reconnect at any time.")
+            }
             .onChange(of: isSignedIn) { oldValue, newValue in
                 if newValue {
                     // User just signed in - clear old recipient cache and fetch fresh
@@ -3390,6 +2943,618 @@ struct ProfileView: View {
                 checkStravaStatus()
             }
         }
+    
+    // MARK: - Recipient Section (extracted for compiler performance)
+    
+    private var recipientSection: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        
+        return Section {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Recipients")
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundStyle(Color.black.opacity(0.6))
+                            Spacer()
+                            if isSettingsLocked {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                    Text("Locked")
+                                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                                }
+                                .foregroundStyle(Color.orange)
+                            } else {
+                                Button(action: { showingAddRecipient = true }) {
+                                    Label("Add", systemImage: "plus.circle.fill")
+                                        .font(.system(.caption, design: .rounded))
+                                }
+                            }
+                        }
+                        
+                        if customRecipients.isEmpty {
+                            HStack {
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                    .foregroundStyle(Color.black.opacity(0.6))
+                                Text("No recipients yet")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.6))
+                            }
+                            .padding(.vertical, 8)
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(Array(customRecipients.enumerated()), id: \.element.id) { index, recipient in
+                                    HStack(spacing: 12) {
+                                        RecipientRow(
+                                            recipient: recipient,
+                                            isSelected: selectedRecipientId == recipient.id,
+                                            onSelect: {
+                                                guard !isSettingsLocked else { return }
+                                                if recipient.status == "active" || recipient.status == "available" {
+                                                    selectRecipient(recipient.id)
+                                                }
+                                            }
+                                        )
+                                        .opacity(isSettingsLocked ? 0.7 : 1)
+                                        
+                                        if !isSettingsLocked {
+                                            Button(action: {
+                                                withAnimation(.easeOut(duration: 0.3)) {
+                                                    deleteRecipient(at: index)
+                                                }
+                                            }) {
+                                                Image(systemName: "trash.circle.fill")
+                                                    .font(.title2)
+                                                    .foregroundStyle(Color.red.opacity(0.8))
+                                            }
+                                            .buttonStyle(BorderlessButtonStyle())
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
+                Button(action: commitDestination) {
+                    HStack {
+                        Image(systemName: isSettingsLocked ? "lock.fill" : (isCommitButtonDisabled ? "exclamationmark.circle.fill" : (destinationCommitted ? "checkmark.circle.fill" : "lock.fill")))
+                            .font(.body)
+                        Text(isSettingsLocked ? "Locked" : lockButtonText)
+                            .font(.system(.body, design: .rounded, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill((isCommitButtonDisabled || isSettingsLocked)
+                                ? Color.gray.opacity(0.3)
+                                : goldColor)
+                    )
+                    .foregroundStyle((isCommitButtonDisabled || isSettingsLocked) ? .gray : .white)
+                }
+                .buttonStyle(.plain)
+                .disabled(isCommitButtonDisabled || isSettingsLocked)
+                .padding(.top, 8)
+            }
+            .listRowBackground(Color.white)
+        } header: {
+            Text("Designated Recipient")
+                .foregroundStyle(Color.white.opacity(0.95))
+        } footer: {
+            Text(isSettingsLocked ? "Recipient is locked until your commitment period ends." : (destinationCommitted ? "Recipient locked." : "Select who receives your forfeited stakes if you miss your goal."))
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.8))
+        }
+    }
+    
+    // MARK: - Stakes Section (extracted for compiler performance)
+    
+    private var stakesSection: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        
+        return Section {
+            VStack(spacing: 16) {
+                if isSettingsLocked {
+                    HStack {
+                        Image(systemName: "lock.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(payoutCommitted ? "$\(committedPayoutAmount, specifier: "%.0f") stakes committed" : "No stakes set")
+                                .font(.system(.body, design: .rounded, weight: .semibold))
+                                .foregroundStyle(Color.black)
+                            Text("Locked until commitment period ends")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.orange)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    .opacity(0.7)
+                } else if payoutCommitted && !showPayoutSelector {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showPayoutSelector = true
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(goldColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("$\(committedPayoutAmount, specifier: "%.0f") stakes committed")
+                                    .font(.system(.body, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(Color.black)
+                                Text("Tap to change stakes amount")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.5))
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(Color.black.opacity(0.4))
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    stakesFullSelector
+                }
+            }
+            .listRowBackground(Color.white)
+        } header: {
+            Text("Accountability Stakes")
+                .foregroundStyle(Color.white.opacity(0.95))
+        } footer: {
+            stakesFooterText
+        }
+    }
+    
+    private var stakesFooterText: some View {
+        let text: String = isSettingsLocked
+            ? "Stakes are locked until your commitment period ends."
+            : (payoutCommitted
+                ? "Stakes committed. Complete your goal to keep your money. Miss it and $\(Int(committedPayoutAmount)) goes to your designated recipient."
+                : "Put your money where your mouth is. Set stakes to hold yourself accountable. Complete your goal and keep your money.")
+        return Text(text)
+            .font(.system(.caption2, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.8))
+    }
+    
+    private var stakesFullSelector: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let isCustomAmount = missedGoalPayout != 10 && missedGoalPayout != 50 && missedGoalPayout != 100 && missedGoalPayout != 0
+        
+        return VStack(spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Stakes Amount")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    Text("Amount at risk per goal")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Text("$")
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .foregroundStyle(goldColor)
+                    TextField("0.00", value: $missedGoalPayout, format: .number)
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .foregroundStyle(goldColor)
+                        .keyboardType(.decimalPad)
+                        .frame(width: 80)
+                        .multilineTextAlignment(.trailing)
+                        .focused($isPayoutAmountFocused)
+                }
+            }
+            
+            VStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    ForEach([10.0, 50.0, 100.0], id: \.self) { amount in
+                        Button(action: {
+                            missedGoalPayout = amount
+                            isPayoutAmountFocused = false
+                        }) {
+                            Text("$\(Int(amount))")
+                                .font(.system(.body, design: .rounded, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(missedGoalPayout == amount ? goldColor : Color.gray.opacity(0.25))
+                                )
+                                .foregroundStyle(Color.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                
+                Button(action: {
+                    if missedGoalPayout == 10 || missedGoalPayout == 50 || missedGoalPayout == 100 {
+                        missedGoalPayout = 0
+                    }
+                    isPayoutAmountFocused = true
+                }) {
+                    HStack {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.body)
+                        Text("Custom Amount")
+                            .font(.system(.body, design: .rounded, weight: .medium))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(isCustomAmount ? goldColor : Color.gray.opacity(0.25))
+                    )
+                    .foregroundStyle(Color.black)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            if !payoutCommitted && missedGoalPayout > 0 {
+                stakesAcknowledgments
+            }
+            
+            Button(action: commitPayout) {
+                HStack {
+                    Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
+                        .font(.body)
+                    Text(payoutCommitted ? "Update Stakes" : "Set Your Stakes")
+                        .font(.system(.body, design: .rounded, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(canSetStakes ? goldColor : Color.gray.opacity(0.3))
+                )
+                .foregroundStyle(canSetStakes ? Color.white : Color.black.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSetStakes)
+            .padding(.top, 4)
+        }
+    }
+    
+    private var stakesAcknowledgments: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("By setting stakes, I acknowledge:")
+                .font(.system(.caption, design: .rounded, weight: .medium))
+                .foregroundStyle(Color.black.opacity(0.7))
+                .padding(.top, 8)
+            
+            Button(action: { acknowledgedVoluntary.toggle() }) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: acknowledgedVoluntary ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(acknowledgedVoluntary ? goldColor : Color.gray)
+                        .font(.body)
+                    Text("Setting stakes is voluntary. I bear all risk of achieving my commitment.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.8))
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+            
+            Button(action: { acknowledgedNoRefund.toggle() }) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: acknowledgedNoRefund ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(acknowledgedNoRefund ? goldColor : Color.gray)
+                        .font(.body)
+                    Text("Forfeited stakes are non-refundable. If I miss my goal, my stakes go to my designated recipient.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.8))
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+            
+            Button(action: { acknowledgedOver18.toggle() }) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: acknowledgedOver18 ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(acknowledgedOver18 ? goldColor : Color.gray)
+                        .font(.body)
+                    Text("I am at least 18 years of age.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.8))
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+    
+    // MARK: - Account Expanded Content (extracted for compiler performance)
+    
+    private var accountExpandedContent: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        
+        return VStack(spacing: 10) {
+            if !profileCompleted {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.orange)
+                    Text("Save profile to send invites")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
+            VStack(spacing: 8) {
+                HStack {
+                    Image(systemName: "person")
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.6))
+                        .frame(width: 20)
+                    TextField("Name", text: $profileUsername)
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(Color.black)
+                }
+                Divider()
+                
+                HStack {
+                    Image(systemName: "envelope")
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.6))
+                        .frame(width: 20)
+                    TextField("Email", text: $profileEmail)
+                        .font(.system(.subheadline, design: .rounded))
+                        .keyboardType(.emailAddress)
+                        .autocapitalization(.none)
+                        .foregroundStyle(Color.black)
+                }
+                Divider()
+                
+                HStack {
+                    Image(systemName: "lock")
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.6))
+                        .frame(width: 20)
+                    SecureField("Password", text: $profilePassword, prompt: Text("Password").foregroundColor(Color.black.opacity(0.5)))
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(Color.black)
+                }
+            }
+            .padding(.vertical, 4)
+            
+            Button(action: saveProfile) {
+                HStack {
+                    if isSavingProfile {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                    }
+                    Text("Update")
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(goldColor.opacity(isSavingProfile || !isProfileValid ? 0.6 : 1.0))
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isSavingProfile || !isProfileValid)
+            
+            // Strava Connection Section
+            Divider()
+                .padding(.vertical, 8)
+            
+            stravaConnectionSection
+            
+            Divider()
+                .padding(.vertical, 8)
+            
+            // Change password link
+            Button(action: {
+                if let url = URL(string: "https://live-eos.com/forgot-password") {
+                    UIApplication.shared.open(url)
+                }
+            }) {
+                Text("Change password")
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+            .padding(.top, 4)
+            
+            Button(action: {
+                // Sign out - Nuclear clear ALL cached data
+                if let bundleID = Bundle.main.bundleIdentifier {
+                    UserDefaults.standard.removePersistentDomain(forName: bundleID)
+                    UserDefaults.standard.synchronize()
+                }
+                // Reset UI state
+                isAccountExpanded = false
+                profilePassword = ""
+            }) {
+                HStack {
+                    Image(systemName: "arrow.right.square")
+                        .font(.caption)
+                    Text("Sign Out")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                }
+                .foregroundStyle(Color.red)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.red, lineWidth: 1.5)
+                )
+            }
+            .buttonStyle(.plain)
+            
+            // Delete Account button
+            Button(action: {
+                deleteAccountPassword = ""
+                deleteAccountError = nil
+                showDeleteAccountAlert = true
+            }) {
+                Text("Delete Account")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+            .padding(.top, 8)
+            .buttonStyle(.plain)
+            
+            if let error = profileErrorMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption2)
+                    Text(error)
+                        .font(.system(.caption2, design: .rounded))
+                }
+                .foregroundStyle(Color.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    // MARK: - Strava Connection Section (extracted for compiler performance)
+    
+    private var stravaConnectionSection: some View {
+        let stravaOrange = Color(red: 0.988, green: 0.322, blue: 0.0)
+        
+        return VStack(spacing: 0) {
+            Button(action: { isStravaExpanded.toggle() }) {
+                HStack {
+                    Image("strava_icon")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 18, height: 18)
+                    
+                    Text("Strava")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.black)
+                    
+                    Spacer()
+                    
+                    if stravaConnected {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.green)
+                            Text("Connected")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.green)
+                        }
+                    }
+                    
+                    Image(systemName: isStravaExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(Color.black.opacity(0.5))
+                }
+            }
+            .buttonStyle(.plain)
+            
+            if isStravaExpanded {
+                VStack(spacing: 12) {
+                    if stravaConnected {
+                        stravaConnectedContent
+                    } else {
+                        stravaDisconnectedContent
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+    
+    private var stravaConnectedContent: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Connected to Strava")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.black)
+                    if !stravaAthleteName.isEmpty {
+                        Text(stravaAthleteName)
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                    }
+                }
+                Spacer()
+            }
+            
+            Button(action: { showDisconnectStravaConfirm = true }) {
+                Text("Disconnect Strava")
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.red)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.red.opacity(0.5), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            
+            // Powered by Strava branding
+            HStack {
+                Spacer()
+                Image("powered_by_strava")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 14)
+                    .opacity(0.7)
+                Spacer()
+            }
+            .padding(.top, 2)
+        }
+    }
+    
+    private var stravaDisconnectedContent: some View {
+        let stravaOrange = Color(red: 0.988, green: 0.322, blue: 0.0)
+        
+        return VStack(spacing: 12) {
+            Text("Connect Strava to track run objectives automatically")
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.gray)
+                .multilineTextAlignment(.leading)
+            
+            // Official "Connect with Strava" button
+            Button(action: connectStrava) {
+                if isCheckingStrava {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .progressViewStyle(CircularProgressViewStyle(tint: stravaOrange))
+                        Text("Connecting...")
+                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                            .foregroundStyle(stravaOrange)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                } else {
+                    Image("btn_strava_connectwith_orange")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 48)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
     
     private var isProfileValid: Bool {
         // Password only required for new accounts, not updates
@@ -4742,13 +4907,6 @@ struct SignInView: View {
                     } else {
                         self.objectiveType = "pushups"
                     }
-                    if let objCount = user["objective_count"] as? Int {
-                        self.pushupObjective = objCount
-                    } else if let pushCount = user["pushups_count"] as? Int {
-                        self.pushupObjective = pushCount
-                    } else if let pushCount = user["pushups_count"] as? Double {
-                        self.pushupObjective = Int(pushCount)
-                    }
                     if let objSchedule = user["objective_schedule"] as? String {
                         self.scheduleType = objSchedule.capitalized
                     } else {
@@ -4765,10 +4923,22 @@ struct SignInView: View {
                     }
                     
                     // === MULTI-OBJECTIVE ===
+                    // Use pushups_enabled from user_objectives table (NOT legacy objective_count)
                     if let pushEnabled = user["pushups_enabled"] as? Bool {
                         self.pushupsEnabled = pushEnabled
                     } else {
-                        self.pushupsEnabled = true
+                        self.pushupsEnabled = false  // Default to disabled (not legacy true)
+                    }
+                    
+                    // Only set pushup objective count if pushups are actually enabled
+                    if self.pushupsEnabled {
+                        if let pushCount = user["pushups_count"] as? Int {
+                            self.pushupObjective = pushCount
+                        } else if let pushCount = user["pushups_count"] as? Double {
+                            self.pushupObjective = Int(pushCount)
+                        } else if let objCount = user["objective_count"] as? Int {
+                            self.pushupObjective = objCount
+                        }
                     }
                     if let runEn = user["run_enabled"] as? Bool {
                         self.runEnabled = runEn

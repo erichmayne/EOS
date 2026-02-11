@@ -27,3 +27,15 @@ Package.resolved
 # Local secrets (never commit)
 docs/SECRETS-LOCAL.md
 docs/AuthKey_*.p8
+
+# Backup files
+*.backup
+*.backup2
+
+# Build output
+build/
+
+# Stray image files
+*.webp
+Pasted Graphic*.png
+strava.logo

@@ -19,7 +19,7 @@
 		<dict>
 			<key>159.26.94.94</key>
 			<dict>
-				<key>   NSExceptionAllowsInsecureHTTPLoads</key>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 				<key>NSIncludesSubdomains</key>
 				<false/>

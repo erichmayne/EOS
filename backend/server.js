@@ -1726,24 +1726,24 @@ app.get("/verify-invite/:code", async (req, res) => {
         
         const { data: invite, error } = await supabase
             .from("recipient_invites")
-            .select("*, payer:users(full_name, email)")
+            .select("*, payer:users!payer_user_id(full_name, email, missed_goal_payout)")
             .eq("invite_code", inviteCode.toUpperCase())
+            .eq("status", "pending")
             .single();
         
         if (error || !invite) {
-            return res.status(404).json({ error: "Invalid invite code" });
-        }
-        
-        if (invite.status !== "pending") {
-            return res.status(400).json({ error: "Invite already used" });
+            return res.status(404).json({ error: "Invalid or expired invite code" });
         }
         
         res.json({ 
-            inviteCode: invite.invite_code,
-            payerName: invite.payer?.full_name || "Unknown",
-            payerEmail: invite.payer?.email
+            code: invite.invite_code,
+            payerName: invite.payer?.full_name || "EOS User",
+            payerEmail: invite.payer?.email,
+            payoutAmount: invite.payer?.missed_goal_payout || 0,
+            phone: invite.phone
         });
     } catch (error) {
+        console.error("Error verifying invite:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -2041,60 +2041,9 @@ app.post("/objectives/check-missed", async (req, res) => {
 });
 
 
-app.post("/users/:userId/deduct-balance", async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const { amount, reason } = req.body;
-        
-        if (!amount || amount <= 0) {
-            return res.status(400).json({ error: "Valid amount required" });
-        }
-        
-        const amountCents = Math.round(amount * 100);
-        
-        // Create transaction
-        const { data: tx, error: txError } = await supabase
-            .from("transactions")
-            .insert({
-                user_id: userId,
-                type: "payout",
-                amount_cents: amountCents,
-                status: "accepted",
-                description: reason || "Manual payout deduction"
-            })
-            .select()
-            .single();
-        
-        if (txError) {
-            return res.status(500).json({ error: txError.message });
-        }
-        
-        // Deduct balance
-        const { data: user, error: updateError } = await supabase
-            .from("users")
-            .update({ 
-                balance_cents: supabase.raw("balance_cents - " + amountCents)
-            })
-            .eq("id", userId)
-            .select("balance_cents")
-            .single();
-        
-        // Alternative: direct SQL update
-        const { error: deductError } = await supabase.rpc("deduct_user_balance", {
-            p_user_id: userId,
-            p_amount_cents: amountCents
-        });
-        
-        res.json({
-            success: true,
-            transactionId: tx.id,
-            amountDeducted: amount
-        });
-        
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
+// NOTE: /users/:userId/deduct-balance was removed (Feb 9 2026)
+// It used supabase.raw() and supabase.rpc() which don't exist in Supabase JS client.
+// Nothing called it — the actual withdrawal flow uses POST /withdraw.
 
 // Get user balance
 app.get("/users/:userId/balance", async (req, res) => {
@@ -2119,6 +2068,99 @@ app.get("/users/:userId/balance", async (req, res) => {
         });
         
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// -----------------------------------------------------------------------------
+// Delete user account (App Store Guideline 5.1.1(v) - required)
+// -----------------------------------------------------------------------------
+app.post("/users/delete-account", async (req, res) => {
+    try {
+        const { userId, email, password } = req.body;
+        
+        if (!userId || !email || !password) {
+            return res.status(400).json({ error: "Missing required fields" });
+        }
+        
+        console.log(`🗑️ Delete account request for user: ${userId}, email: ${email}`);
+        
+        // Verify user exists and password matches
+        const { data: user, error: userError } = await supabase
+            .from("users")
+            .select("id, email, password_hash")
+            .eq("id", userId)
+            .single();
+        
+        if (userError || !user) {
+            console.log(`❌ User not found: ${userId}`);
+            return res.status(404).json({ error: "User not found" });
+        }
+        
+        // Verify email matches
+        if (user.email.toLowerCase() !== email.toLowerCase()) {
+            console.log(`❌ Email mismatch for user: ${userId}`);
+            return res.status(401).json({ error: "Invalid credentials" });
+        }
+        
+        // Verify password (bcrypt hash or plain text legacy)
+        const bcrypt = require("bcryptjs");
+        let passwordValid = false;
+        
+        if (user.password_hash) {
+            if (user.password_hash.startsWith("$2")) {
+                passwordValid = await bcrypt.compare(password, user.password_hash);
+            } else {
+                passwordValid = (password === user.password_hash);
+            }
+        }
+        
+        if (!passwordValid) {
+            console.log(`❌ Invalid password for user: ${userId}`);
+            return res.status(401).json({ error: "Incorrect password" });
+        }
+        
+        // Delete user data from all related tables
+        console.log(`🗑️ Deleting data for user: ${userId}`);
+        
+        const { error: sessionsError } = await supabase
+            .from("objective_sessions").delete().eq("user_id", userId);
+        if (sessionsError) console.log("Error deleting sessions:", sessionsError);
+        
+        const { error: objectivesError } = await supabase
+            .from("user_objectives").delete().eq("user_id", userId);
+        if (objectivesError) console.log("Error deleting objectives:", objectivesError);
+        
+        const { error: invitesSentError } = await supabase
+            .from("invite_relationships").delete().eq("payer_id", userId);
+        if (invitesSentError) console.log("Error deleting sent invites:", invitesSentError);
+        
+        const { error: invitesReceivedError } = await supabase
+            .from("invite_relationships").delete().eq("recipient_id", userId);
+        if (invitesReceivedError) console.log("Error deleting received invites:", invitesReceivedError);
+        
+        const { error: transactionsError } = await supabase
+            .from("transactions").delete().eq("user_id", userId);
+        if (transactionsError) console.log("Error deleting transactions:", transactionsError);
+        
+        const { error: withdrawalsError } = await supabase
+            .from("withdrawal_requests").delete().eq("user_id", userId);
+        if (withdrawalsError) console.log("Error deleting withdrawals:", withdrawalsError);
+        
+        // Finally delete the user record
+        const { error: deleteUserError } = await supabase
+            .from("users").delete().eq("id", userId);
+        
+        if (deleteUserError) {
+            console.log(`❌ Error deleting user: ${deleteUserError.message}`);
+            return res.status(500).json({ error: "Failed to delete user record" });
+        }
+        
+        console.log(`✅ Account deleted successfully for user: ${userId}`);
+        res.json({ success: true, message: "Account deleted successfully" });
+        
+    } catch (error) {
+        console.error("Delete account error:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -2234,6 +2276,38 @@ app.post('/strava/webhook', async (req, res) => {
         
         console.log(`📩 Strava webhook: ${object_type} ${aspect_type} for athlete ${owner_id}`);
         
+        // Handle athlete deauthorization (required by Strava API terms)
+        if (object_type === 'athlete' && aspect_type === 'update') {
+            const updates = req.body.updates;
+            if (updates && updates.authorized === 'false') {
+                console.log(`🔓 Strava deauthorization for athlete ${owner_id}`);
+                
+                // Find and remove the Strava connection
+                const { data: conn } = await supabase
+                    .from('strava_connections')
+                    .select('id')
+                    .eq('strava_user_id', owner_id)
+                    .single();
+                
+                if (conn) {
+                    // Unlink user from this Strava connection
+                    await supabase
+                        .from('users')
+                        .update({ strava_connection_id: null })
+                        .eq('strava_connection_id', conn.id);
+                    
+                    // Delete the connection record
+                    await supabase
+                        .from('strava_connections')
+                        .delete()
+                        .eq('id', conn.id);
+                    
+                    console.log(`✅ Strava connection removed for athlete ${owner_id}`);
+                }
+                return;
+            }
+        }
+        
         if (object_type !== 'activity' || aspect_type !== 'create') {
             return; // Only process new activities
         }
@@ -2262,19 +2336,78 @@ app.post('/strava/webhook', async (req, res) => {
             return;
         }
         
-        // Check if user has a run objective
-        if (user.objective_type !== 'run') {
-            console.log(`User ${user.id} doesn't have a run objective, skipping`);
+        // Check if user has an enabled run objective (multi-objective via user_objectives table)
+        const { data: runObjective, error: objError } = await supabase
+            .from('user_objectives')
+            .select('target_value, enabled')
+            .eq('user_id', user.id)
+            .eq('objective_type', 'run')
+            .eq('enabled', true)
+            .single();
+        
+        if (objError || !runObjective) {
+            console.log(`User ${user.id} doesn't have an enabled run objective, skipping`);
             return;
         }
         
-        // Fetch activity details from Strava
+        // --- Strava Token Refresh ---
+        // Strava access tokens expire after ~6 hours. Check and refresh if needed.
+        let accessToken = stravaConn.access_token;
+        const tokenExpiresAt = new Date(stravaConn.token_expires_at);
+        const now = new Date();
+        
+        if (now >= tokenExpiresAt) {
+            console.log(`🔄 Strava token expired for athlete ${owner_id}, refreshing...`);
+            try {
+                const refreshResponse = await fetch('https://www.strava.com/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        client_id: STRAVA_CLIENT_ID,
+                        client_secret: STRAVA_CLIENT_SECRET,
+                        grant_type: 'refresh_token',
+                        refresh_token: stravaConn.refresh_token
+                    })
+                });
+                
+                const refreshData = await refreshResponse.json();
+                
+                if (!refreshData.access_token) {
+                    console.error(`❌ Strava token refresh failed for athlete ${owner_id}:`, refreshData);
+                    return;
+                }
+                
+                accessToken = refreshData.access_token;
+                
+                // Update stored tokens in DB
+                const { error: tokenUpdateError } = await supabase
+                    .from('strava_connections')
+                    .update({
+                        access_token: refreshData.access_token,
+                        refresh_token: refreshData.refresh_token,
+                        token_expires_at: new Date(refreshData.expires_at * 1000).toISOString(),
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', stravaConn.id);
+                
+                if (tokenUpdateError) {
+                    console.error('Failed to update Strava tokens in DB:', tokenUpdateError);
+                } else {
+                    console.log(`✅ Strava token refreshed for athlete ${owner_id}`);
+                }
+            } catch (refreshErr) {
+                console.error(`❌ Strava token refresh error for athlete ${owner_id}:`, refreshErr);
+                return;
+            }
+        }
+        
+        // Fetch activity details from Strava (using fresh token)
         const activityResponse = await fetch(`https://www.strava.com/api/v3/activities/${object_id}`, {
-            headers: { 'Authorization': `Bearer ${stravaConn.access_token}` }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         
         if (!activityResponse.ok) {
-            console.error(`Failed to fetch Strava activity ${object_id}`);
+            console.error(`Failed to fetch Strava activity ${object_id} (HTTP ${activityResponse.status})`);
             return;
         }
         
@@ -2287,31 +2420,61 @@ app.post('/strava/webhook', async (req, res) => {
         }
         
         const distanceMiles = activity.distance / 1609.34; // meters to miles
-        const goalMiles = user.objective_pushup_count; // reusing field for miles
+        const goalMiles = runObjective.target_value; // from user_objectives table
         
         console.log(`🏃 Run detected: ${distanceMiles.toFixed(2)} miles (goal: ${goalMiles} miles)`);
         
-        if (distanceMiles >= goalMiles) {
-            // Mark objective complete
-            const today = new Date().toISOString().split('T')[0];
-            
-            const { error: sessionError } = await supabase
+        // Always record the run distance in the session (even if under goal)
+        const today = new Date().toISOString().split('T')[0];
+        const isComplete = distanceMiles >= goalMiles;
+        const runMiles = parseFloat(distanceMiles.toFixed(2));
+        
+        // Check if a run session already exists for today
+        // Note: completed_count stores raw miles (e.g. 5.23) — the app reads this directly as todayRunDistance
+        const { data: existingRunSession } = await supabase
+            .from('objective_sessions')
+            .select('id, completed_count')
+            .eq('user_id', user.id)
+            .eq('session_date', today)
+            .eq('objective_type', 'run')
+            .single();
+        
+        let sessionError;
+        if (existingRunSession) {
+            // Update existing run session (accumulate distance if multiple runs)
+            const newCompleted = Math.max(existingRunSession.completed_count || 0, runMiles);
+            const { error } = await supabase
                 .from('objective_sessions')
-                .upsert({
-                    user_id: user.id,
-                    date: today,
-                    target_count: Math.round(goalMiles * 100),
-                    completed_count: Math.round(distanceMiles * 100),
-                    completed: true
-                }, { onConflict: 'user_id,date' });
-            
-            if (sessionError) {
-                console.error('Failed to mark run objective complete:', sessionError);
-            } else {
-                console.log(`✅ Run objective met for user ${user.id}: ${distanceMiles.toFixed(2)} >= ${goalMiles} miles`);
-            }
+                .update({
+                    completed_count: newCompleted,
+                    status: newCompleted >= goalMiles ? 'completed' : 'pending'
+                })
+                .eq('id', existingRunSession.id);
+            sessionError = error;
         } else {
-            console.log(`Run ${distanceMiles.toFixed(2)} miles doesn't meet goal of ${goalMiles} miles`);
+            // Insert new run session for today
+            const { error } = await supabase
+                .from('objective_sessions')
+                .insert({
+                    user_id: user.id,
+                    session_date: today,
+                    objective_type: 'run',
+                    target_count: goalMiles,
+                    completed_count: runMiles,
+                    status: isComplete ? 'completed' : 'pending',
+                    deadline: user.objective_deadline || '23:59:00',
+                    payout_amount: user.missed_goal_payout || 0,
+                    payout_triggered: false
+                });
+            sessionError = error;
+        }
+        
+        if (sessionError) {
+            console.error('Failed to save run session:', sessionError);
+        } else if (isComplete) {
+            console.log(`✅ Run objective met for user ${user.id}: ${distanceMiles.toFixed(2)} >= ${goalMiles} miles`);
+        } else {
+            console.log(`🏃 Run progress saved: ${distanceMiles.toFixed(2)}/${goalMiles} miles (not yet met)`);
         }
         
     } catch (error) {
@@ -2356,6 +2519,65 @@ app.delete('/strava/disconnect/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
         
+        // Find the user's strava connection to get the access token
+        const { data: user } = await supabase
+            .from('users')
+            .select('strava_connection_id')
+            .eq('id', userId)
+            .single();
+        
+        if (user?.strava_connection_id) {
+            // Get the connection record for the access token
+            const { data: conn } = await supabase
+                .from('strava_connections')
+                .select('access_token, refresh_token, token_expires_at, strava_user_id')
+                .eq('id', user.strava_connection_id)
+                .single();
+            
+            if (conn) {
+                // Refresh token if expired before deauthorizing
+                let accessToken = conn.access_token;
+                if (conn.token_expires_at && new Date(conn.token_expires_at * 1000) < new Date()) {
+                    try {
+                        const refreshResp = await fetch('https://www.strava.com/oauth/token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                client_id: process.env.STRAVA_CLIENT_ID,
+                                client_secret: process.env.STRAVA_CLIENT_SECRET,
+                                grant_type: 'refresh_token',
+                                refresh_token: conn.refresh_token
+                            })
+                        });
+                        const refreshData = await refreshResp.json();
+                        if (refreshData.access_token) {
+                            accessToken = refreshData.access_token;
+                        }
+                    } catch (refreshErr) {
+                        console.log('⚠️ Token refresh failed during deauth, proceeding with existing token');
+                    }
+                }
+                
+                // Revoke access at Strava's API (deauthorize)
+                try {
+                    await fetch('https://www.strava.com/oauth/deauthorize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `access_token=${accessToken}`
+                    });
+                    console.log(`🔓 Strava access revoked for athlete ${conn.strava_user_id}`);
+                } catch (deauthErr) {
+                    console.log('⚠️ Strava deauthorize API call failed, cleaning up locally anyway');
+                }
+                
+                // Delete the strava_connections record
+                await supabase
+                    .from('strava_connections')
+                    .delete()
+                    .eq('id', user.strava_connection_id);
+            }
+        }
+        
         // Remove link from user
         await supabase
             .from('users')
@@ -2366,49 +2588,12 @@ app.delete('/strava/disconnect/:userId', async (req, res) => {
         res.json({ success: true });
         
     } catch (error) {
+        console.error('❌ Strava disconnect error:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
-app.listen(port, () => console.log(`Stripe backend listening on port ${port}`));
-
-
-// -----------------------------------------------------------------------------
-// Verify invite code
-// -----------------------------------------------------------------------------
-app.get('/verify-invite/:code', async (req, res) => {
-  try {
-    const { code } = req.params;
-    
-    const { data: invite, error } = await supabase
-      .from('recipient_invites')
-      .select(`
-        *,
-        payer:users!payer_user_id (
-          full_name,
-          email
-        )
-      `)
-      .eq('invite_code', code.toUpperCase())
-      .eq('status', 'pending')
-      .single();
-    
-    if (error || !invite) {
-      return res.status(404).json({ error: 'Invalid or expired invite code' });
-    }
-    
-    res.json({
-      code: invite.invite_code,
-      payerName: invite.payer?.full_name || 'EOS User',
-      payerEmail: invite.payer?.email,
-      payoutAmount: 5, // TODO: Make this dynamic from payer settings
-      phone: invite.phone
-    });
-  } catch (err) {
-    console.error('Error verifying invite:', err);
-    res.status(500).json({ error: 'Failed to verify invite' });
-  }
-});
+// (app.listen moved to end of file — all routes must be registered first)
 
 // -----------------------------------------------------------------------------
 // Recipient onboarding with Stripe Connect
@@ -3059,36 +3244,62 @@ app.post("/objectives/create-daily-sessions", async (req, res) => {
         const results = [];
         
         for (const user of users || []) {
-            // Check if session already exists for today
-            const { data: existing } = await supabase
-                .from("objective_sessions")
-                .select("id")
+            // Get ENABLED objectives from user_objectives table
+            const { data: enabledObjectives } = await supabase
+                .from("user_objectives")
+                .select("objective_type, target_value")
                 .eq("user_id", user.id)
-                .eq("session_date", today)
-                .limit(1);
+                .eq("enabled", true);
             
-            if (existing && existing.length > 0) {
-                continue; // Already has today session
+            // Determine which objectives to create sessions for
+            let objectivesToCreate = [];
+            if (enabledObjectives && enabledObjectives.length > 0) {
+                // Use user_objectives table (modern multi-objective)
+                objectivesToCreate = enabledObjectives.map(obj => ({
+                    type: obj.objective_type,
+                    target: obj.target_value
+                }));
+            } else if (user.objective_count && user.objective_count > 0) {
+                // Legacy fallback: no user_objectives rows, use users table
+                objectivesToCreate = [{
+                    type: user.objective_type || "pushups",
+                    target: user.objective_count
+                }];
             }
             
-            // Create new session
-            const { data: session, error: sessionError } = await supabase
-                .from("objective_sessions")
-                .insert({
-                    user_id: user.id,
-                    session_date: today,
-                    objective_type: user.objective_type || "pushups",
-                    target_count: user.objective_count || 50,
-                    completed_count: 0,
-                    deadline: parseDeadlineTime(user.objective_deadline),
-                    status: "pending",
-                    payout_amount: user.missed_goal_payout || 0
-                })
-                .select()
-                .single();
+            if (objectivesToCreate.length === 0) continue;
             
-            if (!sessionError) {
-                results.push({ userId: user.id, sessionId: session.id });
+            // Check existing sessions for today
+            const { data: existing } = await supabase
+                .from("objective_sessions")
+                .select("objective_type")
+                .eq("user_id", user.id)
+                .eq("session_date", today);
+            
+            const existingTypes = new Set((existing || []).map(s => s.objective_type));
+            
+            // Create sessions for each enabled objective that doesn't have one yet
+            for (const obj of objectivesToCreate) {
+                if (existingTypes.has(obj.type)) continue;
+                
+                const { data: session, error: sessionError } = await supabase
+                    .from("objective_sessions")
+                    .insert({
+                        user_id: user.id,
+                        session_date: today,
+                        objective_type: obj.type,
+                        target_count: obj.target,
+                        completed_count: 0,
+                        deadline: parseDeadlineTime(user.objective_deadline),
+                        status: "pending",
+                        payout_amount: user.missed_goal_payout || 0
+                    })
+                    .select()
+                    .single();
+                
+                if (!sessionError) {
+                    results.push({ userId: user.id, sessionId: session.id, type: obj.type });
+                }
             }
         }
         
@@ -3109,18 +3320,23 @@ app.get("/objectives/today/:userId", async (req, res) => {
         const { userId } = req.params;
         const today = new Date().toISOString().slice(0, 10);
         
-        const { data: session, error } = await supabase
+        // Fetch ALL sessions for today (pushups + run can both exist)
+        const { data: sessions, error } = await supabase
             .from("objective_sessions")
             .select("*")
             .eq("user_id", userId)
-            .eq("session_date", today)
-            .single();
+            .eq("session_date", today);
         
-        if (error && error.code !== "PGRST116") {
+        if (error) {
             return res.status(400).json({ error: error.message });
         }
         
-        res.json({ session: session || null, date: today });
+        // Return both the array and a single session for backwards compat
+        res.json({ 
+            session: sessions && sessions.length > 0 ? sessions[0] : null,
+            sessions: sessions || [],
+            date: today 
+        });
         
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -3366,8 +3582,10 @@ app.post("/signin", async (req, res) => {
                 objective_count: user.objective_count,
                 objective_schedule: user.objective_schedule || "daily",
                 objective_deadline: parseDeadlineTime(user.objective_deadline),
-                // Multi-objective support
-                pushups_enabled: objectivesMap.pushups?.enabled ?? (user.objective_count > 0),
+                // Multi-objective support (legacy fallback only if NO user_objectives rows exist)
+                pushups_enabled: userObjectives && userObjectives.length > 0 
+                    ? (objectivesMap.pushups?.enabled ?? false)
+                    : (user.objective_count > 0),
                 pushups_count: objectivesMap.pushups?.target ?? user.objective_count ?? 50,
                 run_enabled: objectivesMap.run?.enabled ?? false,
                 run_distance: objectivesMap.run?.target ?? 2.0,
@@ -3536,15 +3754,17 @@ app.get("/objectives/settings/:userId", async (req, res) => {
             objMap[obj.objective_type] = { target: obj.target_value, enabled: obj.enabled };
         });
         
-        // LEGACY FALLBACK: If no objectives in new table, check old users.objective_count
+        // Determine pushups state from user_objectives table
+        // Legacy fallback ONLY applies if user has zero rows in user_objectives (never migrated)
         let pushupsEnabled = objMap.pushups?.enabled ?? false;
         let pushupsCount = objMap.pushups?.target ?? 50;
         
-        if (!pushupsEnabled && user.objective_count && user.objective_count > 0) {
-            // User has legacy objective data - treat as enabled
+        const hasAnyObjectives = objectives && objectives.length > 0;
+        if (!hasAnyObjectives && user.objective_count && user.objective_count > 0) {
+            // User has NO rows in user_objectives at all — use legacy data
             pushupsEnabled = true;
             pushupsCount = user.objective_count;
-            console.log(`Legacy fallback: user ${userId} has objective_count=${user.objective_count}`);
+            console.log(`Legacy fallback: user ${userId} has objective_count=${user.objective_count} (no user_objectives rows)`);
         }
         
         res.json({
@@ -3662,64 +3882,67 @@ app.post("/objectives/settings/:userId", async (req, res) => {
             return res.json({ success: true, user: null, session: null });
         }
         
-        // 2. Also upsert todays session with new values
+        // 2. Update/create today's sessions for ENABLED objectives only
         const today = new Date().toISOString().slice(0, 10);
-        const newTargetCount = objective_count || userData.objective_count || 50;
         const newDeadline = objective_deadline || userData.objective_deadline || "09:00:00";
         const newPayoutAmount = (typeof missed_goal_payout === "number") ? missed_goal_payout : (userData.missed_goal_payout || 0);
         
-        // Check if session exists for today
-        const { data: existingSession } = await supabase
-            .from("objective_sessions")
-            .select("id, completed_count, status")
+        // Get all enabled objectives for this user
+        const { data: enabledObjectives } = await supabase
+            .from("user_objectives")
+            .select("objective_type, target_value, enabled")
             .eq("user_id", userId)
-            .eq("session_date", today)
-            .single();
+            .eq("enabled", true);
         
-        let sessionResult = null;
-        if (existingSession) {
-            // Update existing session (preserve completed_count, dont reset if already completed)
-            // Always reset session when settings change (fresh start)
-            if (true) {
-                const { data: updatedSession } = await supabase
+        // Get all existing sessions for today
+        const { data: existingSessions } = await supabase
+            .from("objective_sessions")
+            .select("id, objective_type, completed_count, status")
+            .eq("user_id", userId)
+            .eq("session_date", today);
+        
+        const existingByType = {};
+        (existingSessions || []).forEach(s => { existingByType[s.objective_type] = s; });
+        
+        let sessionResults = [];
+        for (const obj of (enabledObjectives || [])) {
+            const existing = existingByType[obj.objective_type];
+            if (existing) {
+                // Update existing session with new deadline/payout (preserve completed_count)
+                const { data: updated } = await supabase
                     .from("objective_sessions")
                     .update({
-                        target_count: newTargetCount,
-                        status: "pending",
-                        payout_triggered: false,
+                        target_count: obj.target_value,
                         deadline: newDeadline,
                         payout_amount: newPayoutAmount
                     })
-                    .eq("id", existingSession.id)
+                    .eq("id", existing.id)
                     .select()
                     .single();
-                sessionResult = updatedSession;
+                if (updated) sessionResults.push(updated);
             } else {
-                sessionResult = existingSession;
-            }
-        } else {
-            // Create new session
-            const { data: newSession } = await supabase
-                .from("objective_sessions")
-                .insert({
-                    user_id: userId,
-                    session_date: today,
-                    target_count: newTargetCount,
+                // Create new session for this objective type
+                const { data: created } = await supabase
+                    .from("objective_sessions")
+                    .insert({
+                        user_id: userId,
+                        session_date: today,
+                        objective_type: obj.objective_type,
+                        target_count: obj.target_value,
+                        deadline: newDeadline,
+                        payout_amount: newPayoutAmount,
+                        completed_count: 0,
                         status: "pending",
-                        payout_triggered: false,
-                    deadline: newDeadline,
-                    payout_amount: newPayoutAmount,
-                    completed_count: 0,
-                    status: "pending",
-                    payout_triggered: false
-                })
-                .select()
-                .single();
-            sessionResult = newSession;
+                        payout_triggered: false
+                    })
+                    .select()
+                    .single();
+                if (created) sessionResults.push(created);
+            }
         }
         
-        console.log("Settings saved for user", userId, "- session:", sessionResult?.id);
-        res.json({ success: true, user: userData, session: sessionResult });
+        console.log("Settings saved for user", userId, "- sessions:", sessionResults.length);
+        res.json({ success: true, user: userData, session: sessionResults[0] || null, sessions: sessionResults });
         
     } catch (error) {
         console.error("Error in /objectives/settings:", error);
@@ -3872,3 +4095,8 @@ app.post("/admin/charity-payout/:charityName", async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// -----------------------------------------------------------------------------
+// Start server (must be after all route definitions)
+// -----------------------------------------------------------------------------
+app.listen(port, () => console.log(`EOS backend listening on port ${port}`));
