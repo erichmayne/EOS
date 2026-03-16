@@ -1788,6 +1788,7 @@ app.post("/objectives/check-missed", async (req, res) => {
             // Skip if deadline hasn't passed yet
             if (currentTime < deadline) continue;
             
+            
             // Get user's enabled objectives from user_objectives table
             const { data: enabledObjectives } = await supabase
                 .from("user_objectives")
@@ -2132,11 +2133,11 @@ app.post("/users/delete-account", async (req, res) => {
         if (objectivesError) console.log("Error deleting objectives:", objectivesError);
         
         const { error: invitesSentError } = await supabase
-            .from("invite_relationships").delete().eq("payer_id", userId);
+            .from("recipient_invites").delete().eq("payer_user_id", userId);
         if (invitesSentError) console.log("Error deleting sent invites:", invitesSentError);
         
         const { error: invitesReceivedError } = await supabase
-            .from("invite_relationships").delete().eq("recipient_id", userId);
+            .from("recipient_invites").delete().eq("recipient_user_id", userId);
         if (invitesReceivedError) console.log("Error deleting received invites:", invitesReceivedError);
         
         const { error: transactionsError } = await supabase
@@ -2161,6 +2162,296 @@ app.post("/users/delete-account", async (req, res) => {
         
     } catch (error) {
         console.error("Delete account error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Delete a specific invite relationship
+app.delete('/invites/:inviteId', async (req, res) => {
+    try {
+        const { inviteId } = req.params;
+        const { userId } = req.body;
+        
+        if (!inviteId || !userId) {
+            return res.status(400).json({ error: 'Missing inviteId or userId' });
+        }
+        
+        // iOS sends a recipient ID (from recipients table) or an invite ID (from recipient_invites)
+        // Try deleting invites that reference this recipient_id
+        const { error: byRecipient } = await supabase
+            .from('recipient_invites')
+            .delete()
+            .eq('recipient_id', inviteId)
+            .eq('payer_user_id', userId);
+        
+        // Also try deleting by invite ID directly
+        const { error: byId } = await supabase
+            .from('recipient_invites')
+            .delete()
+            .eq('id', inviteId)
+            .eq('payer_user_id', userId);
+        
+        // Clear the user's custom_recipient_id if it matches what we're deleting
+        const { data: user } = await supabase
+            .from('users')
+            .select('custom_recipient_id')
+            .eq('id', userId)
+            .single();
+        
+        if (user?.custom_recipient_id === inviteId) {
+            await supabase.from('users')
+                .update({ custom_recipient_id: null })
+                .eq('id', userId);
+            console.log(`🗑️ Cleared custom_recipient_id for user ${userId}`);
+        }
+        
+        // Also delete from recipients table
+        await supabase.from('recipients').delete().eq('id', inviteId);
+        
+        console.log(`🗑️ Invite/recipient ${inviteId} deleted by user ${userId}`);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Send invite to an existing EOS user by email
+app.post('/invites/send-to-user', async (req, res) => {
+    try {
+        const { payerId, recipientEmail } = req.body;
+        
+        if (!payerId || !recipientEmail) {
+            return res.status(400).json({ error: 'Missing payerId or recipientEmail' });
+        }
+        
+        const normalizedEmail = recipientEmail.trim().toLowerCase();
+        
+        // Look up payer
+        const { data: payer } = await supabase
+            .from('users').select('id, full_name, email').eq('id', payerId).single();
+        if (!payer) {
+            return res.status(404).json({ error: 'Payer account not found.' });
+        }
+        
+        if (payer.email === normalizedEmail) {
+            return res.status(400).json({ error: "You can't invite yourself." });
+        }
+        
+        // Look up recipient - must be an existing user
+        const { data: recipientUser } = await supabase
+            .from('users').select('id, full_name, email').eq('email', normalizedEmail).maybeSingle();
+        if (!recipientUser) {
+            return res.status(404).json({ error: 'No EOS account found with that email. They need to create an account first, or use Generate a Code for new users.' });
+        }
+        
+        // Check for existing pending invite between these two
+        const { data: allPayerInvites } = await supabase
+            .from('recipient_invites')
+            .select('id, status, recipient_user_id')
+            .eq('payer_user_id', payerId)
+            .in('status', ['pending', 'accepted']);
+        
+        const existingInvite = (allPayerInvites || []).find(inv => inv.recipient_user_id === recipientUser.id);
+        
+        if (existingInvite) {
+            const msg = existingInvite.status === 'accepted' 
+                ? 'This user is already linked as your recipient.'
+                : 'You already have a pending invite to this user.';
+            return res.status(400).json({ error: msg });
+        }
+        
+        // Generate invite code
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let inviteCode = '';
+        for (let i = 0; i < 8; i++) {
+            inviteCode += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        
+        // Create recipient_invites entry then set recipient_user_id
+        const { data: invite, error: inviteError } = await supabase
+            .from('recipient_invites')
+            .insert({
+                payer_user_id: payerId,
+                invite_code: inviteCode,
+                status: 'pending',
+                phone: recipientUser.email
+            })
+            .select()
+            .single();
+        
+        if (!inviteError && invite) {
+            await supabase.from('recipient_invites')
+                .update({ recipient_user_id: recipientUser.id })
+                .eq('id', invite.id);
+        }
+        
+        if (inviteError) {
+            console.error('Create invite error:', inviteError);
+            return res.status(500).json({ error: 'Failed to create invite.' });
+        }
+        
+        // Send email to recipient
+        const acceptUrl = `https://api.live-eos.com/invites/accept/${invite.id}`;
+        
+        await emailTransporter.sendMail({
+            from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+            to: recipientUser.email,
+            subject: `${payer.full_name || 'Someone'} wants you as their accountability recipient on EOS`,
+            text: `${payer.full_name} has invited you to be their designated recipient on EOS. If they miss their fitness goals, their stakes go to you.\n\nAccept here: ${acceptUrl}`,
+            html: `
+                <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:30px">
+                    <h2 style="color:#d9a600">You've been invited!</h2>
+                    <p><strong>${payer.full_name || 'An EOS user'}</strong> wants you to be their designated recipient.</p>
+                    <p>If they miss their fitness goals, their accountability stakes go to you.</p>
+                    <a href="${acceptUrl}" style="display:inline-block;background:#d9a600;color:white;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:20px 0">Accept Invite</a>
+                    <p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p>
+                </div>
+            `
+        });
+        
+        console.log(`📧 Invite email sent to ${recipientUser.email} from ${payer.full_name}`);
+        res.json({ success: true, recipientName: recipientUser.full_name || recipientUser.email });
+        
+    } catch (error) {
+        console.error('Send invite to user error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Accept an invite (clicked from email)
+app.get('/invites/accept/:inviteId', async (req, res) => {
+    try {
+        const { inviteId } = req.params;
+        
+        const { data: invite } = await supabase
+            .from('recipient_invites')
+            .select('*, payer:payer_user_id(id, full_name, email)')
+            .eq('id', inviteId)
+            .single();
+        
+        const pageHead = '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>';
+        const pageStyle = 'font-family:-apple-system,sans-serif;text-align:center;padding:40px 24px;max-width:500px;margin:0 auto';
+        
+        if (!invite) {
+            return res.send(`${pageHead}<body style="${pageStyle}"><h2>Invite not found</h2><p style="font-size:17px;color:#666">This invite link is invalid or has expired.</p></body></html>`);
+        }
+        
+        if (invite.status === 'accepted') {
+            return res.send(`${pageHead}<body style="${pageStyle}"><h2 style="color:#d9a600;font-size:24px">Already Accepted</h2><p style="font-size:17px;color:#666">You've already accepted this invite from ${invite.payer?.full_name || 'the user'}.</p><p style="font-size:15px;color:#888;margin-top:24px">Open the EOS app to continue.</p></body></html>`);
+        }
+        
+        // Find recipient - try recipient_user_id first, fall back to phone field (stores email for email invites)
+        let recipientUser = null;
+        if (invite.recipient_user_id) {
+            const { data } = await supabase.from('users').select('id, full_name, email').eq('id', invite.recipient_user_id).single();
+            recipientUser = data;
+        }
+        if (!recipientUser && invite.phone && invite.phone.includes('@')) {
+            const { data } = await supabase.from('users').select('id, full_name, email').eq('email', invite.phone.toLowerCase()).single();
+            recipientUser = data;
+        }
+        
+        if (!recipientUser) {
+            return res.send(`${pageHead}<body style="${pageStyle}"><h2>Error</h2><p style="font-size:17px;color:#666">Recipient account not found. Make sure you have an EOS account.</p></body></html>`);
+        }
+        
+        // Create recipients table entry (needed for FK on users.custom_recipient_id)
+        const { data: recipientEntry, error: recipientError } = await supabase
+            .from('recipients')
+            .insert({
+                name: recipientUser.full_name || recipientUser.email,
+                email: recipientUser.email,
+                type: 'individual'
+            })
+            .select()
+            .single();
+        
+        if (recipientError) {
+            console.error('Failed to create recipient entry:', recipientError);
+            return res.send(`${pageHead}<body style="${pageStyle}"><h2>Error</h2><p style="font-size:17px;color:#666">Failed to link accounts. Please try again.</p></body></html>`);
+        }
+        
+        // Update invite to accepted
+        await supabase.from('recipient_invites')
+            .update({ 
+                status: 'accepted',
+                recipient_id: recipientEntry.id
+            })
+            .eq('id', inviteId);
+        
+        // Update payer's custom_recipient_id
+        await supabase.from('users')
+            .update({ 
+                custom_recipient_id: recipientEntry.id,
+                payout_destination: 'custom'
+            })
+            .eq('id', invite.payer_user_id);
+        
+        const payerName = invite.payer?.full_name || 'the user';
+        console.log(`✅ Invite accepted: ${recipientUser.email} is now recipient for ${payerName}`);
+        
+        res.send(`
+            ${pageHead}<body style="${pageStyle}">
+                <div style="font-size:48px;margin-bottom:16px">🤝</div>
+                <h2 style="color:#d9a600;font-size:24px;margin-bottom:8px">Invite Accepted!</h2>
+                <p style="font-size:18px;line-height:1.5">You are now <strong>${payerName}'s</strong> designated recipient on EOS.</p>
+                <p style="font-size:16px;color:#666;line-height:1.5">If they miss their fitness goals, their accountability stakes will be sent to you.</p>
+                <p style="font-size:15px;color:#888;margin-top:32px">Open the EOS app to see the update.</p>
+                <p style="color:#aaa;font-size:13px;margin-top:40px">— EOS | Dawn of Better Habits</p>
+            </body></html>
+        `);
+        
+    } catch (error) {
+        console.error('Accept invite error:', error);
+        res.send('<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:-apple-system,sans-serif;text-align:center;padding:40px 24px"><h2>Error</h2><p style="font-size:17px;color:#666">Something went wrong. Please try again.</p></body></html>');
+    }
+});
+
+// Check if current user is a recipient for anyone
+app.get('/users/:userId/is-recipient', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Find this user's email, then find recipient entries with that email, then find invites pointing to those
+        const { data: thisUser } = await supabase.from('users').select('email').eq('id', userId).single();
+        if (!thisUser?.email) {
+            return res.json({ isRecipient: false, payers: [] });
+        }
+        
+        const { data: recipientEntries } = await supabase
+            .from('recipients')
+            .select('id')
+            .eq('email', thisUser.email);
+        
+        const recipientIds = (recipientEntries || []).map(r => r.id);
+        if (recipientIds.length === 0) {
+            return res.json({ isRecipient: false, payers: [] });
+        }
+        
+        const { data: invitesRaw } = await supabase
+            .from('recipient_invites')
+            .select('payer_user_id, status, recipient_id, payer:payer_user_id(full_name, email)')
+            .eq('status', 'accepted')
+            .in('recipient_id', recipientIds);
+        
+        const invites = (invitesRaw || []).filter(inv => inv.payer_user_id !== userId);
+        
+        if (!invites || invites.length === 0) {
+            return res.json({ isRecipient: false, payers: [] });
+        }
+        
+        if (!invites || invites.length === 0) {
+            return res.json({ isRecipient: false, payers: [] });
+        }
+        
+        const payers = invites.map(inv => ({
+            payerId: inv.payer_user_id,
+            name: inv.payer?.full_name || inv.payer?.email || 'Unknown'
+        }));
+        
+        res.json({ isRecipient: true, payers });
+        
+    } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
@@ -2336,8 +2627,8 @@ app.post('/strava/webhook', async (req, res) => {
             return;
         }
         
-        // Check if user has an enabled run objective (multi-objective via user_objectives table)
-        const { data: runObjective, error: objError } = await supabase
+        // Check if user has an enabled run objective OR is in an active competition with run/both
+        const { data: runObjective } = await supabase
             .from('user_objectives')
             .select('target_value, enabled')
             .eq('user_id', user.id)
@@ -2345,8 +2636,22 @@ app.post('/strava/webhook', async (req, res) => {
             .eq('enabled', true)
             .single();
         
-        if (objError || !runObjective) {
-            console.log(`User ${user.id} doesn't have an enabled run objective, skipping`);
+        let inRunCompetition = false;
+        if (!runObjective) {
+            const { data: activeComps } = await supabase
+                .from('competition_participants')
+                .select('competition_id, competitions!inner(status, objective_type)')
+                .eq('user_id', user.id)
+                .eq('status', 'active');
+            
+            inRunCompetition = (activeComps || []).some(cp => {
+                const comp = cp.competitions;
+                return comp && comp.status === 'active' && (comp.objective_type === 'run' || comp.objective_type === 'both');
+            });
+        }
+        
+        if (!runObjective && !inRunCompetition) {
+            console.log(`User ${user.id} has no run objective and no active run competition, skipping`);
             return;
         }
         
@@ -2419,8 +2724,19 @@ app.post('/strava/webhook', async (req, res) => {
             return;
         }
         
-        const distanceMiles = activity.distance / 1609.34; // meters to miles
-        const goalMiles = runObjective.target_value; // from user_objectives table
+        // Pace check: reject runs faster than 4:00/mile (likely driving/cheating)
+        const distanceMeters = activity.distance || 0;
+        const movingTimeSec = activity.moving_time || 0;
+        if (distanceMeters > 0 && movingTimeSec > 0) {
+            const paceMinPerMile = (movingTimeSec / 60) / (distanceMeters / 1609.34);
+            if (paceMinPerMile < 4.0) {
+                console.log(`🚫 Activity ${object_id} rejected: pace ${paceMinPerMile.toFixed(1)} min/mi is faster than 4:00/mi limit (likely not a real run)`);
+                return;
+            }
+        }
+        
+        const distanceMiles = distanceMeters / 1609.34; // meters to miles
+        const goalMiles = runObjective ? runObjective.target_value : 0; // 0 if only in competition (no individual goal)
         
         console.log(`🏃 Run detected: ${distanceMiles.toFixed(2)} miles (goal: ${goalMiles} miles)`);
         
@@ -2524,8 +2840,8 @@ app.delete('/strava/disconnect/:userId', async (req, res) => {
             .from('users')
             .select('strava_connection_id')
             .eq('id', userId)
-            .single();
-        
+      .single();
+    
         if (user?.strava_connection_id) {
             // Get the connection record for the access token
             const { data: conn } = await supabase
@@ -3282,22 +3598,22 @@ app.post("/objectives/create-daily-sessions", async (req, res) => {
             for (const obj of objectivesToCreate) {
                 if (existingTypes.has(obj.type)) continue;
                 
-                const { data: session, error: sessionError } = await supabase
-                    .from("objective_sessions")
-                    .insert({
-                        user_id: user.id,
-                        session_date: today,
+            const { data: session, error: sessionError } = await supabase
+                .from("objective_sessions")
+                .insert({
+                    user_id: user.id,
+                    session_date: today,
                         objective_type: obj.type,
                         target_count: obj.target,
-                        completed_count: 0,
+                    completed_count: 0,
                         deadline: parseDeadlineTime(user.objective_deadline),
-                        status: "pending",
-                        payout_amount: user.missed_goal_payout || 0
-                    })
-                    .select()
-                    .single();
-                
-                if (!sessionError) {
+                    status: "pending",
+                    payout_amount: user.missed_goal_payout || 0
+                })
+                .select()
+                .single();
+            
+            if (!sessionError) {
                     results.push({ userId: user.id, sessionId: session.id, type: obj.type });
                 }
             }
@@ -3843,7 +4159,7 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         if (objective_deadline) updateData.objective_deadline = objective_deadline;
         if (typeof missed_goal_payout === "number") { 
             updateData.missed_goal_payout = missed_goal_payout; 
-            if (missed_goal_payout > 0) updateData.payout_committed = true; 
+            if (missed_goal_payout > 0) updateData.payout_committed = true;
         }
         if (timezone) updateData.timezone = timezone;
         // Handle settings_locked_until - allow null to clear the lock
@@ -3855,15 +4171,15 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         let userData = null;
         if (Object.keys(updateData).length > 0) {
             const { data, error: userError } = await supabase
-                .from("users")
-                .update(updateData)
-                .eq("id", userId)
-                .select()
-                .single();
-            
-            if (userError) {
-                console.error("User update error:", userError);
-                return res.status(400).json({ error: userError.message });
+            .from("users")
+            .update(updateData)
+            .eq("id", userId)
+            .select()
+            .single();
+        
+        if (userError) {
+            console.error("User update error:", userError);
+            return res.status(400).json({ error: userError.message });
             }
             userData = data;
         } else {
@@ -3923,20 +4239,20 @@ app.post("/objectives/settings/:userId", async (req, res) => {
             } else {
                 // Create new session for this objective type
                 const { data: created } = await supabase
-                    .from("objective_sessions")
-                    .insert({
-                        user_id: userId,
-                        session_date: today,
+                .from("objective_sessions")
+                .insert({
+                    user_id: userId,
+                    session_date: today,
                         objective_type: obj.objective_type,
                         target_count: obj.target_value,
-                        deadline: newDeadline,
-                        payout_amount: newPayoutAmount,
-                        completed_count: 0,
-                        status: "pending",
-                        payout_triggered: false
-                    })
-                    .select()
-                    .single();
+                    deadline: newDeadline,
+                    payout_amount: newPayoutAmount,
+                    completed_count: 0,
+                    status: "pending",
+                    payout_triggered: false
+                })
+                .select()
+                .single();
                 if (created) sessionResults.push(created);
             }
         }
@@ -4093,6 +4409,736 @@ app.post("/admin/charity-payout/:charityName", async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// -----------------------------------------------------------------------------
+// Competitions (Compete Feature)
+// -----------------------------------------------------------------------------
+
+// Create a competition (LOBBY — no money deducted, status = pending)
+app.post('/compete/create', async (req, res) => {
+    try {
+        const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue } = req.body;
+        
+        if (!userId || !name || !objectiveType || !durationDays) {
+            return res.status(400).json({ error: 'Missing required fields: userId, name, objectiveType, durationDays' });
+        }
+        
+        const buyIn = parseFloat(buyInAmount) || 0;
+        const days = parseInt(durationDays) || 7;
+        
+        if (buyIn > 0) {
+            const { data: creator } = await supabase
+                .from('users').select('balance_cents').eq('id', userId).single();
+            const creatorBalance = (creator?.balance_cents || 0) / 100;
+            if (creatorBalance < buyIn) {
+                return res.status(400).json({ error: `Insufficient balance. You have $${creatorBalance.toFixed(2)} but the buy-in is $${buyIn}. Deposit funds first.` });
+            }
+        }
+        
+        // Generate 6-char invite code
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let inviteCode = '';
+        for (let i = 0; i < 6; i++) {
+            inviteCode += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        
+        // Create in PENDING status — dates are placeholders, set properly on start
+        const today = new Date();
+        const startDate = today.toISOString().split('T')[0];
+        const endDate = new Date(today.getTime() + days * 86400000).toISOString().split('T')[0];
+        
+        const { data: competition, error: createError } = await supabase
+            .from('competitions')
+            .insert({
+                creator_user_id: userId,
+                name: name.trim(),
+                objective_type: objectiveType,
+                scoring_type: scoringType || 'consistency',
+                start_date: startDate,
+                end_date: endDate,
+                status: 'pending',
+                invite_code: inviteCode,
+                target_value: targetValue || 0,
+                buy_in_amount: buyIn,
+                duration_days: days
+            })
+            .select()
+            .single();
+        
+        if (createError) {
+            console.error('Competition create error:', createError);
+            return res.status(500).json({ error: createError.message });
+        }
+        
+        // Auto-join the creator as first participant (NO money deducted yet)
+        await supabase
+            .from('competition_participants')
+            .insert({
+                competition_id: competition.id,
+                user_id: userId,
+                status: 'active',
+                buy_in_locked: false,
+                buy_in_amount: buyIn
+            });
+        
+        console.log(`🏆 Competition created (PENDING): "${name}" (${inviteCode}) by ${userId}`);
+        res.json({ success: true, competition, inviteCode });
+        
+    } catch (error) {
+        console.error('Competition create error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Verify/preview a competition by code (before joining)
+app.get('/compete/verify/:code', async (req, res) => {
+    try {
+        const code = req.params.code.toUpperCase();
+        
+        const { data: competition, error } = await supabase
+            .from('competitions')
+            .select('*, creator:users!creator_user_id(full_name, email)')
+            .eq('invite_code', code)
+            .single();
+        
+        if (error || !competition) {
+            return res.status(404).json({ error: 'Competition not found' });
+        }
+        
+        // Get participant count
+        const { count } = await supabase
+            .from('competition_participants')
+            .select('*', { count: 'exact', head: true })
+            .eq('competition_id', competition.id)
+            .eq('status', 'active');
+        
+        res.json({
+            id: competition.id,
+            name: competition.name,
+            objectiveType: competition.objective_type,
+            scoringType: competition.scoring_type,
+            startDate: competition.start_date,
+            endDate: competition.end_date,
+            status: competition.status,
+            targetValue: competition.target_value || 0,
+            buyInAmount: competition.buy_in_amount,
+            durationDays: competition.duration_days || 7,
+            creatorUserId: competition.creator_user_id,
+            creatorName: competition.creator?.full_name || 'Unknown',
+            participantCount: count || 0
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Join a competition
+app.post('/compete/join', async (req, res) => {
+    try {
+        const { userId, code } = req.body;
+        
+        if (!userId || !code) {
+            return res.status(400).json({ error: 'Missing userId or code' });
+        }
+        
+        const { data: competition, error: findError } = await supabase
+            .from('competitions')
+            .select('*')
+            .eq('invite_code', code.toUpperCase())
+            .single();
+        
+        if (findError || !competition) {
+            return res.status(404).json({ error: 'Competition not found' });
+        }
+        
+        if (competition.status === 'completed') {
+            return res.status(400).json({ error: 'This competition has already ended' });
+        }
+        
+        if (competition.status === 'active') {
+            return res.status(400).json({ error: 'This competition has already started. You can only join before it begins.' });
+        }
+        
+        // Check if already joined
+        const { data: existing } = await supabase
+            .from('competition_participants')
+            .select('id')
+            .eq('competition_id', competition.id)
+            .eq('user_id', userId)
+            .single();
+        
+        if (existing) {
+            return res.status(400).json({ error: 'You have already joined this competition' });
+        }
+        
+        const buyIn = parseFloat(competition.buy_in_amount) || 0;
+        
+        if (buyIn > 0) {
+            const { data: joiner } = await supabase
+                .from('users').select('balance_cents').eq('id', userId).single();
+            const joinerBalance = (joiner?.balance_cents || 0) / 100;
+            if (joinerBalance < buyIn) {
+                return res.status(400).json({ error: `Insufficient balance. You have $${joinerBalance.toFixed(2)} but the buy-in is $${buyIn}. Deposit funds first.` });
+            }
+        }
+        
+        // Join the LOBBY — NO money deducted yet (happens when creator starts)
+        const { error: joinError } = await supabase
+            .from('competition_participants')
+            .insert({
+                competition_id: competition.id,
+                user_id: userId,
+                status: 'active',
+                buy_in_locked: false,
+                buy_in_amount: buyIn
+            });
+        
+        if (joinError) {
+            console.error('Competition join error:', joinError);
+            return res.status(500).json({ error: joinError.message });
+        }
+        
+        console.log(`🏆 User ${userId} joined lobby for "${competition.name}" (${code})`);
+        res.json({ success: true, competitionId: competition.id, name: competition.name });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// START a competition (creator only — deducts all balances, sets active, starts timer)
+app.post('/compete/start', async (req, res) => {
+    try {
+        const { userId, competitionId } = req.body;
+        
+        if (!userId || !competitionId) {
+            return res.status(400).json({ error: 'Missing userId or competitionId' });
+        }
+        
+        // Get competition
+        const { data: comp, error: compErr } = await supabase
+            .from('competitions')
+            .select('*')
+            .eq('id', competitionId)
+            .single();
+        
+        if (compErr || !comp) {
+            return res.status(404).json({ error: 'Competition not found' });
+        }
+        
+        // Only the creator can start
+        if (comp.creator_user_id !== userId) {
+            return res.status(403).json({ error: 'Only the competition creator can start it' });
+        }
+        
+        if (comp.status !== 'pending') {
+            return res.status(400).json({ error: 'Competition has already been started' });
+        }
+        
+        // Get all participants
+        const { data: participants } = await supabase
+            .from('competition_participants')
+            .select('user_id, buy_in_amount')
+            .eq('competition_id', competitionId)
+            .eq('status', 'active');
+        
+        if (!participants || participants.length < 1) {
+            return res.status(400).json({ error: 'No participants to start with' });
+        }
+        
+        const buyIn = parseFloat(comp.buy_in_amount) || 0;
+        
+        // If paid competition, check ALL participants have sufficient balance
+        if (buyIn > 0) {
+            const insufficientUsers = [];
+            for (const p of participants) {
+                const { data: user } = await supabase
+                    .from('users').select('balance_cents, full_name').eq('id', p.user_id).single();
+                const balanceDollars = (user?.balance_cents || 0) / 100;
+                if (balanceDollars < buyIn) {
+                    insufficientUsers.push({
+                        name: user?.full_name || 'Unknown',
+                        userId: p.user_id,
+                        balance: balanceDollars
+                    });
+                }
+            }
+            
+            if (insufficientUsers.length > 0) {
+                const names = insufficientUsers.map(u => u.name).join(', ');
+                return res.status(400).json({
+                    error: `Cannot start: ${names} ${insufficientUsers.length === 1 ? 'has' : 'have'} insufficient balance for the $${buyIn} buy-in.`,
+                    insufficientUsers
+                });
+            }
+            
+            // Deduct buy-in from ALL participants
+            for (const p of participants) {
+                const buyInCents = Math.round(buyIn * 100);
+                const { data: user } = await supabase
+                    .from('users').select('balance_cents').eq('id', p.user_id).single();
+                const newBalance = Math.max(0, (user?.balance_cents || 0) - buyInCents);
+                await supabase.from('users').update({ balance_cents: newBalance }).eq('id', p.user_id);
+                
+                // Mark participant's buy-in as locked
+                await supabase.from('competition_participants')
+                    .update({ buy_in_locked: true })
+                    .eq('competition_id', competitionId)
+                    .eq('user_id', p.user_id);
+                
+                console.log(`🏆 Deducted $${buyIn} from ${p.user_id} (new: $${(newBalance/100).toFixed(2)})`);
+            }
+        }
+        
+        // Set start_date = today, end_date = today + duration_days, status = active
+        const today = new Date();
+        const durationDays = comp.duration_days || 7;
+        const startDate = today.toISOString().split('T')[0];
+        const endDate = new Date(today.getTime() + durationDays * 86400000).toISOString().split('T')[0];
+        
+        await supabase.from('competitions')
+            .update({
+                status: 'active',
+                start_date: startDate,
+                end_date: endDate
+            })
+            .eq('id', competitionId);
+        
+        // Return updated balance for the requesting user
+        const { data: updatedUser } = await supabase
+            .from('users').select('balance_cents').eq('id', userId).single();
+        
+        const poolTotal = buyIn * participants.length;
+        console.log(`🏆 Competition STARTED: "${comp.name}" | ${participants.length} players | Pool: $${poolTotal}`);
+        
+        res.json({
+            success: true,
+            startDate,
+            endDate,
+            participantCount: participants.length,
+            poolTotal,
+            newBalanceCents: updatedUser?.balance_cents ?? null
+        });
+        
+    } catch (error) {
+        console.error('Competition start error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// List competitions for a user
+app.get('/compete/user/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Get all competition IDs this user participates in
+        const { data: participations, error: partError } = await supabase
+            .from('competition_participants')
+            .select('competition_id')
+            .eq('user_id', userId)
+            .eq('status', 'active');
+        
+        if (partError) {
+            return res.status(500).json({ error: partError.message });
+        }
+        
+        if (!participations || participations.length === 0) {
+            return res.json({ competitions: [] });
+        }
+        
+        const compIds = participations.map(p => p.competition_id);
+        
+        const { data: competitions, error: compError } = await supabase
+            .from('competitions')
+            .select('*, creator:users!creator_user_id(full_name)')
+            .in('id', compIds)
+            .order('created_at', { ascending: false });
+        
+        if (compError) {
+            return res.status(500).json({ error: compError.message });
+        }
+        
+        // For each competition, get participant count
+        const results = [];
+        for (const comp of (competitions || [])) {
+            const { count } = await supabase
+                .from('competition_participants')
+                .select('*', { count: 'exact', head: true })
+                .eq('competition_id', comp.id)
+                .eq('status', 'active');
+            
+            results.push({
+                id: comp.id,
+                name: comp.name,
+                objectiveType: comp.objective_type,
+                scoringType: comp.scoring_type,
+                startDate: comp.start_date,
+                endDate: comp.end_date,
+                status: comp.status,
+                inviteCode: comp.invite_code,
+                targetValue: comp.target_value || 0,
+                buyInAmount: comp.buy_in_amount,
+                durationDays: comp.duration_days || 7,
+                creatorUserId: comp.creator_user_id,
+                creatorName: comp.creator?.full_name || 'Unknown',
+                participantCount: count || 0
+            });
+        }
+        
+        res.json({ competitions: results });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get leaderboard for a competition
+app.get('/compete/:competitionId/leaderboard', async (req, res) => {
+    try {
+        const { competitionId } = req.params;
+        
+        // Get competition details
+        const { data: competition, error: compError } = await supabase
+            .from('competitions')
+            .select('*')
+            .eq('id', competitionId)
+            .single();
+        
+        if (compError || !competition) {
+            return res.status(404).json({ error: 'Competition not found' });
+        }
+        
+        // Get all active participants with user info
+        const { data: participants, error: partError } = await supabase
+            .from('competition_participants')
+            .select('user_id, users!user_id(full_name, email)')
+            .eq('competition_id', competitionId)
+            .eq('status', 'active');
+        
+        if (partError) {
+            return res.status(500).json({ error: partError.message });
+        }
+        
+        const leaderboard = [];
+        
+        for (const p of (participants || [])) {
+            // Query their sessions within the competition date range
+            let sessionsQuery = supabase
+                .from('objective_sessions')
+                .select('status, completed_count, session_date, objective_type')
+                .eq('user_id', p.user_id)
+                .gte('session_date', competition.start_date)
+                .lte('session_date', competition.end_date);
+            
+            // Filter by objective type (unless "both")
+            if (competition.objective_type !== 'both') {
+                sessionsQuery = sessionsQuery.eq('objective_type', competition.objective_type);
+            }
+            
+            const { data: sessions } = await sessionsQuery;
+            
+            let score = 0;
+            let daysCompleted = 0;
+            let totalCount = 0;
+            let currentStreak = 0;
+            
+            const allSessions = sessions || [];
+            
+            if (competition.objective_type === 'both') {
+                // Group sessions by date, day counts only if ALL objective types completed
+                const byDate = {};
+                for (const s of allSessions) {
+                    if (!byDate[s.session_date]) byDate[s.session_date] = {};
+                    byDate[s.session_date][s.objective_type] = s;
+                    // Weighted scoring: 1 mile = 100 pts, 1 pushup = 1 pt
+                    const pts = s.objective_type === 'run' 
+                        ? (parseFloat(s.completed_count) || 0) * 100 
+                        : (parseFloat(s.completed_count) || 0);
+                    totalCount += pts;
+                }
+                const sortedDates = Object.keys(byDate).sort();
+                for (const date of sortedDates) {
+                    const dayEntries = byDate[date];
+                    const allDone = Object.values(dayEntries).every(s => s.status === 'completed');
+                    if (allDone && Object.keys(dayEntries).length >= 2) {
+                        daysCompleted++;
+                        currentStreak++;
+                    } else {
+                        currentStreak = 0;
+                    }
+                }
+            } else {
+                // Single objective type — sort by date for streak
+                const sorted = allSessions.sort((a, b) => a.session_date.localeCompare(b.session_date));
+                for (const s of sorted) {
+                    if (s.status === 'completed') {
+                        daysCompleted++;
+                        totalCount += parseFloat(s.completed_count) || 0;
+                        currentStreak++;
+                    } else {
+                        currentStreak = 0;
+                    }
+                }
+            }
+            
+            score = competition.scoring_type === 'cumulative' ? totalCount : daysCompleted;
+            
+            leaderboard.push({
+                userId: p.user_id,
+                name: p.users?.full_name || p.users?.email || 'Unknown',
+                score: Math.round(score * 100) / 100,
+                daysCompleted,
+                totalCount: Math.round(totalCount * 100) / 100,
+                streak: currentStreak
+            });
+        }
+        
+        // Sort by score descending, then by streak as tiebreaker
+        leaderboard.sort((a, b) => b.score - a.score || b.streak - a.streak);
+        
+        // Assign ranks
+        leaderboard.forEach((entry, i) => { entry.rank = i + 1; });
+        
+        // Calculate total days in competition
+        const start = new Date(competition.start_date);
+        const end = new Date(competition.end_date);
+        const today = new Date();
+        const totalDays = Math.ceil((end - start) / 86400000);
+        const daysElapsed = Math.min(Math.ceil((today - start) / 86400000), totalDays);
+        const daysRemaining = Math.max(0, Math.ceil((end - today) / 86400000));
+        
+        res.json({
+            competition: {
+                id: competition.id,
+                name: competition.name,
+                objectiveType: competition.objective_type,
+                scoringType: competition.scoring_type,
+                startDate: competition.start_date,
+                endDate: competition.end_date,
+                status: competition.status,
+                inviteCode: competition.invite_code,
+                targetValue: competition.target_value || 0,
+                buyInAmount: competition.buy_in_amount,
+                durationDays: competition.duration_days || 7,
+                creatorUserId: competition.creator_user_id,
+                totalDays,
+                daysElapsed,
+                daysRemaining
+            },
+            leaderboard
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Cron: check and complete ended competitions, determine winners, pay out
+app.post('/compete/check-completed', async (req, res) => {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        
+        const { data: ended, error } = await supabase
+            .from('competitions')
+            .select('*')
+            .eq('status', 'active')
+            .lt('end_date', today);
+        
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+        
+        let completed = 0;
+        const payoutResults = [];
+        
+        for (const comp of (ended || [])) {
+            // --- Determine the winner via leaderboard calculation ---
+            const { data: participants } = await supabase
+                .from('competition_participants')
+                .select('user_id, buy_in_amount')
+                .eq('competition_id', comp.id)
+                .eq('status', 'active');
+            
+            if (!participants || participants.length === 0) {
+                await supabase.from('competitions')
+                    .update({ status: 'completed', completed_at: new Date().toISOString() })
+                    .eq('id', comp.id);
+                completed++;
+                continue;
+            }
+            
+            // Calculate scores for each participant
+            const scores = [];
+            for (const p of participants) {
+                let sessionsQuery = supabase
+                    .from('objective_sessions')
+                    .select('status, completed_count, session_date, objective_type')
+                    .eq('user_id', p.user_id)
+                    .gte('session_date', comp.start_date)
+                    .lte('session_date', comp.end_date);
+                
+                if (comp.objective_type !== 'both') {
+                    sessionsQuery = sessionsQuery.eq('objective_type', comp.objective_type);
+                }
+                
+                const { data: sessions } = await sessionsQuery;
+                const allSessions = sessions || [];
+                
+                let daysCompleted = 0;
+                let totalCount = 0;
+                
+                if (comp.objective_type === 'both') {
+                    const byDate = {};
+                    for (const s of allSessions) {
+                        if (!byDate[s.session_date]) byDate[s.session_date] = {};
+                        byDate[s.session_date][s.objective_type] = s;
+                        // Weighted: 1 mile = 100 pts, 1 pushup = 1 pt
+                        const pts = s.objective_type === 'run'
+                            ? (parseFloat(s.completed_count) || 0) * 100
+                            : (parseFloat(s.completed_count) || 0);
+                        totalCount += pts;
+                    }
+                    for (const date of Object.keys(byDate)) {
+                        const dayEntries = byDate[date];
+                        const allDone = Object.values(dayEntries).every(s => s.status === 'completed');
+                        if (allDone && Object.keys(dayEntries).length >= 2) {
+                            daysCompleted++;
+                        }
+                    }
+                } else {
+                    for (const s of allSessions) {
+                        if (s.status === 'completed') {
+                            daysCompleted++;
+                            totalCount += parseFloat(s.completed_count) || 0;
+                        }
+                    }
+                }
+                
+                const score = comp.scoring_type === 'cumulative' ? totalCount : daysCompleted;
+                const { data: scoreUser } = await supabase.from('users').select('full_name').eq('id', p.user_id).single();
+                scores.push({ userId: p.user_id, score, buyInAmount: parseFloat(p.buy_in_amount) || 0, name: scoreUser?.full_name || 'Unknown' });
+            }
+            
+            // Sort by score descending
+            scores.sort((a, b) => b.score - a.score);
+            const topScore = scores[0].score;
+            const winners = scores.filter(s => s.score === topScore && s.score > 0);
+            
+            // --- Payout logic ---
+            const buyIn = parseFloat(comp.buy_in_amount) || 0;
+            const poolAmount = buyIn * participants.length;
+            let payoutDone = false;
+            
+            if (poolAmount > 0 && winners.length > 0) {
+                // Split pool among all tied winners
+                const splitCents = Math.floor(Math.round(poolAmount * 100) / winners.length);
+                
+                for (const winner of winners) {
+                    const { data: winnerUser } = await supabase
+                        .from('users').select('balance_cents').eq('id', winner.userId).single();
+                    const newBalance = (winnerUser?.balance_cents || 0) + splitCents;
+                    await supabase.from('users').update({ balance_cents: newBalance }).eq('id', winner.userId);
+                    
+                    await supabase.from('competition_payouts').insert({
+                        competition_id: comp.id,
+                        winner_user_id: winner.userId,
+                        pool_amount: splitCents / 100,
+                        participant_count: participants.length
+                    });
+                    
+                    console.log(`🏆 PAYOUT: $${(splitCents/100).toFixed(2)} to ${winner.name} (${winner.userId}) for "${comp.name}"${winners.length > 1 ? ` (split ${winners.length} ways)` : ''}`);
+                }
+                
+                payoutDone = true;
+            } else if (poolAmount > 0 && winners.length === 0) {
+                // Nobody scored — refund all participants
+                for (const p of participants) {
+                    if (p.buy_in_amount > 0) {
+                        const refundCents = Math.round(parseFloat(p.buy_in_amount) * 100);
+                        const { data: refundUser } = await supabase
+                            .from('users').select('balance_cents').eq('id', p.user_id).single();
+                        const newBal = (refundUser?.balance_cents || 0) + refundCents;
+                        await supabase.from('users').update({ balance_cents: newBal }).eq('id', p.user_id);
+                    }
+                }
+                console.log(`🏆 REFUND: All participants refunded for "${comp.name}" (no one scored)`);
+            }
+            
+            // Mark competition completed with winner(s)
+            const winnerId = winners.length > 0 ? winners[0].userId : null;
+            await supabase.from('competitions')
+                .update({
+                    status: 'completed',
+                    winner_user_id: winnerId,
+                    payout_completed: payoutDone,
+                    completed_at: new Date().toISOString()
+                })
+                .eq('id', comp.id);
+            
+            payoutResults.push({
+                competitionId: comp.id,
+                name: comp.name,
+                winnerId,
+                winnerCount: winners.length,
+                poolAmount,
+                payoutDone,
+                participantCount: participants.length
+            });
+            
+            // Send completion emails to all participants
+            try {
+                const winnerIds = new Set(winners.map(w => w.userId));
+                const winnerNames = winners.map(w => w.name).join(' & ');
+                
+                for (const p of participants) {
+                    const { data: pUser } = await supabase
+                        .from('users').select('email, full_name').eq('id', p.user_id).single();
+                    if (!pUser?.email) continue;
+                    
+                    const isWinner = winnerIds.has(p.user_id);
+                    let subject, body;
+                    
+                    if (winners.length === 0) {
+                        subject = `Competition "${comp.name}" has ended — Draw`;
+                        body = `"${comp.name}" has ended with no winner.${poolAmount > 0 ? ' All buy-ins have been refunded since no one scored.' : ' Better luck next time!'}`;
+                    } else if (isWinner && winners.length === 1) {
+                        subject = `🏆 You won "${comp.name}"!`;
+                        body = `Congrats ${pUser.full_name || 'Champion'}! You won "${comp.name}" with a score of ${topScore}.${poolAmount > 0 ? ` $${poolAmount} has been added to your EOS balance.` : ''}`;
+                    } else if (isWinner && winners.length > 1) {
+                        const splitAmount = (Math.floor(Math.round(poolAmount * 100) / winners.length) / 100).toFixed(2);
+                        subject = `🏆 You tied for first in "${comp.name}"!`;
+                        body = `"${comp.name}" ended in a ${winners.length}-way tie! You and ${winnerNames.replace(pUser.full_name + ' & ', '').replace(' & ' + pUser.full_name, '')} each scored ${topScore}.${poolAmount > 0 ? ` The $${poolAmount} pool has been split — $${splitAmount} added to your balance.` : ''}`;
+                    } else {
+                        const winnerName = winnerNames;
+                        subject = `Competition "${comp.name}" has ended`;
+                        body = `"${comp.name}" has ended. ${winnerName} won with a score of ${topScore}.${poolAmount > 0 ? ` The $${poolAmount} pool has been awarded to the winner${winners.length > 1 ? 's' : ''}.` : ''}`;
+                    }
+                    
+                    await emailTransporter.sendMail({
+                        from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+                        to: pUser.email,
+                        subject,
+                        text: body,
+                        html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">${subject}</h2><p>${body}</p><p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p></div>`
+                    });
+                    console.log(`📧 Competition email sent to ${pUser.email}`);
+                }
+            } catch (emailErr) {
+                console.error('Competition email error (non-fatal):', emailErr.message);
+            }
+            
+            completed++;
+            console.log(`🏆 Competition completed: "${comp.name}" | Winner${winners.length > 1 ? 's' : ''}: ${winners.length > 0 ? winners.map(w => w.name).join(' & ') : 'none (refunded)'}`);
+        }
+        
+        res.json({ success: true, completed, payouts: payoutResults });
+        
+    } catch (error) {
+        console.error('Competition check-completed error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 

@@ -84,7 +84,12 @@ struct ContentView: View {
     @State private var showObjectiveSettings = false
     @State private var showProfileView = false
     @State private var showPushUpSession = false
+    @State private var showCompeteView = false
     @State private var currentTime = Date() // For live countdown
+    
+    // Active competition data for main screen widget
+    @State private var activeCompetition: [String: Any]? = nil
+    @State private var compLeaderboard: [[String: Any]] = []
     
     // Timer for live countdown updates
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -203,6 +208,11 @@ struct ContentView: View {
                             )
                         )
                         .padding(.top, 30)
+                    
+                    // Active competition widget
+                    if let comp = activeCompetition {
+                        activeCompetitionWidget(comp)
+                    }
 
                     VStack(spacing: 20) {
                         // Goals Header
@@ -380,50 +390,75 @@ struct ContentView: View {
                             }
                         }
 
-                        HStack(spacing: 15) {
-                            Button(action: {
-                                showObjectiveSettings = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "target")
-                                    Text("My Objective")
-                                }
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color.white)
-                                        )
-                                )
-                            }
-
-                            Button(action: {
-                                showProfileView = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "person.circle")
-                                    Text("Profile")
-                                    if !profileCompleted {
-                                        Circle()
-                                            .fill(Color.red)
-                                            .frame(width: 8, height: 8)
+                        // Navigation buttons - triangle layout
+                        VStack(spacing: 10) {
+                            HStack(spacing: 15) {
+                                Button(action: {
+                                    showObjectiveSettings = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "target")
+                                        Text("My Objective")
                                     }
+                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .fill(Color.white)
+                                            )
+                                    )
+                                }
+
+                                Button(action: {
+                                    showProfileView = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "person.circle")
+                                        Text("Profile")
+                                        if !profileCompleted {
+                                            Circle()
+                                                .fill(Color.red)
+                                                .frame(width: 8, height: 8)
+                                        }
+                                    }
+                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .fill(Color.white)
+                                            )
+                                    )
+                                }
+                            }
+                            
+                            // Compete button - centered below, completing the triangle
+                            Button(action: {
+                                showCompeteView = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "trophy.fill")
+                                    Text("Compete")
                                 }
                                 .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                                .padding(.horizontal, 20)
+                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                .padding(.horizontal, 24)
                                 .padding(.vertical, 12)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                        .stroke(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.4), lineWidth: 1)
                                         .background(
                                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color.white)
+                                                .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.08))
                                         )
                                 )
                             }
@@ -431,10 +466,18 @@ struct ContentView: View {
                     }
 
                     Spacer()
+                    
+                    // Powered by Strava
+                    Image("powered_by_strava")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 14)
+                        .opacity(0.7)
+                    .padding(.bottom, 8)
                 }
             }
             .sheet(isPresented: $showPushUpSession) {
-                PushUpSessionView(todayPushUpCount: $todayPushUpCount, objective: pushupObjective)
+                PushUpSessionView(todayPushUpCount: $todayPushUpCount, objective: pushupObjective, isInCompetition: activeCompetition != nil)
             }
             .sheet(isPresented: $showObjectiveSettings) {
                 ObjectiveSettingsView(
@@ -451,14 +494,21 @@ struct ContentView: View {
             .sheet(isPresented: $showProfileView) {
                 ProfileView()
             }
+            .sheet(isPresented: $showCompeteView) {
+                CompeteView(onOpenProfile: {
+                    showProfileView = true
+                })
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             checkAndResetDaily()
             refreshTodayProgress()
+            refreshActiveCompetition()
         }
         .onAppear {
             checkAndResetDaily()
             refreshTodayProgress()
+            refreshActiveCompetition()
             notificationManager.requestPermissions()
             if shouldShowObjective && hasAnyObjective && !objectiveMet {
                 notificationManager.scheduleObjectiveReminder(
@@ -520,6 +570,158 @@ struct ContentView: View {
                     }
                 }
             }
+        }.resume()
+    }
+    
+    // MARK: - Active Competition Widget
+    
+    private func activeCompetitionWidget(_ comp: [String: Any]) -> some View {
+        let compName = comp["name"] as? String ?? "Competition"
+        let objType = comp["objectiveType"] as? String ?? "pushups"
+        let daysRemaining = comp["daysRemaining"] as? Int ?? 0
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        
+        // Find my rank and score
+        let myEntry = compLeaderboard.first { ($0["userId"] as? String) == userId }
+        let myRank = myEntry?["rank"] as? Int ?? 0
+        let myScore = myEntry?["score"] as? Double ?? 0
+        let totalPlayers = compLeaderboard.count
+        let scoreText = myScore == floor(myScore) ? "\(Int(myScore))" : String(format: "%.1f", myScore)
+        
+        return Button(action: {
+            showCompeteView = true
+        }) {
+            HStack(spacing: 10) {
+                // Trophy icon
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(goldColor)
+                
+                // Name + rank
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(compName)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(Color.black)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    HStack(spacing: 4) {
+                        if myRank > 0 {
+                            Text("#\(myRank)")
+                                .font(.system(.caption2, design: .rounded, weight: .bold))
+                                .foregroundStyle(myRank == 1 ? goldColor : Color.black)
+                            Text("of \(totalPlayers)")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                        }
+                        if myRank == 1 {
+                            Image(systemName: "crown.fill")
+                                .font(.system(size: 7))
+                                .foregroundStyle(goldColor)
+                        }
+                    }
+                }
+                .layoutPriority(1)
+                
+                Spacer()
+                
+                // Score pill
+                HStack(spacing: 3) {
+                    Image(systemName: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                        .font(.system(size: 9))
+                    Text(scoreText)
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                }
+                .foregroundStyle(goldColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(goldColor.opacity(0.1))
+                .cornerRadius(6)
+                
+                // Days left + chevron
+                HStack(spacing: 2) {
+                    Text("\(daysRemaining)d")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.gray)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.gray.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white)
+                    .shadow(color: goldColor.opacity(0.12), radius: 6, x: 0, y: 2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(goldColor.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, 30)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    /// Fetch active competition for main screen widget
+    private func refreshActiveCompetition() {
+        guard !userId.isEmpty else {
+            print("🏆 Widget: No userId, skipping")
+            return
+        }
+        print("🏆 Widget: Fetching competitions for \(userId)")
+        guard let url = URL(string: "https://api.live-eos.com/compete/user/\(userId)") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            if let error = error {
+                print("🏆 Widget: Network error: \(error.localizedDescription)")
+                return
+            }
+            guard let data = data else {
+                print("🏆 Widget: No data returned")
+                return
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                let raw = String(data: data, encoding: .utf8) ?? "?"
+                print("🏆 Widget: Invalid JSON: \(raw.prefix(200))")
+                return
+            }
+            guard let comps = json["competitions"] as? [[String: Any]] else {
+                print("🏆 Widget: No 'competitions' key in response: \(json)")
+                return
+            }
+            
+            print("🏆 Widget: Found \(comps.count) competitions")
+            
+            // Find the first active competition
+            guard let active = comps.first(where: { ($0["status"] as? String) == "active" }),
+                  let compId = active["id"] as? String else {
+                print("🏆 Widget: No active competitions")
+                DispatchQueue.main.async { self.activeCompetition = nil }
+                return
+            }
+            
+            print("🏆 Widget: Active competition: \(active["name"] ?? "?") (\(compId))")
+            
+            // Fetch leaderboard for it
+            guard let lbUrl = URL(string: "https://api.live-eos.com/compete/\(compId)/leaderboard") else { return }
+            
+            URLSession.shared.dataTask(with: lbUrl) { lbData, _, lbError in
+                DispatchQueue.main.async {
+                    if let lbError = lbError {
+                        print("🏆 Widget: Leaderboard error: \(lbError.localizedDescription)")
+                        return
+                    }
+                    guard let lbData = lbData,
+                          let lbJson = try? JSONSerialization.jsonObject(with: lbData) as? [String: Any] else {
+                        print("🏆 Widget: Invalid leaderboard response")
+                        return
+                    }
+                    self.activeCompetition = lbJson["competition"] as? [String: Any]
+                    self.compLeaderboard = lbJson["leaderboard"] as? [[String: Any]] ?? []
+                    print("🏆 Widget: Loaded! Leaderboard has \(self.compLeaderboard.count) entries")
+                }
+            }.resume()
         }.resume()
     }
     
@@ -641,6 +843,7 @@ struct ContentView: View {
 struct PushUpSessionView: View {
     @Binding var todayPushUpCount: Int
     let objective: Int
+    var isInCompetition: Bool = false
     @Environment(\.dismiss) private var dismiss
     @StateObject private var cameraViewModel = CameraViewModel()
     @State private var sessionCount = 0
@@ -666,6 +869,22 @@ struct PushUpSessionView: View {
 
                     if isStaging {
                         VStack(spacing: 20) {
+                            if isInCompetition {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "trophy.fill")
+                                        .font(.caption2)
+                                    Text("Activity will be logged for individual and competition goals")
+                                        .font(.system(.caption2, design: .rounded))
+                                }
+                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.15))
+                                )
+                            }
+                            
                             Text("Position yourself in frame")
                                 .font(.system(.title2, design: .rounded, weight: .medium))
                                 .foregroundStyle(Color.white)
@@ -1800,7 +2019,8 @@ struct ObjectiveSettingsView: View {
         
         let body: [String: Any] = [
             "objective_schedule": tempScheduleType.lowercased(),
-            "objective_deadline": deadlineString
+            "objective_deadline": deadlineString,
+            "timezone": TimeZone.current.identifier
         ]
         
         saveObjectiveToBackend(body: body) { success in
@@ -2085,21 +2305,34 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
     }
 
+    private var noseHistory: [CGFloat] = []
+    
     private func processPoseForPushups(keypoints: [VNRecognizedPoint]) {
         guard keypoints.count > 0 else { return }
-
-        if let nose = keypoints.first(where: { $0.confidence > 0.3 }) {
-            let yPosition = nose.location.y
-
-            if yPosition < 0.4 {
-                if !poseEstimator.wasInUpPosition {
-                    poseEstimator.wasInUpPosition = true
-                }
-            } else if yPosition > 0.6 && poseEstimator.wasInUpPosition {
-                poseEstimator.wasInUpPosition = false
-                DispatchQueue.main.async {
-                    self.pushupCount += 1
-                }
+        
+        // Find specific body parts by checking known joint positions
+        // Sort by Y to find the likely nose (highest point on body in pushup position)
+        let confidentPoints = keypoints.filter { $0.confidence > 0.3 }
+        guard !confidentPoints.isEmpty else { return }
+        
+        // Use the highest Y point as proxy for head/nose position
+        // In Vision coordinates, Y=1 is top of frame, Y=0 is bottom
+        let headPoint = confidentPoints.max(by: { $0.location.y < $1.location.y })!
+        let yPosition = headPoint.location.y
+        
+        // Smooth the signal with a rolling average to reduce jitter
+        noseHistory.append(yPosition)
+        if noseHistory.count > 5 { noseHistory.removeFirst() }
+        let smoothedY = noseHistory.reduce(0, +) / CGFloat(noseHistory.count)
+        
+        if smoothedY < 0.4 {
+            if !poseEstimator.wasInUpPosition {
+                poseEstimator.wasInUpPosition = true
+            }
+        } else if smoothedY > 0.55 && poseEstimator.wasInUpPosition {
+            poseEstimator.wasInUpPosition = false
+            DispatchQueue.main.async {
+                self.pushupCount += 1
             }
         }
     }
@@ -2140,8 +2373,28 @@ final class PoseEstimator {
             }
 
             do {
-                let keypoints = try pose.recognizedPoints(.all)
-                let points = keypoints.values.map { $0 }
+                // Get specific joints relevant to pushup detection
+                var points: [VNRecognizedPoint] = []
+                if let nose = try? pose.recognizedPoint(.nose), nose.confidence > 0.3 {
+                    points.append(nose)
+                }
+                if let leftWrist = try? pose.recognizedPoint(.leftWrist), leftWrist.confidence > 0.2 {
+                    points.append(leftWrist)
+                }
+                if let rightWrist = try? pose.recognizedPoint(.rightWrist), rightWrist.confidence > 0.2 {
+                    points.append(rightWrist)
+                }
+                if let leftElbow = try? pose.recognizedPoint(.leftElbow), leftElbow.confidence > 0.2 {
+                    points.append(leftElbow)
+                }
+                if let rightElbow = try? pose.recognizedPoint(.rightElbow), rightElbow.confidence > 0.2 {
+                    points.append(rightElbow)
+                }
+                // Fallback: if no specific joints found, use all
+                if points.isEmpty {
+                    let keypoints = try pose.recognizedPoints(.all)
+                    points = keypoints.values.map { $0 }
+                }
                 completion(points)
             } catch {
                 completion([])
@@ -2513,6 +2766,7 @@ struct ProfileView: View {
     @State private var showDisconnectStravaConfirm: Bool = false
     @State private var activeRecipientName: String = ""
     @State private var activeRecipientId: String = ""
+    @State private var isRecipientOfPayers: [String] = []
     @State private var depositAmount: String = ""
     @State private var showPayoutSelector: Bool = false
     @StateObject private var depositPaymentService = DepositPaymentService()
@@ -2526,6 +2780,9 @@ struct ProfileView: View {
     
     // Delete account states
     @State private var showDeleteAccountAlert: Bool = false
+    @State private var showDeleteRecipientConfirm: Bool = false
+    @State private var recipientIndexToDelete: Int? = nil
+    @State private var showMyRecipientStatus: Bool = false
     @State private var deleteAccountPassword: String = ""
     @State private var isDeletingAccount: Bool = false
     @State private var deleteAccountError: String?
@@ -2658,106 +2915,7 @@ struct ProfileView: View {
                 
                 stakesSection
 
-                // Balance Section
-                Section {
-                    VStack(spacing: 16) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Available Balance")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                                Text("$\(profileCashHoldings, specifier: "%.2f")")
-                                    .font(.system(.title2, design: .rounded, weight: .semibold))
-                                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                            }
-                            Spacer()
-                            Image(systemName: "dollarsign.circle.fill")
-                                .font(.largeTitle)
-                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                        }
-
-                        HStack(spacing: 12) {
-                            HStack {
-                                Text("$")
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                                TextField("0.00", text: $depositAmount)
-                                    .keyboardType(.decimalPad)
-                                    .focused($isDepositAmountFocused)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.gray.opacity(0.25))
-                            .cornerRadius(8)
-                            
-                            // Deposit uses onTapGesture (not Button) to prevent Form button
-                            // tap bleed that was causing Withdraw to fire simultaneously
-                            HStack {
-                                if isProcessingDeposit {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                } else {
-                                    Text("Deposit")
-                                        .font(.system(.body, design: .rounded, weight: .medium))
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(
-                                Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
-                                    .opacity(depositAmount.isEmpty || isProcessingDeposit ? 0.5 : 1.0)
-                            )
-                            .foregroundStyle(.white)
-                            .cornerRadius(8)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                guard !depositAmount.isEmpty, !isProcessingDeposit else { return }
-                                startDeposit()
-                            }
-                        }
-                        
-                        // Withdraw - links to web portal (uses onTapGesture to avoid Form button tap bleed with Deposit)
-                        let isWithdrawLocked = settingsLockedUntil > Date()
-                        
-                        Text(isWithdrawLocked ? "🔒 Withdraw Locked" : "Withdraw")
-                            .font(.system(.subheadline, design: .rounded, weight: .medium))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity)
-                            .background(isWithdrawLocked ? Color.gray.opacity(0.3) : Color.white)
-                            .foregroundStyle(isWithdrawLocked ? Color.gray : Color.black)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
-                            )
-                            .cornerRadius(8)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if !isWithdrawLocked {
-                                    if let url = URL(string: "https://live-eos.com/portal") {
-                                        UIApplication.shared.open(url)
-                                    }
-                                }
-                            }
-
-                        if let error = depositErrorMessage {
-                            HStack {
-                                Image(systemName: "exclamationmark.circle.fill")
-                                    .font(.caption)
-                                Text(error)
-                                    .font(.system(.caption, design: .rounded))
-                            }
-                            .foregroundStyle(Color.red)
-                        }
-                    }
-                } header: {
-                    Text("Balance")
-                        .foregroundStyle(Color.white.opacity(0.95))
-                } footer: {
-                    Text("Add funds to back your commitment")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
-                .listRowBackground(Color.white)
+                balanceSection
 
                 if let error = profileErrorMessage {
                     Section {
@@ -2910,6 +3068,21 @@ struct ProfileView: View {
             } message: {
                 Text("This will unlink your Strava account. Run objectives will no longer be tracked automatically. You can reconnect at any time.")
             }
+            .alert("Delete Recipient?", isPresented: $showDeleteRecipientConfirm) {
+                Button("Cancel", role: .cancel) {
+                    recipientIndexToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    if let index = recipientIndexToDelete {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            deleteRecipient(at: index)
+                        }
+                    }
+                    recipientIndexToDelete = nil
+                }
+            } message: {
+                Text("Are you sure? This will permanently remove this recipient and any pending invite.")
+            }
             .onChange(of: isSignedIn) { oldValue, newValue in
                 if newValue {
                     // User just signed in - clear old recipient cache and fetch fresh
@@ -2941,8 +3114,107 @@ struct ProfileView: View {
                 refreshBalance()
                 syncInviteStatuses()
                 checkStravaStatus()
+                checkIfRecipient()
             }
         }
+    
+    // MARK: - Balance Section (extracted for compiler performance)
+    
+    private var balanceSection: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let isWithdrawLocked = settingsLockedUntil > Date()
+        
+        return Section {
+            VStack(spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Available Balance")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.6))
+                        Text("$\(profileCashHoldings, specifier: "%.2f")")
+                            .font(.system(.title2, design: .rounded, weight: .semibold))
+                            .foregroundStyle(goldColor)
+                    }
+                    Spacer()
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(goldColor)
+                }
+
+                HStack(spacing: 12) {
+                    HStack {
+                        Text("$")
+                            .foregroundStyle(Color.black.opacity(0.6))
+                        TextField("0.00", text: $depositAmount)
+                            .keyboardType(.decimalPad)
+                            .focused($isDepositAmountFocused)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.gray.opacity(0.25))
+                    .cornerRadius(8)
+                    
+                    Button(action: startDeposit) {
+                        if isProcessingDeposit {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Text("Deposit")
+                                .font(.system(.body, design: .rounded, weight: .medium))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(depositAmount.isEmpty || isProcessingDeposit)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(
+                        goldColor
+                            .opacity(depositAmount.isEmpty || isProcessingDeposit ? 0.5 : 1.0)
+                    )
+                    .foregroundStyle(.white)
+                    .cornerRadius(8)
+                }
+                
+                Text(isWithdrawLocked ? "🔒 Withdraw Locked" : "Withdraw")
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(isWithdrawLocked ? Color.gray.opacity(0.3) : Color.white)
+                    .foregroundStyle(isWithdrawLocked ? Color.gray : Color.black)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
+                    )
+                    .cornerRadius(8)
+                    .onTapGesture {
+                        if !isWithdrawLocked {
+                            if let url = URL(string: "https://live-eos.com/portal") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                    }
+
+                if let error = depositErrorMessage {
+                    HStack {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption)
+                        Text(error)
+                            .font(.system(.caption, design: .rounded))
+                    }
+                    .foregroundStyle(Color.red)
+                }
+            }
+        } header: {
+            Text("Balance")
+                .foregroundStyle(Color.white.opacity(0.95))
+        } footer: {
+            Text("Add funds to back your commitment")
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.8))
+        }
+        .listRowBackground(Color.white)
+    }
     
     // MARK: - Recipient Section (extracted for compiler performance)
     
@@ -3001,9 +3273,8 @@ struct ProfileView: View {
                                         
                                         if !isSettingsLocked {
                                             Button(action: {
-                                                withAnimation(.easeOut(duration: 0.3)) {
-                                                    deleteRecipient(at: index)
-                                                }
+                                                recipientIndexToDelete = index
+                                                showDeleteRecipientConfirm = true
                                             }) {
                                                 Image(systemName: "trash.circle.fill")
                                                     .font(.title2)
@@ -3019,6 +3290,49 @@ struct ProfileView: View {
                     }
                 }
 
+                // My Recipient Status toggle
+                if !isRecipientOfPayers.isEmpty {
+                    Button(action: { withAnimation { showMyRecipientStatus.toggle() } }) {
+                        HStack {
+                            Image(systemName: "person.crop.circle.badge.checkmark")
+                                .font(.caption)
+                                .foregroundStyle(Color.green)
+                            Text("My Recipient Status")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.green)
+                            Spacer()
+                            Image(systemName: showMyRecipientStatus ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(Color.green.opacity(0.5))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if showMyRecipientStatus {
+                        VStack(spacing: 6) {
+                            ForEach(isRecipientOfPayers, id: \.self) { payerName in
+                                HStack(spacing: 8) {
+                                    Image(systemName: "person.crop.circle.badge.checkmark")
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.green)
+                                    Text("Recipient of \(payerName)")
+                                        .font(.system(.caption, design: .rounded, weight: .medium))
+                                        .foregroundStyle(Color.black)
+                                    Spacer()
+                                    Text("Active")
+                                        .font(.system(.caption2, design: .rounded))
+                                        .foregroundStyle(Color.green)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.green.opacity(0.08))
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                
                 Button(action: commitDestination) {
                     HStack {
                         Image(systemName: isSettingsLocked ? "lock.fill" : (isCommitButtonDisabled ? "exclamationmark.circle.fill" : (destinationCommitted ? "checkmark.circle.fill" : "lock.fill")))
@@ -3864,11 +4178,29 @@ struct ProfileView: View {
         
         let recipientToDelete = customRecipients[index]
         
+        // Delete from backend database, then re-sync
+        let recipientId = recipientToDelete.id
+        if let userId = UserDefaults.standard.string(forKey: "userId"),
+           let url = URL(string: "/invites/\(recipientId)", relativeTo: StripeConfig.backendURL) {
+            var request = URLRequest(url: url)
+            request.httpMethod = "DELETE"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId])
+            URLSession.shared.dataTask(with: request) { _, _, error in
+                if let error = error {
+                    print("🗑️ Failed to delete invite from server: \(error.localizedDescription)")
+                } else {
+                    print("🗑️ Invite \(recipientId) deleted from server")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.syncInviteStatuses()
+                    }
+                }
+            }.resume()
+        }
+        
         // Check if we're deleting the selected recipient
         if recipientToDelete.id == selectedRecipientId {
-            // Select another recipient if available
             if customRecipients.count > 1 {
-                // Select the next recipient, or previous if this was the last one
                 let newIndex = index < customRecipients.count - 1 ? index + 1 : index - 1
                 if newIndex >= 0 && newIndex < customRecipients.count && newIndex != index {
                     selectedRecipientId = customRecipients[newIndex].id
@@ -3880,13 +4212,9 @@ struct ProfileView: View {
             }
         }
         
-        // Remove the recipient
         customRecipients.remove(at: index)
-        
-        // Save changes
         saveCustomRecipients()
         
-        // If no recipients left, make sure nothing is selected
         if customRecipients.isEmpty {
             selectedRecipientId = ""
         }
@@ -4224,6 +4552,24 @@ struct ProfileView: View {
             }
         }.resume()
     }
+    
+    private func checkIfRecipient() {
+        guard !userId.isEmpty else { return }
+        
+        guard let url = URL(string: "/users/\(userId)/is-recipient", relativeTo: StripeConfig.backendURL) else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            DispatchQueue.main.async {
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let payers = json["payers"] as? [[String: Any]] else {
+                    self.isRecipientOfPayers = []
+                    return
+                }
+                self.isRecipientOfPayers = payers.compactMap { $0["name"] as? String }
+            }
+        }.resume()
+    }
 }
 
 // MARK: - Add Recipient Sheet
@@ -4239,6 +4585,8 @@ struct AddRecipientSheet: View {
     @State private var generatedInviteCode: String?
     @State private var isGenerating = false
     @State private var errorMessage: String?
+    @State private var inviteEmail: String = ""
+    @State private var isSendingInvite = false
     
     // ## SMS INVITE FLOW - DISABLED FOR NOW ##
     // @State private var recipientName: String = ""
@@ -4318,6 +4666,60 @@ struct AddRecipientSheet: View {
                     }
                     .padding(.top, 4)
                 }
+                
+                // MARK: - Invite Active User by Email
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "envelope.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                            Text("Invite Active User")
+                                .font(.system(.body, design: .rounded, weight: .semibold))
+                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                        }
+                        
+                        TextField("Their EOS email address", text: $inviteEmail, prompt: Text("Their EOS email address").foregroundColor(.black.opacity(0.4)))
+                            .font(.system(.body, design: .rounded))
+                            .foregroundStyle(Color.black)
+                            .keyboardType(.emailAddress)
+                            .autocapitalization(.none)
+                            .autocorrectionDisabled()
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            )
+                        
+                        Button(action: sendInviteToUser) {
+                            HStack {
+                                if isSendingInvite {
+                                    ProgressView().scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "paperplane.fill")
+                                }
+                                Text(isSendingInvite ? "Sending..." : "Send Invite")
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(inviteEmail.isEmpty || isSendingInvite ? Color.gray.opacity(0.3) : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(inviteEmail.isEmpty || isSendingInvite)
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("Or Invite an Existing User")
+                } footer: {
+                    Text("They'll get an email to accept. Once accepted, they become your designated recipient.")
+                        .font(.system(.caption2, design: .rounded))
+                }
+                .listRowBackground(Color.white)
                 
                 // ## SMS INVITE UI - DISABLED FOR NOW ##
                 /*
@@ -4414,6 +4816,12 @@ struct AddRecipientSheet: View {
     // MARK: - Generate Code (calls backend to register in database)
     private func generateInviteCode() {
         errorMessage = nil
+        
+        guard !payerEmail.isEmpty else {
+            errorMessage = "Sign in to generate an invite code."
+            return
+        }
+        
         isGenerating = true
         
         guard let url = URL(string: "/recipient-invites/code-only", relativeTo: StripeConfig.backendURL) else {
@@ -4470,6 +4878,66 @@ struct AddRecipientSheet: View {
         }.resume()
     }
 
+    private func sendInviteToUser() {
+        errorMessage = nil
+        
+        guard !payerEmail.isEmpty else {
+            errorMessage = "Sign in to invite a user."
+            return
+        }
+        
+        let trimmedEmail = inviteEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard trimmedEmail.contains("@") && trimmedEmail.contains(".") else {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+        
+        isSendingInvite = true
+        
+        guard let userId = UserDefaults.standard.string(forKey: "userId"),
+              let url = URL(string: "/invites/send-to-user", relativeTo: StripeConfig.backendURL) else {
+            errorMessage = "Invalid configuration."
+            isSendingInvite = false
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "payerId": userId,
+            "recipientEmail": trimmedEmail
+        ])
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isSendingInvite = false
+                
+                if let error = error {
+                    self.errorMessage = "Network error: \(error.localizedDescription)"
+                    return
+                }
+                
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self.errorMessage = "Invalid server response."
+                    return
+                }
+                
+                if let errMsg = json["error"] as? String {
+                    self.errorMessage = errMsg
+                } else if json["success"] as? Bool == true {
+                    let name = json["recipientName"] as? String ?? trimmedEmail
+                    self.errorMessage = "✅ Invite sent to \(name)!"
+                    self.inviteEmail = ""
+                } else {
+                    self.errorMessage = "Unexpected response."
+                }
+            }
+        }.resume()
+    }
+    
     // ## SMS INVITE FUNCTION - DISABLED FOR NOW ##
     /*
     private func sendInvite() {
@@ -4619,6 +5087,1687 @@ struct ContactPickerView: UIViewControllerRepresentable {
         func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
             // Don't call dismiss here - the picker dismisses itself
         }
+    }
+}
+
+// MARK: - Compete Views
+
+struct CompeteView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("userId") private var userId: String = ""
+    var onOpenProfile: (() -> Void)? = nil
+    
+    @State private var competitions: [[String: Any]] = []
+    @State private var isLoading: Bool = true
+    @State private var showCreateSheet: Bool = false
+    @State private var showJoinSheet: Bool = false
+    @State private var selectedCompetition: [String: Any]? = nil
+    @State private var showDetail: Bool = false
+    @State private var showPastCompetitions: Bool = false
+    
+    private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    private let lightGold = Color(UIColor(red: 0.95, green: 0.75, blue: 0.1, alpha: 1))
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(UIColor.systemGroupedBackground).ignoresSafeArea()
+                
+                if isLoading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading competitions...")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                    }
+                } else {
+                    let hasActiveOrPending = competitions.contains { ($0["status"] as? String) == "active" || ($0["status"] as? String) == "pending" }
+                    if hasActiveOrPending {
+                        competeList
+                    } else {
+                        competeEmptyState
+                    }
+                }
+            }
+            .navigationTitle("Compete")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button(action: { showCreateSheet = true }) {
+                            Label("Create Competition", systemImage: "plus.circle")
+                        }
+                        Button(action: { showJoinSheet = true }) {
+                            Label("Join with Code", systemImage: "ticket")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.body.weight(.semibold))
+                    }
+                }
+            }
+            .sheet(isPresented: $showCreateSheet) {
+                CreateCompetitionView(onCreated: { loadCompetitions() })
+            }
+            .sheet(isPresented: $showJoinSheet) {
+                JoinCompetitionView(onJoined: { loadCompetitions() })
+            }
+            .sheet(isPresented: $showDetail) {
+                if let comp = selectedCompetition, let compId = comp["id"] as? String {
+                    CompetitionDetailView(onOpenProfile: {
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            onOpenProfile?()
+                        }
+                    }, competitionId: compId)
+                }
+            }
+            .onAppear { loadCompetitions() }
+        }
+    }
+    
+    private var competeEmptyState: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "trophy.fill")
+                .font(.system(size: 50))
+                .foregroundStyle(goldColor)
+            
+            Text("No Competitions Yet")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(Color.white)
+            
+            Text("Create a competition and challenge your friends, or join one with a code.")
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            
+            VStack(spacing: 12) {
+                Button(action: { showCreateSheet = true }) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Create Competition")
+                            .font(.system(.headline, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: 280)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(LinearGradient(colors: [goldColor, lightGold], startPoint: .leading, endPoint: .trailing))
+                    )
+                }
+                .buttonStyle(.plain)
+                
+                Button(action: { showJoinSheet = true }) {
+                    HStack {
+                        Image(systemName: "ticket.fill")
+                        Text("Join with Code")
+                            .font(.system(.headline, design: .rounded))
+                    }
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: 280)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Past competitions toggle
+            let completed = competitions.filter { ($0["status"] as? String) == "completed" }
+            if !completed.isEmpty {
+                Button(action: { withAnimation { showPastCompetitions.toggle() } }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: showPastCompetitions ? "chevron.up" : "clock.arrow.circlepath")
+                            .font(.caption)
+                        Text(showPastCompetitions ? "Hide Past Competitions" : "Past Competitions (\(completed.count))")
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 16)
+                
+                if showPastCompetitions {
+                    VStack(spacing: 8) {
+                        ForEach(completed.indices, id: \.self) { i in
+                            Button(action: {
+                                selectedCompetition = completed[i]
+                                showDetail = true
+                            }) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "trophy.fill")
+                                        .foregroundStyle(Color.gray.opacity(0.5))
+                                    Text(completed[i]["name"] as? String ?? "Competition")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .foregroundStyle(Color.white.opacity(0.8))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(Color.white.opacity(0.3))
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.top, 8)
+                }
+            }
+        }
+    }
+    
+    private var competeList: some View {
+        let pending = competitions.filter { ($0["status"] as? String) == "pending" }
+        let active = competitions.filter { ($0["status"] as? String) == "active" }
+        let completed = competitions.filter { ($0["status"] as? String) == "completed" }
+        
+        return List {
+            if !pending.isEmpty {
+                Section {
+                    ForEach(pending.indices, id: \.self) { i in
+                        competitionCard(pending[i])
+                    }
+                } header: {
+                    Text("Lobby — Waiting to Start").foregroundStyle(Color.white.opacity(0.8))
+                }
+                .listRowBackground(Color.white)
+            }
+            
+            if !active.isEmpty {
+                Section {
+                    ForEach(active.indices, id: \.self) { i in
+                        competitionCard(active[i])
+                    }
+                } header: {
+                    Text("Active").foregroundStyle(Color.white.opacity(0.8))
+                }
+                .listRowBackground(Color.white)
+            }
+            
+            if !completed.isEmpty {
+                Section {
+                    Button(action: { withAnimation { showPastCompetitions.toggle() } }) {
+                        HStack {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.caption)
+                                .foregroundStyle(Color.gray)
+                            Text(showPastCompetitions ? "Hide Past Competitions" : "Past Competitions (\(completed.count))")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.gray)
+                            Spacer()
+                            Image(systemName: showPastCompetitions ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                                .foregroundStyle(Color.gray.opacity(0.5))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if showPastCompetitions {
+                        ForEach(completed.indices, id: \.self) { i in
+                            competitionCard(completed[i])
+                        }
+                    }
+                }
+                .listRowBackground(Color.white)
+            }
+        }
+    }
+    
+    private func competitionCard(_ comp: [String: Any]) -> some View {
+        let name = comp["name"] as? String ?? "Competition"
+        let objType = comp["objectiveType"] as? String ?? "pushups"
+        let participants = comp["participantCount"] as? Int ?? 0
+        let endDate = comp["endDate"] as? String ?? ""
+        let status = comp["status"] as? String ?? "active"
+        let code = comp["inviteCode"] as? String ?? ""
+        let target = comp["targetValue"] as? Double ?? 0
+        
+        let targetLabel: String = {
+            if objType == "run" && target > 0 {
+                return String(format: "%.1f mi/day", target)
+            } else if target > 0 {
+                return "\(Int(target)) reps/day"
+            }
+            return ""
+        }()
+        
+        let daysLeft: Int = {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd"
+            if let end = formatter.date(from: endDate) {
+                return max(0, Calendar.current.dateComponents([.day], from: Date(), to: end).day ?? 0)
+            }
+            return 0
+        }()
+        
+        return Button(action: {
+            selectedCompetition = comp
+            showDetail = true
+        }) {
+            HStack(spacing: 14) {
+                // Icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(status == "completed" ? Color.gray.opacity(0.15) : goldColor.opacity(0.15))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                        .font(.title3)
+                        .foregroundStyle(status == "completed" ? Color.gray : goldColor)
+                }
+                
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(name)
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                        .foregroundStyle(Color.black)
+                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Label("\(participants)", systemImage: "person.2.fill")
+                        if !targetLabel.isEmpty {
+                            Text("·")
+                            Text(targetLabel)
+                        }
+                        if status == "pending" {
+                            Text("·")
+                            Text("Lobby")
+                                .foregroundStyle(Color.orange)
+                        } else if status == "active" {
+                            Text("·")
+                            Text("\(daysLeft)d left")
+                        }
+                    }
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+                    .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                if status == "pending" {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(code)
+                            .font(.system(.caption2, design: .monospaced, weight: .bold))
+                            .foregroundStyle(Color.orange)
+                        Text("Waiting")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.orange)
+                    }
+                } else if status == "active" {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(code)
+                            .font(.system(.caption2, design: .monospaced, weight: .bold))
+                            .foregroundStyle(goldColor)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(Color.gray)
+                    }
+                } else {
+                    Image(systemName: "trophy.fill")
+                        .foregroundStyle(Color.gray.opacity(0.5))
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+    
+    private func loadCompetitions() {
+        guard !userId.isEmpty else { isLoading = false; return }
+        
+        guard let url = URL(string: "https://api.live-eos.com/compete/user/\(userId)") else {
+            isLoading = false
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 3
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let comps = json["competitions"] as? [[String: Any]] else { return }
+                self.competitions = comps
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Create Competition View
+
+struct CreateCompetitionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("userId") private var userId: String = ""
+    
+    var onCreated: () -> Void
+    
+    @State private var name: String = ""
+    @State private var objectiveType: String = "run"
+    @State private var scoringType: String = "consistency"
+    @State private var durationDays: Int = 7
+    @State private var pushupTarget: Int = 50
+    @State private var runDistance: Double = 2.0
+    @State private var buyInAmount: Double = 0
+    @State private var isCreating: Bool = false
+    @State private var createdCode: String? = nil
+    @State private var createError: String? = nil
+    @State private var showBuyInAgreement: Bool = false
+    
+    private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                if let code = createdCode {
+                    createdSuccessSection(code: code)
+                } else {
+                    createFormSections
+                    
+                    if let error = createError {
+                        Section {
+                            HStack {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Color.red)
+                                Text(error)
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.red)
+                            }
+                        }
+                        .listRowBackground(Color.red.opacity(0.08))
+                    }
+                }
+            }
+            .navigationTitle(createdCode != nil ? "Competition Created" : "Create Competition")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(createdCode != nil ? "Done" : "Cancel") {
+                        if createdCode != nil { onCreated() }
+                        dismiss()
+                    }
+                }
+            }
+            .alert("Confirm Buy-In Competition", isPresented: $showBuyInAgreement) {
+                Button("I Understand — Create", role: .destructive) {
+                    createCompetition()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This competition has a $\(Int(buyInAmount)) buy-in per player. When you start the competition, all participants' funds will be locked and the entire pool will be awarded to the winner. No refunds once started.")
+            }
+        }
+    }
+    
+    private var shareMessage: String {
+        let durationLabel = durationDays == 7 ? "1 week" : (durationDays == 14 ? "2 weeks" : (durationDays == 30 ? "1 month" : "\(durationDays) days"))
+        let objLabel = objectiveType == "run" ? "running" : (objectiveType == "both" ? "running + pushups" : "pushups")
+        let buyInLabel = buyInAmount > 0 ? " with a $\(Int(buyInAmount)) buy-in" : ""
+        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on EOS!\n\nCode: \(createdCode ?? "")\n\nDownload EOS: live-eos.com"
+    }
+    
+    @State private var codeCopied: Bool = false
+    @State private var messageCopied: Bool = false
+    
+    @ViewBuilder
+    private func createdSuccessSection(code: String) -> some View {
+        Section {
+            VStack(spacing: 20) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(goldColor)
+                    .padding(.top, 12)
+                
+                Text("Competition Created!")
+                    .font(.system(.headline, design: .rounded))
+                
+                Text("Share this code with your friends. Once everyone has joined, open the competition and tap Start.")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(Color.gray)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                
+                Text(code)
+                    .font(.system(size: 36, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(goldColor.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(goldColor.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                
+                // Copy code only
+                Button(action: {
+                    UIPasteboard.general.string = code
+                    codeCopied = true
+                    messageCopied = false
+                }) {
+                    Label(codeCopied ? "Copied!" : "Copy Code", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(codeCopied ? Color.green : goldColor)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .listRowBackground(Color.white)
+        
+        // Tap-to-copy share message (matches recipient invite pattern)
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tap to copy & share:")
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(Color.gray)
+                
+                Button(action: {
+                    UIPasteboard.general.string = shareMessage
+                    messageCopied = true
+                    codeCopied = false
+                }) {
+                    Text(shareMessage)
+                        .font(.system(.subheadline, design: .rounded))
+                        .multilineTextAlignment(.leading)
+                        .foregroundStyle(.white)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(goldColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(messageCopied ? Color.green : Color.clear, lineWidth: 2)
+                        )
+                }
+                .buttonStyle(.plain)
+                
+                if messageCopied {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.green)
+                        Text("Copied to clipboard — paste in iMessage, WhatsApp, etc.")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.green)
+                    }
+                }
+            }
+        }
+        .listRowBackground(Color.white)
+    }
+    
+    private var objectiveTypeIcon: String {
+        switch objectiveType {
+        case "run": return "figure.run"
+        case "pushups": return "figure.strengthtraining.traditional"
+        default: return "flame.fill"
+        }
+    }
+    
+    private var objectiveTypeLabel: String {
+        switch objectiveType {
+        case "run": return "Run"
+        case "pushups": return "Pushups"
+        default: return "Both"
+        }
+    }
+    
+    @ViewBuilder
+    private var createFormSections: some View {
+        // 1. Name
+        Section {
+            TextField("Competition Name", text: $name, prompt: Text("Competition Name").foregroundColor(.black))
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(Color.black)
+        } header: {
+            Text("Name")
+        }
+        .listRowBackground(Color.white)
+        
+        // 2. Scoring (above objective so it controls whether target shows)
+        Section {
+            Picker("Scoring", selection: $scoringType) {
+                Text("Days Completed").tag("consistency")
+                Text("Total Count").tag("cumulative")
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Competition Type")
+        } footer: {
+            Text(scoringType == "consistency" ? "Winner completes the most days hitting their target." : "Winner has the highest total (miles or reps). No daily target needed.")
+                .font(.system(.caption2, design: .rounded))
+        }
+        .listRowBackground(Color.white)
+        
+        // 3. Objective type + target (target hidden if cumulative)
+        Section {
+            // Objective type dropdown
+            HStack {
+                Image(systemName: objectiveTypeIcon)
+                    .font(.system(size: 18))
+                    .foregroundStyle(goldColor)
+                    .frame(width: 24)
+                
+                Text(objectiveTypeLabel)
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color.black)
+                
+                Spacer()
+                
+                Menu {
+                    Button(action: { objectiveType = "run" }) {
+                        Label("Run", systemImage: "figure.run")
+                    }
+                    Button(action: { objectiveType = "pushups" }) {
+                        Label("Pushups", systemImage: "figure.strengthtraining.traditional")
+                    }
+                    Button(action: { objectiveType = "both" }) {
+                        Label("Both", systemImage: "flame.fill")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Change")
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(goldColor)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(goldColor.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.vertical, 4)
+            
+            // Target pickers — only shown for "Days Completed" (consistency)
+            if scoringType == "consistency" {
+                createTargetPickers
+            }
+        } header: {
+            Text("Objective")
+        }
+        .listRowBackground(Color.white)
+        
+        // 4. Duration
+        Section {
+            Picker("Duration", selection: $durationDays) {
+                ForEach(1...90, id: \.self) { day in
+                    Text("\(day) \(day == 1 ? "day" : "days")")
+                        .foregroundStyle(Color.black)
+                        .tag(day)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(height: 120)
+        } header: {
+            Text("Duration")
+        }
+        .listRowBackground(Color.white)
+        
+        // 5. Buy-in
+        Section {
+            HStack {
+                Image(systemName: "dollarsign.circle.fill")
+                    .foregroundStyle(goldColor)
+                Text("Buy-In")
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                
+                Spacer()
+                
+                Menu {
+                    Button("Free") { buyInAmount = 0 }
+                    Button("$5") { buyInAmount = 5 }
+                    Button("$10") { buyInAmount = 10 }
+                    Button("$20") { buyInAmount = 20 }
+                    Button("$50") { buyInAmount = 50 }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(buyInAmount == 0 ? "Free" : String(format: "$%.0f", buyInAmount))
+                            .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(buyInAmount > 0 ? goldColor : Color.black)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(buyInAmount > 0 ? goldColor.opacity(0.1) : Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("Stakes")
+        } footer: {
+            Text(buyInAmount > 0 ? "Each participant's $\(Int(buyInAmount)) will be locked when you start the competition. Winner takes the entire pool." : "No money on the line — just bragging rights.")
+                .font(.system(.caption2, design: .rounded))
+        }
+        .listRowBackground(Color.white)
+        
+        // 6. Create button — using onTapGesture for reliable tap handling in Form
+        Section {
+            HStack {
+                Spacer()
+                HStack {
+                    if isCreating {
+                        ProgressView().scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "trophy.fill")
+                    }
+                    Text("Create Competition")
+                        .font(.system(.headline, design: .rounded))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(name.isEmpty || isCreating ? Color.gray.opacity(0.3) : goldColor)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if !name.isEmpty && !isCreating {
+                        if buyInAmount > 0 {
+                            showBuyInAgreement = true
+                        } else {
+                            createCompetition()
+                        }
+                    }
+                }
+                Spacer()
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets())
+    }
+    
+    @ViewBuilder
+    private var createTargetPickers: some View {
+        if objectiveType == "run" || objectiveType == "both" {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Distance")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                    
+                    Menu {
+                        ForEach([0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0], id: \.self) { miles in
+                            Button(String(format: "%.1f miles", miles)) { runDistance = miles }
+                        }
+                    } label: {
+                        HStack {
+                            Text(String(format: "%.1f mi", runDistance))
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                }
+                Spacer()
+            }
+        }
+        
+        if objectiveType == "pushups" || objectiveType == "both" {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Daily Target")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.6))
+                    
+                    Menu {
+                        ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 100], id: \.self) { count in
+                            Button("\(count) pushups") { pushupTarget = count }
+                        }
+                    } label: {
+                        HStack {
+                            Text("\(pushupTarget)")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                }
+                Spacer()
+            }
+        }
+    }
+    
+    private func createCompetition() {
+        guard !userId.isEmpty else {
+            createError = "Not signed in. Please sign in first."
+            return
+        }
+        guard !name.isEmpty else {
+            createError = "Please enter a competition name."
+            return
+        }
+        
+        isCreating = true
+        createError = nil
+        
+        guard let url = URL(string: "https://api.live-eos.com/compete/create") else {
+            isCreating = false
+            createError = "Invalid server URL."
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 5
+        
+        let targetValue: Double = objectiveType == "run" || objectiveType == "both" ? runDistance : Double(pushupTarget)
+        let body: [String: Any] = [
+            "userId": userId,
+            "name": name,
+            "objectiveType": objectiveType,
+            "scoringType": scoringType,
+            "durationDays": durationDays,
+            "targetValue": scoringType == "cumulative" ? 0 : targetValue,
+            "buyInAmount": buyInAmount
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        print("🏆 Creating competition: \(body)")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isCreating = false
+                
+                if let error = error {
+                    self.createError = "Network error: \(error.localizedDescription)"
+                    print("🏆 Create error: \(error)")
+                    return
+                }
+                
+                let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+                
+                guard let data = data else {
+                    self.createError = "No response from server."
+                    return
+                }
+                
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    let raw = String(data: data, encoding: .utf8) ?? "unknown"
+                    self.createError = "Invalid response (HTTP \(httpStatus)): \(raw.prefix(100))"
+                    print("🏆 Raw response: \(raw)")
+                    return
+                }
+                
+                if let code = json["inviteCode"] as? String {
+                    self.createdCode = code
+                    print("🏆 Competition created (pending lobby)! Code: \(code)")
+                } else if let errMsg = json["error"] as? String {
+                    self.createError = errMsg
+                    print("🏆 Server error: \(errMsg)")
+                } else {
+                    self.createError = "Unexpected response (HTTP \(httpStatus))"
+                    print("🏆 Unexpected: \(json)")
+                }
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Join Competition View
+
+struct JoinCompetitionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("userId") private var userId: String = ""
+    @AppStorage("stravaConnected") private var stravaConnected: Bool = false
+    
+    var onJoined: () -> Void
+    
+    @State private var code: String = ""
+    @State private var isVerifying: Bool = false
+    @State private var isJoining: Bool = false
+    @State private var preview: [String: Any]? = nil
+    @State private var errorMessage: String? = nil
+    @State private var joinSuccess: Bool = false
+    @State private var showJoinAgreement: Bool = false
+    @State private var showStravaRequired: Bool = false
+    
+    private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    TextField("Enter 6-digit code", text: $code, prompt: Text("Enter 6-digit code").foregroundColor(.black))
+                        .font(.system(.title3, design: .monospaced, weight: .bold))
+                        .foregroundStyle(Color.black)
+                        .multilineTextAlignment(.center)
+                        .tint(Color.black)
+                        .autocapitalization(.allCharacters)
+                        .onChange(of: code) { _, newValue in
+                            code = String(newValue.uppercased().prefix(6))
+                            if code.count == 6 { verifyCode() }
+                            preview = nil
+                            errorMessage = nil
+                        }
+                } header: {
+                    Text("Competition Code")
+                        .foregroundStyle(Color.white.opacity(0.8))
+                }
+                .listRowBackground(Color.white)
+                
+                if isVerifying {
+                    Section {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                    }
+                    .listRowBackground(Color.white)
+                }
+                
+                if let preview = preview {
+                    competitionPreview(preview)
+                }
+                
+                if let error = errorMessage {
+                    Section {
+                        HStack {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Color.red)
+                            Text(error)
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.red)
+                        }
+                    }
+                    .listRowBackground(Color.white)
+                }
+                
+                if joinSuccess {
+                    Section {
+                        VStack(spacing: 12) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 40))
+                                .foregroundStyle(Color.green)
+                            Text("You're in!")
+                                .font(.system(.headline, design: .rounded))
+                            Text("You've joined the lobby. The competition will begin when the creator starts it.")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    }
+                    .listRowBackground(Color.white)
+                }
+            }
+            .navigationTitle("Join Competition")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(joinSuccess ? "Done" : "Cancel") {
+                        if joinSuccess { onJoined() }
+                        dismiss()
+                    }
+                }
+            }
+            .alert("Buy-In Competition", isPresented: $showJoinAgreement) {
+                Button("I Agree — Join", role: .destructive) {
+                    joinCompetition()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                let buyIn = preview?["buyInAmount"] as? Double ?? 0
+                Text("This competition has a $\(Int(buyIn)) buy-in. When the creator starts the competition, your $\(Int(buyIn)) will be locked and the entire pool goes to the winner. No refunds once started.")
+            }
+        }
+    }
+    
+    private func competitionPreview(_ data: [String: Any]) -> some View {
+        let name = data["name"] as? String ?? ""
+        let creator = data["creatorName"] as? String ?? ""
+        let objType = data["objectiveType"] as? String ?? ""
+        let scoring = data["scoringType"] as? String ?? ""
+        let participants = data["participantCount"] as? Int ?? 0
+        let status = data["status"] as? String ?? ""
+        let target = data["targetValue"] as? Double ?? 0
+        
+        let targetLabel: String = {
+            if objType == "run" && target > 0 {
+                return String(format: "%.1f mi/day", target)
+            } else if target > 0 {
+                return "\(Int(target)) reps/day"
+            }
+            return objType.capitalized
+        }()
+        
+        return Section {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                        .font(.title2)
+                        .foregroundStyle(goldColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .font(.system(.headline, design: .rounded))
+                        Text("by \(creator)")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                    }
+                }
+                
+                HStack(spacing: 16) {
+                    Label(targetLabel, systemImage: "star.fill")
+                    Label(scoring == "cumulative" ? "Total Count" : "Days Completed", systemImage: "chart.bar.fill")
+                    Label("\(participants) joined", systemImage: "person.2.fill")
+                }
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.6))
+                
+                if status == "completed" {
+                    Text("This competition has ended.")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.red)
+                } else {
+                    // Show buy-in notice if applicable
+                    if let buyIn = data["buyInAmount"] as? Double, buyIn > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(Color.orange)
+                            Text("$\(Int(buyIn)) buy-in — locked when competition starts")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    
+                    if showStravaRequired {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(Color.orange)
+                            Text("This competition has a running objective. Connect Strava in Profile → Account to join.")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.orange)
+                        }
+                        .padding(10)
+                        .background(Color.orange.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    
+                    Button(action: {
+                        let objType = data["objectiveType"] as? String ?? ""
+                        let needsStrava = objType == "run" || objType == "both"
+                        
+                        if needsStrava && !stravaConnected {
+                            withAnimation { showStravaRequired = true }
+                            return
+                        }
+                        
+                        showStravaRequired = false
+                        let buyIn = data["buyInAmount"] as? Double ?? 0
+                        if buyIn > 0 {
+                            showJoinAgreement = true
+                        } else {
+                            joinCompetition()
+                        }
+                    }) {
+                        HStack {
+                            if isJoining {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "person.badge.plus")
+                            }
+                            Text("Join Competition")
+                                .font(.system(.headline, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(goldColor))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isJoining)
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("Competition Found")
+        }
+        .listRowBackground(Color.white)
+    }
+    
+    private func verifyCode() {
+        isVerifying = true
+        guard let url = URL(string: "https://api.live-eos.com/compete/verify/\(code)") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, _ in
+            DispatchQueue.main.async {
+                self.isVerifying = false
+                guard let data = data,
+                      let http = response as? HTTPURLResponse else {
+                    self.errorMessage = "Could not reach server"
+                    return
+                }
+                if http.statusCode == 404 {
+                    self.errorMessage = "No competition found with that code"
+                    return
+                }
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+                self.preview = json
+            }
+        }.resume()
+    }
+    
+    private func joinCompetition() {
+        guard !userId.isEmpty else { return }
+        isJoining = true
+        
+        guard let url = URL(string: "https://api.live-eos.com/compete/join") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId, "code": code])
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            DispatchQueue.main.async {
+                self.isJoining = false
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["success"] as? Bool == true else {
+                    if let data = data,
+                       let errJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let errMsg = errJson["error"] as? String {
+                        self.errorMessage = errMsg
+                    } else {
+                        self.errorMessage = "Failed to join"
+                    }
+                    return
+                }
+                self.joinSuccess = true
+                self.preview = nil
+            }
+        }.resume()
+    }
+}
+
+// MARK: - Competition Detail View (Leaderboard)
+
+struct CompetitionDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("userId") private var userId: String = ""
+    @AppStorage("profileCashHoldings") private var profileCashHoldings: Double = 0
+    var onOpenProfile: (() -> Void)? = nil
+    
+    let competitionId: String
+    
+    @State private var competition: [String: Any]? = nil
+    @State private var leaderboard: [[String: Any]] = []
+    @State private var isLoading: Bool = true
+    @State private var isStarting: Bool = false
+    @State private var showStartConfirm: Bool = false
+    @State private var showInsufficientFunds: Bool = false
+    @State private var startError: String? = nil
+    @State private var insufficientNames: String = ""
+    
+    private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color(UIColor.systemGroupedBackground).ignoresSafeArea()
+                
+                if isLoading {
+                    ProgressView()
+                } else if (competition?["status"] as? String) == "pending" {
+                    lobbyContent
+                } else {
+                    leaderboardContent
+                }
+            }
+            .navigationTitle(competition?["name"] as? String ?? "Competition")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .onAppear { loadLeaderboard() }
+            .alert("Start Competition", isPresented: $showStartConfirm) {
+                Button("Lock Funds & Start", role: .destructive) {
+                    startCompetition()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text(startConfirmMessage)
+            }
+            .alert("Cannot Start", isPresented: $showInsufficientFunds) {
+                Button("OK") { }
+            } message: {
+                Text(insufficientNames)
+            }
+        }
+    }
+    
+    private var startConfirmMessage: String {
+        let buyIn = competition?["buyInAmount"] as? Double ?? (competition?["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let count = leaderboard.count
+        let pool = buyIn * Double(count)
+        let days = competition?["durationDays"] as? Int ?? 7
+        if buyIn > 0 {
+            return "This will lock $\(Int(buyIn)) from each of the \(count) participants ($\(Int(pool)) total pool). Funds are non-refundable and the entire pool goes to the winner. The timer starts now."
+        } else {
+            return "Start the \(days)-day timer now? All \(count) participants will begin competing."
+        }
+    }
+    
+    private var lobbyContent: some View {
+        let comp = competition ?? [:]
+        let creatorId = comp["creatorUserId"] as? String ?? ""
+        let isCreator = creatorId == userId
+        let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let durationDays = comp["durationDays"] as? Int ?? 7
+        let inviteCode = comp["inviteCode"] as? String ?? ""
+        let objType = comp["objectiveType"] as? String ?? "pushups"
+        let scoring = comp["scoringType"] as? String ?? "consistency"
+        
+        return List {
+            // Lobby header
+            Section {
+                VStack(spacing: 16) {
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 36))
+                        .foregroundStyle(Color.orange)
+                    
+                    Text("Waiting to Start")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                    
+                    Text(isCreator ? "Share the code and tap Start when everyone is ready." : "Waiting for the creator to start the competition.")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                        .multilineTextAlignment(.center)
+                    
+                    // Invite code
+                    HStack(spacing: 8) {
+                        Text(inviteCode)
+                            .font(.system(size: 28, weight: .bold, design: .monospaced))
+                            .foregroundStyle(goldColor)
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                        Button(action: { UIPasteboard.general.string = inviteCode }) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.subheadline)
+                                .foregroundStyle(goldColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
+            .listRowBackground(Color.white)
+            
+            // Competition details
+            Section {
+                HStack {
+                    Label("Type", systemImage: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                    Spacer()
+                    Text(objType == "run" ? "Run" : (objType == "both" ? "Both" : "Pushups"))
+                        .foregroundStyle(Color.gray)
+                }
+                HStack {
+                    Label("Scoring", systemImage: "chart.bar.fill")
+                    Spacer()
+                    Text(scoring == "cumulative" ? "Total Count" : "Days Completed")
+                        .foregroundStyle(Color.gray)
+                }
+                HStack {
+                    Label("Duration", systemImage: "clock.fill")
+                    Spacer()
+                    Text(durationDays == 7 ? "1 Week" : (durationDays == 14 ? "2 Weeks" : (durationDays == 30 ? "1 Month" : "\(durationDays) days")))
+                        .foregroundStyle(Color.gray)
+                }
+                if buyIn > 0 {
+                    HStack {
+                        Label("Buy-In", systemImage: "dollarsign.circle.fill")
+                        Spacer()
+                        Text("$\(Int(buyIn)) per player")
+                            .foregroundStyle(goldColor)
+                            .fontWeight(.semibold)
+                    }
+                }
+            } header: {
+                Text("Details")
+            }
+            .listRowBackground(Color.white)
+            .font(.system(.subheadline, design: .rounded))
+            
+            // Participants
+            Section {
+                ForEach(leaderboard.indices, id: \.self) { i in
+                    let entry = leaderboard[i]
+                    let name = entry["name"] as? String ?? "Unknown"
+                    let entryUserId = entry["userId"] as? String ?? ""
+                    let isMe = entryUserId == userId
+                    
+                    HStack {
+                        Image(systemName: "person.circle.fill")
+                            .foregroundStyle(isMe ? goldColor : Color.gray.opacity(0.5))
+                        Text(name)
+                            .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .regular))
+                            .foregroundStyle(Color.black)
+                        if isMe {
+                            Text("(you)")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(goldColor)
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.green)
+                            .font(.caption)
+                    }
+                }
+            } header: {
+                Text("\(leaderboard.count) Participant\(leaderboard.count == 1 ? "" : "s") Joined")
+            }
+            .listRowBackground(Color.white)
+            
+            // Buy-in notice
+            if buyIn > 0 {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.shield.fill")
+                            .foregroundStyle(Color.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("$\(Int(buyIn)) will be locked from each player when started")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                            Text("Total pool: $\(Int(buyIn * Double(leaderboard.count))) → awarded to the winner")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(Color.orange.opacity(0.08))
+            }
+            
+            // Start error
+            if let error = startError {
+                Section {
+                    HStack {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Color.red)
+                        Text(error)
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.red)
+                    }
+                }
+                .listRowBackground(Color.red.opacity(0.08))
+            }
+            
+            // Start button (creator only)
+            if isCreator {
+                Section {
+                    HStack {
+                        Spacer()
+                        HStack {
+                            if isStarting {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "flag.checkered")
+                            }
+                            Text("Start Competition")
+                                .font(.system(.headline, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(leaderboard.count < 2 || isStarting ? Color.gray.opacity(0.3) : goldColor)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if leaderboard.count >= 2 && !isStarting {
+                                showStartConfirm = true
+                            }
+                        }
+                        Spacer()
+                    }
+                } footer: {
+                    if leaderboard.count < 2 {
+                        Text("Need at least 2 participants to start.")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.orange)
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+        }
+    }
+    
+    private var leaderboardContent: some View {
+        let comp = competition ?? [:]
+        let objType = comp["objectiveType"] as? String ?? "pushups"
+        let scoring = comp["scoringType"] as? String ?? "consistency"
+        let daysRemaining = comp["daysRemaining"] as? Int ?? 0
+        let daysElapsed = comp["daysElapsed"] as? Int ?? 0
+        let totalDays = comp["totalDays"] as? Int ?? 1
+        let inviteCode = comp["inviteCode"] as? String ?? ""
+        let status = comp["status"] as? String ?? "active"
+        let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let progress = min(1.0, Double(daysElapsed) / Double(max(1, totalDays)))
+        let poolTotal = buyIn * Double(leaderboard.count)
+        
+        // Score unit label
+        let scoreUnit: String = {
+            if scoring == "consistency" { return "days" }
+            switch objType {
+            case "run": return "mi"
+            case "pushups": return "reps"
+            default: return "pts"
+            }
+        }()
+        
+        return List {
+            // Stats header
+            Section {
+                VStack(spacing: 14) {
+                    HStack(spacing: 16) {
+                        statBubble(value: "\(leaderboard.count)", label: "Players", icon: "person.2.fill")
+                        statBubble(value: status == "active" ? "\(daysRemaining)d" : "Done", label: status == "active" ? "Remaining" : "Completed", icon: "clock.fill")
+                        statBubble(value: objType == "run" ? "Run" : (objType == "both" ? "Both" : "Pushups"), label: "Type", icon: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                        if buyIn > 0 {
+                            statBubble(value: "$\(Int(poolTotal))", label: "Prize Pool", icon: "dollarsign.circle.fill")
+                        }
+                    }
+                    
+                    // Progress bar
+                    VStack(spacing: 4) {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.gray.opacity(0.15))
+                                    .frame(height: 6)
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(goldColor)
+                                    .frame(width: geo.size.width * progress, height: 6)
+                            }
+                        }
+                        .frame(height: 6)
+                        
+                        HStack {
+                            Text("Day \(daysElapsed) of \(totalDays)")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                            Spacer()
+                            Text(scoring == "cumulative" ? "Total \(objType == "run" ? "Miles" : (objType == "pushups" ? "Reps" : "Count"))" : "Days Completed")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                    }
+                    
+                    // Buy-in notice
+                    if buyIn > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(goldColor)
+                            Text("$\(Int(buyIn)) buy-in per player")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                            Text("·")
+                                .foregroundStyle(Color.gray)
+                            Text("$\(Int(poolTotal)) total pool")
+                                .font(.system(.caption2, design: .rounded, weight: .bold))
+                                .foregroundStyle(goldColor)
+                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(goldColor.opacity(0.08))
+                        .cornerRadius(8)
+                    }
+                    
+                    // Scoring disclaimer for "both" type
+                    if objType == "both" && scoring == "cumulative" {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                                .font(.caption2)
+                                .foregroundStyle(Color.blue)
+                            Text("Scoring: 1 pushup = 1 pt, 1 mile = 100 pts")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.blue)
+                        }
+                    }
+                    
+                    // Invite code
+                    HStack {
+                        Text("Code:")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                        Text(inviteCode)
+                            .font(.system(.caption, design: .monospaced, weight: .bold))
+                            .foregroundStyle(goldColor)
+                        Spacer()
+                        Button(action: { UIPasteboard.general.string = inviteCode }) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.caption2)
+                                .foregroundStyle(goldColor)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .listRowBackground(Color.white)
+            
+            // Leaderboard
+            Section {
+                ForEach(leaderboard.indices, id: \.self) { i in
+                    leaderboardRow(leaderboard[i], index: i, scoreUnit: scoreUnit)
+                }
+            } header: {
+                Text("Leaderboard")
+            }
+            .listRowBackground(Color.white)
+            
+            // Powered by Strava
+            Section {
+                HStack {
+                    Spacer()
+                    Image("powered_by_strava")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 14)
+                        .opacity(0.7)
+                    Spacer()
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+    
+    private func statBubble(value: String, label: String, icon: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(goldColor)
+            Text(value)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(Color.black)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.gray)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+    
+    private func leaderboardRow(_ entry: [String: Any], index: Int, scoreUnit: String) -> some View {
+        let name = entry["name"] as? String ?? "Unknown"
+        let score = entry["score"] as? Double ?? 0
+        let streak = entry["streak"] as? Int ?? 0
+        let rank = entry["rank"] as? Int ?? (index + 1)
+        let entryUserId = entry["userId"] as? String ?? ""
+        let isMe = entryUserId == userId
+        let scoreText = score == floor(score) ? "\(Int(score))" : String(format: "%.1f", score)
+        
+        return HStack(spacing: 14) {
+            // Rank
+            ZStack {
+                if rank <= 3 {
+                    Circle()
+                        .fill(rank == 1 ? goldColor : (rank == 2 ? Color.gray.opacity(0.4) : Color.orange.opacity(0.3)))
+                        .frame(width: 30, height: 30)
+                    Text("\(rank)")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(rank == 1 ? .white : Color.black)
+                } else {
+                    Text("\(rank)")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.gray)
+                        .frame(width: 30)
+                }
+            }
+            
+            // Name
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(name)
+                        .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .medium))
+                        .foregroundStyle(Color.black)
+                        .lineLimit(1)
+                    if isMe {
+                        Text("(you)")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(goldColor)
+                            .layoutPriority(-1)
+                    }
+                }
+                if streak > 0 {
+                    Text("\(streak) day streak 🔥")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.orange)
+                }
+            }
+            
+            Spacer(minLength: 8)
+            
+            // Score with unit
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(scoreText)
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(rank == 1 ? goldColor : Color.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(scoreUnit)
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.vertical, 4)
+        .background(isMe ? goldColor.opacity(0.05) : Color.clear)
+    }
+    
+    private func startCompetition() {
+        isStarting = true
+        startError = nil
+        
+        guard let url = URL(string: "https://api.live-eos.com/compete/start") else {
+            isStarting = false
+            startError = "Invalid URL"
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 20
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "userId": userId,
+            "competitionId": competitionId
+        ])
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isStarting = false
+                
+                if let error = error {
+                    self.startError = "Network error: \(error.localizedDescription)"
+                    return
+                }
+                
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self.startError = "Invalid server response"
+                    return
+                }
+                
+                if json["success"] as? Bool == true {
+                    // Sync balance
+                    if let newBal = json["newBalanceCents"] as? Int {
+                        self.profileCashHoldings = Double(newBal) / 100.0
+                    }
+                    // Reload — will now show leaderboard since status is active
+                    self.isLoading = true
+                    self.loadLeaderboard()
+                } else if let errMsg = json["error"] as? String {
+                    // Check if it's an insufficient funds error
+                    if json["insufficientUsers"] != nil {
+                        self.insufficientNames = errMsg
+                        self.showInsufficientFunds = true
+                    } else {
+                        self.startError = errMsg
+                    }
+                } else {
+                    self.startError = "Unexpected response"
+                }
+            }
+        }.resume()
+    }
+    
+    private func loadLeaderboard() {
+        guard let url = URL(string: "https://api.live-eos.com/compete/\(competitionId)/leaderboard") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+                self.competition = json["competition"] as? [String: Any]
+                self.leaderboard = json["leaderboard"] as? [[String: Any]] ?? []
+            }
+        }.resume()
     }
 }
 
@@ -4827,9 +6976,8 @@ struct SignInView: View {
                 }
                 
                 if httpResponse.statusCode >= 300 {
-                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let detail = json["detail"] as? String {
-                        self.errorMessage = detail
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        self.errorMessage = (json["error"] as? String) ?? (json["detail"] as? String) ?? "Sign in failed (status \(httpResponse.statusCode))"
                     } else {
                         self.errorMessage = "Sign in failed (status \(httpResponse.statusCode))"
                     }
@@ -5161,6 +7309,7 @@ struct CreateAccountView: View {
             "email": email.trimmingCharacters(in: .whitespaces),
             "password": password.trimmingCharacters(in: .whitespaces),
             "balanceCents": 0,
+            "timezone": TimeZone.current.identifier,
             "createOnly": true
         ]
         
@@ -5186,9 +7335,8 @@ struct CreateAccountView: View {
                 
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode >= 300 {
                     if let data = data,
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let detail = json["detail"] as? String {
-                        self.errorMessage = detail
+                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        self.errorMessage = (json["error"] as? String) ?? (json["detail"] as? String) ?? "Failed to create account (status \(httpResponse.statusCode))"
                     } else {
                         self.errorMessage = "Failed to create account (status \(httpResponse.statusCode))"
                     }
@@ -5225,3 +7373,6 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
+
+
+

@@ -16,6 +16,9 @@ struct EOSApp: App {
 
     init() {
         STPAPIClient.shared.publishableKey = StripeConfig.publishableKey
+        UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)
+        UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
+        UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.black], for: .normal)
     }
 
     var body: some Scene {

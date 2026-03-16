@@ -45,8 +45,8 @@ struct SplashView: View {
                     .scaleEffect(logoScale)
                     .offset(y: logoOffset)
                 
-                // Do or Donate tagline
-                Text("Do or Donate")
+                // Dawn of Better Habits tagline
+                Text("Dawn of Better Habits")
                     .font(.system(size: 32, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -148,8 +148,8 @@ struct SplashViewWithLogo: View {
                     .scaleEffect(textScale)
                     .offset(y: textOffset)
                 
-                // Do or Donate tagline - Bigger
-                Text("Do or Donate")
+                // Dawn of Better Habits tagline - Bigger
+                Text("Dawn of Better Habits")
                     .font(.system(size: 32, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -248,8 +248,8 @@ struct SplashViewTextOnly: View {
                     .scaleEffect(logoScale)
                     .offset(y: logoOffset)
                 
-                // Do or Donate tagline
-                Text("Do or Donate")
+                // Dawn of Better Habits tagline
+                Text("Dawn of Better Habits")
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
