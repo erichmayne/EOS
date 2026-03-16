@@ -1,10 +1,64 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: February 10, 2026
-> Version: 3.0 - Strava Production, Deauth & UI Overhaul
+> Last Updated: March 16, 2026
+> Version: 3.5 - Server Migration, Competitions, Invite System
 
 ---
 
-## 🆕 Latest Updates (Feb 10, 2026) - Strava Production & UI Overhaul
+## 🆕 Latest Updates (Mar 16, 2026) - Server Migration & Major Features
+
+### Server Migration
+- **Old server**: `143.198.143.204` (decommissioned)
+- **New server**: `143.198.143.204` (DigitalOcean)
+- All services migrated: PM2, Nginx, SSL (Let's Encrypt), cron jobs
+- DNS updated on Vercel for `live-eos.com`, `api.live-eos.com`, `www.live-eos.com`, `app.live-eos.com`
+
+### Competition System Enhancements
+- **Tie-split payouts**: If multiple players tie for first, pool splits evenly among them
+- **Weighted scoring**: For "both" type competitions, 1 pushup = 1 pt, 1 mile = 100 pts
+- **Balance check**: Users can't create or join buy-in competitions without sufficient balance
+- **Completion emails**: Winners, losers, and draws all get appropriate emails
+- **Competition check-completed**: Now wired to cron, runs every minute
+- **Strava webhook**: Processes runs for competition participants even without individual run objective
+- **Strava pace check**: Rejects activities faster than 4:00/mile (anti-cheat)
+- **Strava required**: Can't join run/both competitions without Strava linked
+- **Past competitions**: Hidden behind collapsible toggle instead of cluttering main screen
+
+### Invite Active User System (New)
+- **`POST /invites/send-to-user`**: Send email invite to an existing EOS user
+- **`GET /invites/accept/:inviteId`**: Accept link from email, auto-links recipient to payer
+- **`GET /users/:userId/is-recipient`**: Check if user is someone's active recipient
+- **My Recipient Status**: Dropdown in Designated Recipient section shows who you're a recipient of
+- **Email invite flow**: Payer enters email → recipient gets styled email → clicks Accept → linked
+
+### Recipient & Invite Fixes
+- **Delete recipient**: Now properly purges from `recipient_invites`, `recipients`, and clears `custom_recipient_id`
+- **Delete confirmation**: Alert prompt before deleting any recipient
+- **Re-sync after delete**: App re-fetches from server after backend delete completes
+
+### Objective Settings Fix
+- **Root cause found**: `objective_settings_updated_at` column didn't exist in database, causing ALL schedule/deadline saves to fail silently
+- **Fixed**: Removed non-existent column references, deadline Set/Unset/Update now works
+
+### iOS UI Polish
+- **Splash**: "Dawn of Better Habits" tagline
+- **Gold segmented controls**: Applied globally via app init
+- **Competition UI**: Black text on white fields, wheel duration picker (1-90 days), text compression fixes
+- **Pushup motion capture**: Specific joint tracking (nose, wrists, elbows), signal smoothing, better thresholds
+- **Error messages**: iOS now displays actual backend error text instead of generic "status 409" etc.
+- **Timezone**: Sent on account creation and schedule save
+- **Website**: Sign In link added to nav bar
+- **Powered by Strava**: Removed redundant "powered by" text
+
+### Key Endpoints Added/Changed
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/invites/send-to-user` | POST | Email invite to existing user |
+| `/invites/accept/:inviteId` | GET | Accept invite (from email link) |
+| `/invites/:inviteId` | DELETE | Remove invite + recipient link |
+| `/users/:userId/is-recipient` | GET | Check if user is a recipient |
+| `/compete/check-completed` | POST | Now in cron, handles ties + weighted scoring |
+
+### Previous Updates (Feb 10, 2026) - Strava Production & UI Overhaul
 
 ### Strava Production Readiness
 - **Deauthorization webhook handler**: Backend now processes `athlete.update` events with `updates.authorized === 'false'` — required by Strava API terms. Unlinks user and deletes `strava_connections` record.
@@ -43,7 +97,7 @@
 - **Contact links fixed**: "Help Center" and "Contact Us" in footer now link to `mailto:connect@live-eos.com` (were dead `#` links). Privacy Policy and Terms link to `/terms.html`.
 
 ### Deployment
-- Backend (`server.js`) deployed to `159.26.94.94:/home/user/morning-would-payments/`
+- Backend (`server.js`) deployed to `143.198.143.204:/home/user/morning-would-payments/`
 - Website (`eos-website-improved.html`) deployed to `/var/www/live-eos/index.html`
 - PM2 processes restarted and confirmed online.
 
@@ -180,12 +234,12 @@ All "penalty" language replaced with commitment contract framing:
 | Component | Technology | Location |
 |-----------|------------|----------|
 | iOS App | SwiftUI + Stripe SDK | Local `/Users/emayne/morning-would/` |
-| Backend API | Node.js/Express | Remote `159.26.94.94:/home/user/morning-would-payments/` |
+| Backend API | Node.js/Express | Remote `143.198.143.204:/home/user/morning-would-payments/` |
 | Database | Supabase (PostgreSQL) | Cloud: `ddehnllsqoxmisnyjerf.supabase.co` |
 | Payments | Stripe & Stripe Connect | API Integration |
 | SMS | Twilio | API Integration |
 | Email | SendGrid + Google Workspace | API Integration (To Be Configured) |
-| Web Hosting | Nginx + Let's Encrypt | Remote `159.26.94.94` |
+| Web Hosting | Nginx + Let's Encrypt | Remote `143.198.143.204` |
 
 ---
 
@@ -356,7 +410,7 @@ This is already in the repo and will run on every `main` push.
 
 **2) Add GitHub Secrets**
 In your repo → Settings → Secrets and variables → Actions, add:
-- `SSH_HOST` (server IP, e.g. `159.26.94.94`)
+- `SSH_HOST` (server IP, e.g. `143.198.143.204`)
 - `SSH_USER` (usually `user`)
 - `SSH_PRIVATE_KEY` (private key with access to the server)
 - `SSH_PORT` (optional, default `22`)
@@ -406,7 +460,7 @@ Push any commit to `main` and GitHub Actions will:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌──────────────┐      HTTPS       ┌──────────────────────────────────────┐ │
-│  │   iOS App    │─────────────────▶│     REMOTE SERVER (159.26.94.94)     │ │
+│  │   iOS App    │─────────────────▶│     REMOTE SERVER (143.198.143.204)     │ │
 │  │   (SwiftUI)  │                  │                                      │ │
 │  │              │                  │  ┌─────────────────────────────────┐ │ │
 │  │ LOCAL MACHINE│                  │  │         NGINX PROXY             │ │ │
@@ -703,10 +757,10 @@ The `/create-payment-intent` endpoint MUST return these 3 fields for Apple Pay:
 
 | Record Type | Host | Value | Status |
 |-------------|------|-------|--------|
-| A | @ | `159.26.94.94` | ✅ Configured |
-| A | www | `159.26.94.94` | ✅ Configured |
-| A | app | `159.26.94.94` | ✅ Configured |
-| A | api | `159.26.94.94` | ✅ Configured |
+| A | @ | `143.198.143.204` | ✅ Configured |
+| A | www | `143.198.143.204` | ✅ Configured |
+| A | app | `143.198.143.204` | ✅ Configured |
+| A | api | `143.198.143.204` | ✅ Configured |
 | MX | @ | `[GOOGLE WORKSPACE MX - TO BE ADDED]` | ⏳ Pending |
 | MX | @ | `ASPMX.L.GOOGLE.COM` (priority 1) | ⏳ After GW setup |
 | MX | @ | `ALT1.ASPMX.L.GOOGLE.COM` (priority 5) | ⏳ After GW setup |
@@ -727,7 +781,7 @@ The `/create-payment-intent` endpoint MUST return these 3 fields for Apple Pay:
 
 | Setting | Value |
 |---------|-------|
-| **Host IP** | `159.26.94.94` |
+| **Host IP** | `143.198.143.204` |
 | **SSH User** | `user` |
 | **SSH Password** | `[PLACEHOLDER - IF USING PASSWORD AUTH]` |
 | **Auth Method** | SSH Key (recommended) |
@@ -735,7 +789,7 @@ The `/create-payment-intent` endpoint MUST return these 3 fields for Apple Pay:
 | **Root Password** | `[PLACEHOLDER - SERVER ROOT PASSWORD]` |
 | **OS** | Ubuntu 22.04 LTS |
 
-**Quick Access**: `ssh user@159.26.94.94`
+**Quick Access**: `ssh user@143.198.143.204`
 
 ---
 
@@ -773,7 +827,7 @@ EOS/
 | Vercel | vercel.com | `[PLACEHOLDER]` | `[PLACEHOLDER]` |
 | VPS Provider | `[PLACEHOLDER]` | `[PLACEHOLDER]` | `[PLACEHOLDER]` |
 | GitHub | github.com/erichmayne/EOS | `erichmayne` | SSH key auth |
-| Server SSH | `ssh user@159.26.94.94` | N/A | SSH Key / `[PLACEHOLDER]` |
+| Server SSH | `ssh user@143.198.143.204` | N/A | SSH Key / `[PLACEHOLDER]` |
 
 ---
 
@@ -851,7 +905,7 @@ stripe-ios v25.3.1
 
 ## 🖥️ Remote Server (Ubuntu)
 
-**Host**: `159.26.94.94`  
+**Host**: `143.198.143.204`  
 **User**: `user`  
 **OS**: Ubuntu 22.04 LTS
 
@@ -2231,7 +2285,7 @@ Status: SUCCESS - funds delivered to debit card
 ### Currently Running Crons (on server)
 ```bash
 # View current crontab
-ssh user@159.26.94.94 "crontab -l"
+ssh user@143.198.143.204 "crontab -l"
 
 # Active cron jobs:
 */5 * * * * /home/user/morning-would-payments/check-missed-cron.sh   # Every 5 min
@@ -2267,7 +2321,7 @@ curl -X POST https://api.live-eos.com/objectives/ensure-session/{userId}
 ### Setup Commands
 ```bash
 # On server, edit crontab
-ssh user@159.26.94.94
+ssh user@143.198.143.204
 crontab -e
 
 # Add lines above, save and exit
@@ -2326,11 +2380,11 @@ code /Users/emayne/morning-would/backend/complete-server-update.js
 
 # 2. Copy to server
 scp /Users/emayne/morning-would/backend/complete-server-update.js \
-    user@159.26.94.94:/home/user/morning-would-payments/server.js
+    user@143.198.143.204:/home/user/morning-would-payments/server.js
 
 # 3. Restart server
 # 3. Restart server with PM2
-ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 restart eos-backend"
+ssh user@143.198.143.204 "source ~/.nvm/nvm.sh && pm2 restart eos-backend"
 
 # 4. Verify
 curl https://api.live-eos.com/health
@@ -2339,10 +2393,10 @@ curl https://api.live-eos.com/health
 ### Deploying Web Changes
 ```bash
 # Landing page
-scp /path/to/index.html user@159.26.94.94:/var/www/live-eos/index.html
+scp /path/to/index.html user@143.198.143.204:/var/www/live-eos/index.html
 
 # Invite page
-scp /path/to/index.html user@159.26.94.94:/var/www/invite/index.html
+scp /path/to/index.html user@143.198.143.204:/var/www/invite/index.html
 ```
 
 ### Database Changes
@@ -2637,25 +2691,25 @@ All penalty/charity language replaced throughout `ContentView.swift`:
 
 ```bash
 # SSH to server
-ssh user@159.26.94.94
+ssh user@143.198.143.204
 
 # Check server status
 curl https://api.live-eos.com/health
 
 # View server logs (PM2)
-ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 logs eos-backend --lines 50"
+ssh user@143.198.143.204 "source ~/.nvm/nvm.sh && pm2 logs eos-backend --lines 50"
 
 # Restart server (PM2)
-ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 restart eos-backend"
+ssh user@143.198.143.204 "source ~/.nvm/nvm.sh && pm2 restart eos-backend"
 
 # Check PM2 status
-ssh user@159.26.94.94 "source ~/.nvm/nvm.sh && pm2 status"
+ssh user@143.198.143.204 "source ~/.nvm/nvm.sh && pm2 status"
 
 # Check nginx status
-ssh user@159.26.94.94 "sudo systemctl status nginx"
+ssh user@143.198.143.204 "sudo systemctl status nginx"
 
 # Renew SSL certs
-ssh user@159.26.94.94 "sudo certbot renew"
+ssh user@143.198.143.204 "sudo certbot renew"
 
 # Test database connection
 curl https://api.live-eos.com/debug/database
