@@ -2415,7 +2415,9 @@ final class NotificationManager {
 
     func scheduleObjectiveReminder(deadline: Date, pushupsEnabled: Bool = false, pushupTarget: Int = 0, runEnabled: Bool = false, runDistance: Double = 0, scheduleType: String) {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: centerIdentifiers(for: scheduleType))
+        // Remove ALL objective notification IDs to prevent duplicates from mode switches
+        let allIds = ["pushupObjectiveFailure_daily"] + (2...6).map { "pushupObjectiveFailure_weekday_\($0)" }
+        center.removePendingNotificationRequests(withIdentifiers: allIds)
 
         // Build objective-specific message
         var goals: [String] = []
@@ -2429,10 +2431,10 @@ final class NotificationManager {
         let content = UNMutableNotificationContent()
         if goals.isEmpty {
             content.title = "Objective Missed"
-            content.body = "You didn't complete today's objective before the deadline. Your stakes will be forfeited."
+            content.body = "You didn't complete today's objective before the deadline. Your committed stakes will go to your designated recipient."
         } else {
             content.title = "Objective Missed"
-            content.body = "You didn't complete your \(goals.joined(separator: " + ")) before the deadline. Your stakes will be forfeited to your designated recipient."
+            content.body = "You didn't complete your \(goals.joined(separator: " + ")) before the deadline. Your committed stakes will go to your designated recipient."
         }
         content.sound = .default
 
@@ -3359,7 +3361,7 @@ struct ProfileView: View {
             Text("Designated Recipient")
                 .foregroundStyle(Color.white.opacity(0.95))
         } footer: {
-            Text(isSettingsLocked ? "Recipient is locked until your commitment period ends." : (destinationCommitted ? "Recipient locked." : "Select who receives your forfeited stakes if you miss your goal."))
+            Text(isSettingsLocked ? "Recipient is locked until your commitment period ends." : (destinationCommitted ? "Recipient locked." : "Select who receives your committed stakes if you miss your goal."))
                 .font(.system(.caption2, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.8))
         }
@@ -3564,7 +3566,7 @@ struct ProfileView: View {
                     Image(systemName: acknowledgedNoRefund ? "checkmark.square.fill" : "square")
                         .foregroundStyle(acknowledgedNoRefund ? goldColor : Color.gray)
                         .font(.body)
-                    Text("Forfeited stakes are non-refundable. If I miss my goal, my stakes go to my designated recipient.")
+                    Text("Committed stakes are non-refundable. If I miss my goal, my stakes go to my designated recipient.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.black.opacity(0.8))
                         .multilineTextAlignment(.leading)
@@ -4661,7 +4663,7 @@ struct AddRecipientSheet: View {
                             .font(.system(.caption, design: .rounded, weight: .medium))
                         Text("• Share the invite link + code above")
                             .font(.system(.caption2, design: .rounded))
-                        Text("• They will receive your forfeited stakes if you miss")
+                        Text("• They will receive your committed stakes if you miss")
                             .font(.system(.caption2, design: .rounded))
                     }
                     .padding(.top, 4)
@@ -5104,6 +5106,7 @@ struct CompeteView: View {
     @State private var selectedCompetition: [String: Any]? = nil
     @State private var showDetail: Bool = false
     @State private var showPastCompetitions: Bool = false
+    @State private var showContestRules: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     private let lightGold = Color(UIColor(red: 0.95, green: 0.75, blue: 0.1, alpha: 1))
@@ -5136,18 +5139,27 @@ struct CompeteView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button(action: { showCreateSheet = true }) {
-                            Label("Create Competition", systemImage: "plus.circle")
+                    HStack(spacing: 16) {
+                        Button(action: { showContestRules = true }) {
+                            Image(systemName: "doc.text")
+                                .font(.caption)
                         }
-                        Button(action: { showJoinSheet = true }) {
-                            Label("Join with Code", systemImage: "ticket")
+                        Menu {
+                            Button(action: { showCreateSheet = true }) {
+                                Label("Create Competition", systemImage: "plus.circle")
+                            }
+                            Button(action: { showJoinSheet = true }) {
+                                Label("Join with Code", systemImage: "ticket")
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.body.weight(.semibold))
                         }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.body.weight(.semibold))
                     }
                 }
+            }
+            .sheet(isPresented: $showContestRules) {
+                contestRulesView
             }
             .sheet(isPresented: $showCreateSheet) {
                 CreateCompetitionView(onCreated: { loadCompetitions() })
@@ -5166,6 +5178,69 @@ struct CompeteView: View {
                 }
             }
             .onAppear { loadCompetitions() }
+        }
+    }
+    
+    private var contestRulesView: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Official Competition Rules")
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.primary)
+                    
+                    Group {
+                        ruleSection(title: "1. Eligibility", body: "Competitions are open to all registered EOS users aged 18 or older. By joining a competition, you confirm you meet the age requirement.")
+                        
+                        ruleSection(title: "2. How Competitions Work", body: "Users create or join fitness competitions with a set duration and objective type (push-ups, running, or both). Participants track their daily fitness activity through the app. At the end of the competition period, the participant with the highest score wins.")
+                        
+                        ruleSection(title: "3. Scoring", body: "Scores are determined by physical fitness performance only. For 'Days Completed' scoring, each day you meet your target counts as one point. For 'Total Count' scoring, your cumulative reps or miles are tallied. For combined competitions: 1 push-up = 1 point, 1 mile = 100 points.")
+                        
+                        ruleSection(title: "4. Voluntary Entry Contributions", body: "Competitions may include an optional voluntary entry contribution. All contributions are clearly disclosed before joining. When the competition starts, contributions are committed from each participant's existing EOS balance. The total contributions go to the top performer. In the event of a tie, the total is split equally among tied participants. If no participant scores, all contributions are refunded.")
+                        
+                        ruleSection(title: "5. Competition Duration", body: "Each competition has a fixed duration set by the creator (1-90 days). The competition begins when the creator starts it and ends automatically when the duration expires. Results are calculated and payouts are processed automatically.")
+                        
+                        ruleSection(title: "6. Fair Play", body: "All activity must be performed by the registered participant. Running activities are verified through Strava integration and are subject to pace validation. Activities that appear fraudulent may be rejected.")
+                        
+                        ruleSection(title: "7. No Refunds", body: "Once a competition is started, voluntary entry contributions are non-refundable except in the case where no participant records any activity, in which case all contributions are returned.")
+                        
+                        ruleSection(title: "8. Disputes", body: "Competition results are determined automatically based on recorded activity data. EOS reserves the right to make final decisions on any disputes.")
+                    }
+                    
+                    Divider().padding(.vertical, 8)
+                    
+                    Text("Apple does not sponsor, endorse, or administer EOS competitions in any way. No prizes or payments are provided by Apple. All financial transactions are voluntary user-initiated commitments processed through Stripe.")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.secondary)
+                    
+                    Text("For questions, contact connect@live-eos.com")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.secondary)
+                    
+                    Text("© 2026 The EOS. All rights reserved.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.secondary)
+                }
+                .padding(20)
+            }
+            .navigationTitle("Contest Rules")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { showContestRules = false }
+                }
+            }
+        }
+    }
+    
+    private func ruleSection(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .foregroundStyle(Color.primary)
+            Text(body)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(Color.secondary)
         }
     }
     
@@ -5498,13 +5573,13 @@ struct CreateCompetitionView: View {
                     }
                 }
             }
-            .alert("Confirm Buy-In Competition", isPresented: $showBuyInAgreement) {
+            .alert("Confirm Competition Entry", isPresented: $showBuyInAgreement) {
                 Button("I Understand — Create", role: .destructive) {
                     createCompetition()
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This competition has a $\(Int(buyInAmount)) buy-in per player. When you start the competition, all participants' funds will be locked and the entire pool will be awarded to the winner. No refunds once started.")
+                Text("This competition has a $\(Int(buyInAmount)) voluntary entry per player. When you start the competition, all participants' contributions will be committed and the total goes to the top performer. No refunds once started.")
             }
         }
     }
@@ -5751,7 +5826,7 @@ struct CreateCompetitionView: View {
         } header: {
             Text("Stakes")
         } footer: {
-            Text(buyInAmount > 0 ? "Each participant's $\(Int(buyInAmount)) will be locked when you start the competition. Winner takes the entire pool." : "No money on the line — just bragging rights.")
+            Text(buyInAmount > 0 ? "Each participant voluntarily contributes $\(Int(buyInAmount)) when the competition starts. Top performer receives the total contributions." : "No money on the line — just bragging rights.")
                 .font(.system(.caption2, design: .rounded))
         }
         .listRowBackground(Color.white)
@@ -6026,14 +6101,14 @@ struct JoinCompetitionView: View {
                     }
                 }
             }
-            .alert("Buy-In Competition", isPresented: $showJoinAgreement) {
+            .alert("Competition Entry", isPresented: $showJoinAgreement) {
                 Button("I Agree — Join", role: .destructive) {
                     joinCompetition()
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
                 let buyIn = preview?["buyInAmount"] as? Double ?? 0
-                Text("This competition has a $\(Int(buyIn)) buy-in. When the creator starts the competition, your $\(Int(buyIn)) will be locked and the entire pool goes to the winner. No refunds once started.")
+                Text("This competition has a $\(Int(buyIn)) voluntary entry. When the creator starts the competition, your $\(Int(buyIn)) contribution will be committed. The total goes to the top performer. No refunds once started.")
             }
         }
     }
@@ -6596,17 +6671,21 @@ struct CompetitionDetailView: View {
             }
             .listRowBackground(Color.white)
             
-            // Powered by Strava
+            // Powered by Strava + Apple disclaimer
             Section {
-                HStack {
-                    Spacer()
+                VStack(spacing: 12) {
                     Image("powered_by_strava")
                         .resizable()
                         .scaledToFit()
                         .frame(height: 14)
                         .opacity(0.7)
-                    Spacer()
+                    
+                    Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray.opacity(0.6))
+                        .multilineTextAlignment(.center)
                 }
+                .frame(maxWidth: .infinity)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }

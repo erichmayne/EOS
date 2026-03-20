@@ -2724,6 +2724,12 @@ app.post('/strava/webhook', async (req, res) => {
             return;
         }
         
+        // Reject manual entries - only GPS-tracked runs count
+        if (activity.manual) {
+            console.log(`🚫 Activity ${object_id} rejected: manual entry (only GPS-tracked runs accepted)`);
+            return;
+        }
+        
         // Pace check: reject runs faster than 4:00/mile (likely driving/cheating)
         const distanceMeters = activity.distance || 0;
         const movingTimeSec = activity.moving_time || 0;
