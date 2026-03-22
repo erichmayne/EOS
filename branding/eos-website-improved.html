@@ -24,7 +24,7 @@
         html { scroll-behavior: smooth; }
         body {
             font-family: 'Inter', -apple-system, sans-serif;
-            background: var(--darker);
+            background: #080808;
             color: var(--white);
             overflow-x: hidden;
         }
@@ -68,15 +68,53 @@
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
             position: relative; overflow: hidden;
             padding: 120px 32px 80px;
+            background: 
+                radial-gradient(ellipse at 20% 50%, rgba(217,166,0,0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(217,166,0,0.05) 0%, transparent 40%),
+                radial-gradient(ellipse at 50% 80%, rgba(217,166,0,0.04) 0%, transparent 50%);
         }
+        /* Grid lines */
         .hero::before {
-            content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
-            background: radial-gradient(ellipse at center, rgba(217,166,0,0.06) 0%, transparent 60%);
-            animation: heroGlow 8s ease-in-out infinite alternate;
+            content: ''; position: absolute; inset: 0;
+            background-image: 
+                linear-gradient(rgba(217,166,0,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(217,166,0,0.03) 1px, transparent 1px);
+            background-size: 80px 80px;
+            mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
         }
-        @keyframes heroGlow {
-            0% { transform: translate(0, 0) scale(1); }
-            100% { transform: translate(5%, -5%) scale(1.1); }
+        /* Floating shapes */
+        .hero-shape {
+            position: absolute; border-radius: 50%; opacity: 0.7;
+            background: radial-gradient(circle, rgba(217,166,0,0.25), transparent 70%);
+            filter: blur(40px); pointer-events: none;
+        }
+        .hero-shape-1 { width: 600px; height: 600px; top: 5%; left: -5%; animation: float1 12s ease-in-out infinite; }
+        .hero-shape-2 { width: 500px; height: 500px; bottom: 5%; right: -5%; animation: float2 15s ease-in-out infinite; }
+        .hero-shape-3 { width: 400px; height: 400px; top: 50%; left: 55%; animation: float3 10s ease-in-out infinite; }
+        @keyframes float1 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(40px,-30px); } }
+        @keyframes float2 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-30px,40px); } }
+        @keyframes float3 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(20px,-20px); } }
+        /* Logo trace SVG */
+        .hero-logo-bg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 900px; height: 900px; opacity: 0.20;
+        }
+        @media (max-width: 768px) {
+            .hero-logo-bg {
+                width: 120vw; height: 120vw; max-width: none;
+            }
+        }
+        .hero-logo-bg img { width: 100%; height: 100%; object-fit: contain; }
+        /* Floating gold particles */
+        .particle {
+            position: absolute; width: 5px; height: 5px; background: var(--gold);
+            border-radius: 50%; opacity: 0; pointer-events: none;
+            animation: particleFade 5s ease-in-out infinite;
+        }
+        @keyframes particleFade {
+            0%, 100% { opacity: 0; transform: translateY(0) scale(1); }
+            50% { opacity: 1; transform: translateY(-60px) scale(1.8); }
         }
         .hero-content { max-width: 800px; text-align: center; position: relative; z-index: 1; }
         .hero-badge {
@@ -127,8 +165,14 @@
         }
         .stat-label { font-size: 13px; color: var(--gray); margin-top: 6px; font-weight: 500; }
 
+        /* Section divider glow */
+        .section-glow {
+            height: 1px; max-width: 600px; margin: 0 auto;
+            background: linear-gradient(90deg, transparent, var(--gold-medium), transparent);
+        }
+        
         /* Section styling */
-        section { padding: 100px 32px; }
+        section { padding: 100px 32px; position: relative; }
         .section-header { text-align: center; max-width: 600px; margin: 0 auto 64px; }
         .section-tag {
             display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 2px;
@@ -308,6 +352,7 @@
                 <li><a href="#features">Features</a></li>
                 <li><a href="#how">How It Works</a></li>
                 <li><a href="#compete">Compete</a></li>
+                <li><a href="/blog">Blog</a></li>
                 <li><a href="/portal" class="nav-signin">Sign In</a></li>
                 <li><a href="#download" class="nav-cta">Download</a></li>
             </ul>
@@ -319,10 +364,22 @@
 
     <!-- Hero -->
     <section class="hero" id="home">
+        <div class="hero-shape hero-shape-1"></div>
+        <div class="hero-shape hero-shape-2"></div>
+        <div class="hero-shape hero-shape-3"></div>
+        <div class="hero-logo-bg"><img src="/eos-logo.png" alt=""></div>
+        <div class="particle" style="top:20%;left:15%;animation-delay:0s"></div>
+        <div class="particle" style="top:30%;left:75%;animation-delay:1s"></div>
+        <div class="particle" style="top:60%;left:25%;animation-delay:2s"></div>
+        <div class="particle" style="top:70%;left:65%;animation-delay:0.5s"></div>
+        <div class="particle" style="top:40%;left:45%;animation-delay:1.5s"></div>
+        <div class="particle" style="top:80%;left:85%;animation-delay:3s"></div>
+        <div class="particle" style="top:15%;left:55%;animation-delay:2.5s"></div>
+        <div class="particle" style="top:50%;left:10%;animation-delay:0.8s"></div>
         <div class="hero-content">
             <div class="hero-badge"><span class="dot"></span> Now on the App Store</div>
             <h1>Dawn of<br><span class="gold">Better Habits.</span></h1>
-            <p>AI-powered push-up tracking. Strava-synced runs. Friendly competitions. Optional commitment stakes that make showing up non-negotiable.</p>
+            <p>Put real money behind your fitness goals. Get out of bed, hit your reps, run your miles — or your stakes go to someone else. No more excuses. No more "I'll start Monday."</p>
             <div class="hero-ctas">
                 <a href="#download" class="btn-primary">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
@@ -343,87 +400,93 @@
         </div>
     </div>
 
+    <div class="section-glow"></div>
+
     <!-- Features -->
     <section id="features">
         <div class="section-header reveal">
             <span class="section-tag">Features</span>
-            <h2>Everything you need to <span style="color:var(--gold)">stay accountable</span></h2>
-            <p>From AI camera tracking to friendly competitions — EOS gives you every tool to build habits that stick.</p>
+            <h2>Built for people who are <span style="color:var(--gold)">done making excuses</span></h2>
+            <p>Early alarms, real stakes, verified workouts, and competitions that expose who actually puts in the work.</p>
         </div>
         <div class="features-grid">
             <div class="feature-card reveal">
-                <div class="tag">AI Powered</div>
-                <div class="feature-icon">💪</div>
-                <h3>Live Push-Up Counter</h3>
-                <p>Real-time camera detection counts your reps as you go. Powered by Apple Vision framework — no data leaves your device.</p>
+                <div class="tag">No Excuses</div>
+                <div class="feature-icon">⏰</div>
+                <h3>Early Morning Accountability</h3>
+                <p>Set a 6AM deadline and you'll actually get out of bed. When your money's on the line, the snooze button loses its power.</p>
             </div>
             <div class="feature-card reveal">
-                <div class="tag">Strava Sync</div>
-                <div class="feature-icon">🏃</div>
-                <h3>Automatic Run Tracking</h3>
-                <p>Connect Strava and your runs count automatically. GPS-verified only — no shortcuts, no manual entries.</p>
-            </div>
-            <div class="feature-card reveal">
-                <div class="tag">Compete</div>
+                <div class="tag">Prove It</div>
                 <div class="feature-icon">🏆</div>
-                <h3>Fitness Competitions</h3>
-                <p>Challenge friends to push-up or running competitions. Leaderboards, streaks, and bragging rights. Optional entry stakes.</p>
+                <h3>Compete With Friends</h3>
+                <p>Talk is cheap. Create a competition and prove who's actually built different. Leaderboards don't lie — either you showed up or you didn't.</p>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-icon">🎯</div>
-                <h3>Custom Goals</h3>
-                <p>Set your own daily targets, deadlines, and schedule. Daily or weekdays. Your rules, your commitment.</p>
+                <div class="tag">Strava Verified</div>
+                <div class="feature-icon">🏃</div>
+                <h3>GPS-Tracked Runs</h3>
+                <p>Your runs sync automatically through Strava. GPS-verified, pace-checked, no faking it. Every mile earned, not entered.</p>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-icon">🔒</div>
-                <h3>Voluntary Commitment Stakes</h3>
-                <p>Optionally put your own money behind your goals. Complete them and keep every dollar. Your commitment, your choice.</p>
+                <div class="feature-icon">💪</div>
+                <h3>Camera Rep Counter</h3>
+                <p>Point your phone, start pushing. The camera counts every rep in real-time. No manual logging, no inflating numbers.</p>
             </div>
             <div class="feature-card reveal">
-                <div class="feature-icon">👥</div>
-                <h3>Accountability Partners</h3>
-                <p>Invite friends or family as your designated recipient. Real social accountability with people you know.</p>
+                <div class="feature-icon">💰</div>
+                <h3>Money Where Your Mouth Is</h3>
+                <p>Deposit funds, set your stakes, and commit. Hit your goal? Keep every dollar. Miss it? It goes to your designated person. Simple.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔥</div>
+                <h3>Push Each Other</h3>
+                <p>Invite friends as accountability partners or challenge them to competitions. Nothing motivates like knowing someone's watching — and winning.</p>
             </div>
         </div>
     </section>
+
+    <div class="section-glow"></div>
 
     <!-- How It Works -->
     <section class="how-it-works" id="how">
         <div class="section-header reveal">
             <span class="section-tag">How It Works</span>
-            <h2>Four steps to <span style="color:var(--gold)">unbreakable habits</span></h2>
+            <h2>Four steps to <span style="color:var(--gold)">never missing again</span></h2>
         </div>
         <div class="steps-grid">
             <div class="step reveal">
                 <div class="step-number">1</div>
-                <h3>Set Your Goal</h3>
-                <p>Choose push-ups, running, or both. Set your daily target and deadline.</p>
+                <h3>Set the Standard</h3>
+                <p>Pick your daily goal — 50 pushups, a 2 mile run, or both. Set a deadline that forces you out of bed.</p>
             </div>
             <div class="step reveal">
                 <div class="step-number">2</div>
-                <h3>Show Up Daily</h3>
-                <p>Open the app, start your session. AI tracks push-ups. Strava logs runs.</p>
+                <h3>Put Skin in the Game</h3>
+                <p>Deposit funds and set your stakes. Now it's real. Your alarm hits different when money's on the line.</p>
             </div>
             <div class="step reveal">
                 <div class="step-number">3</div>
-                <h3>Stay Accountable</h3>
-                <p>Optional commitment stakes add real weight to your goals. Compete with friends for extra motivation.</p>
+                <h3>Do the Work</h3>
+                <p>Camera counts your pushups. Strava logs your run. No faking it. Hit your numbers before the clock runs out.</p>
             </div>
             <div class="step reveal">
                 <div class="step-number">4</div>
-                <h3>Build the Habit</h3>
-                <p>Day by day, rep by rep. Watch your streaks grow and your consistency compound.</p>
+                <h3>Keep Your Money</h3>
+                <p>Complete your goal and every dollar stays yours. Miss it and your stakes go to whoever you chose. That's accountability.</p>
             </div>
         </div>
     </section>
+
+    <div class="section-glow"></div>
 
     <!-- Competitions -->
     <section class="compete-section" id="compete">
         <div class="compete-content">
             <div class="compete-text reveal">
                 <span class="section-tag">Competitions</span>
-                <h2>Challenge your friends.<br><span style="color:var(--gold)">Prove you're built different.</span></h2>
-                <p>Create a competition, share the code, and go head to head. Real fitness performance, real leaderboards, real bragging rights.</p>
+                <h2>Your friends talk.<br><span style="color:var(--gold)">Make them prove it.</span></h2>
+                <p>Everyone says they work out. Create a competition and find out who actually does. Share a code, set the stakes, and let the leaderboard settle it.</p>
                 <div class="compete-features">
                     <div class="compete-feature"><span class="check">✓</span> Push-ups, running, or both</div>
                     <div class="compete-feature"><span class="check">✓</span> 1-90 day duration</div>
@@ -463,16 +526,18 @@
         </div>
     </section>
 
+    <div class="section-glow"></div>
+
     <!-- Testimonials -->
     <section class="testimonials">
         <div class="section-header reveal">
-            <span class="section-tag">Community</span>
-            <h2>People are <span style="color:var(--gold)">showing up</span></h2>
+            <span class="section-tag">Real Talk</span>
+            <h2>What happens when you <span style="color:var(--gold)">stop playing</span></h2>
         </div>
         <div class="testimonials-grid">
             <div class="testimonial-card reveal">
                 <div class="stars">★★★★★</div>
-                <blockquote>"The push-up counter is surprisingly accurate. Having money on the line makes you actually do them instead of snoozing the alarm."</blockquote>
+                <blockquote>"I set a 6AM deadline with $25 on the line. Haven't missed a morning workout in 3 weeks. My alarm doesn't stand a chance anymore."</blockquote>
                 <div class="testimonial-author">
                     <div class="testimonial-avatar">MR</div>
                     <div><div class="testimonial-name">Mike R.</div><div class="testimonial-role">21-day streak</div></div>
@@ -480,7 +545,7 @@
             </div>
             <div class="testimonial-card reveal">
                 <div class="stars">★★★★★</div>
-                <blockquote>"My roommate and I did a 2-week running competition. I ran more that month than the entire previous year. This app is dangerous in the best way."</blockquote>
+                <blockquote>"Started a running comp with my roommate. He talked so much trash. I beat him by 12 miles and he had to pay up. Best $20 I ever made."</blockquote>
                 <div class="testimonial-author">
                     <div class="testimonial-avatar">JL</div>
                     <div><div class="testimonial-name">Jess L.</div><div class="testimonial-role">Competition winner</div></div>
@@ -488,7 +553,7 @@
             </div>
             <div class="testimonial-card reveal">
                 <div class="stars">★★★★★</div>
-                <blockquote>"Simple concept, perfect execution. Set a goal, put stakes on it, show up. I haven't missed a day in 3 weeks."</blockquote>
+                <blockquote>"I've tried every habit app. This is the only one that worked because it's the only one with consequences. When you might lose money, you show up."</blockquote>
                 <div class="testimonial-author">
                     <div class="testimonial-avatar">DW</div>
                     <div><div class="testimonial-name">Derek W.</div><div class="testimonial-role">Daily user</div></div>
@@ -499,8 +564,8 @@
 
     <!-- Final CTA -->
     <section class="final-cta" id="download">
-        <h2>Stop planning.<br><span style="color:var(--gold)">Start committing.</span></h2>
-        <p>Free to download. Free to use. Stakes are always optional.</p>
+        <h2>You already know<br><span style="color:var(--gold)">what you need to do.</span></h2>
+        <p>Stop thinking about it. Download EOS, set your goal, put something on the line, and become the person you keep saying you'll be. Free to download. Stakes are optional — but they work.</p>
         <div class="hero-ctas" style="position:relative">
             <a href="https://apps.apple.com/app/the-eos/id6758569221" class="btn-primary">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>

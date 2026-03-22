@@ -1783,6 +1783,10 @@ app.post("/objectives/check-missed", async (req, res) => {
             const userTimezone = user?.timezone || "America/New_York";
             const currentTime = getCurrentTimeInTimezone(userTimezone);
             const today = getTodayInTimezone(userTimezone);
+            
+            // Skip if no deadline set (user removed it — stakes paused)
+            if (!user.objective_deadline) continue;
+            
             const deadline = parseDeadlineTime(user.objective_deadline);
             
             // Skip if deadline hasn't passed yet
@@ -4125,7 +4129,7 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         // Handle objective upserts to user_objectives table
         if (typeof pushups_enabled === "boolean" || typeof pushups_count === "number") {
             const targetValue = pushups_count ?? 50;
-            const enabled = pushups_enabled ?? true;
+            const enabled = pushups_enabled ?? false;
             
             await supabase
                 .from("user_objectives")
@@ -4162,10 +4166,10 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         if (objective_type) updateData.objective_type = objective_type;
         if (objective_count) updateData.objective_count = objective_count;
         if (objective_schedule) updateData.objective_schedule = objective_schedule;
-        if (objective_deadline) updateData.objective_deadline = objective_deadline;
+        if ('objective_deadline' in req.body) updateData.objective_deadline = objective_deadline;
         if (typeof missed_goal_payout === "number") { 
             updateData.missed_goal_payout = missed_goal_payout; 
-            if (missed_goal_payout > 0) updateData.payout_committed = true;
+            if (missed_goal_payout > 0) updateData.payout_committed = true; 
         }
         if (timezone) updateData.timezone = timezone;
         // Handle settings_locked_until - allow null to clear the lock
@@ -4735,6 +4739,100 @@ app.post('/compete/start', async (req, res) => {
     }
 });
 
+// Cancel/end a competition (creator only — refunds all participants)
+app.post('/compete/cancel', async (req, res) => {
+    try {
+        const { userId, competitionId } = req.body;
+        
+        if (!userId || !competitionId) {
+            return res.status(400).json({ error: 'Missing userId or competitionId' });
+        }
+        
+        const { data: comp, error: compErr } = await supabase
+            .from('competitions')
+            .select('*')
+            .eq('id', competitionId)
+            .single();
+        
+        if (compErr || !comp) {
+            return res.status(404).json({ error: 'Competition not found' });
+        }
+        
+        if (comp.creator_user_id !== userId) {
+            return res.status(403).json({ error: 'Only the creator can cancel this competition' });
+        }
+        
+        if (comp.status === 'completed') {
+            return res.status(400).json({ error: 'Competition has already ended' });
+        }
+        
+        // Refund all participants if buy-ins were locked (active competitions)
+        if (comp.status === 'active') {
+            const { data: participants } = await supabase
+                .from('competition_participants')
+                .select('user_id, buy_in_amount, buy_in_locked')
+                .eq('competition_id', competitionId)
+                .eq('status', 'active');
+            
+            for (const p of (participants || [])) {
+                if (p.buy_in_locked && parseFloat(p.buy_in_amount) > 0) {
+                    const refundCents = Math.round(parseFloat(p.buy_in_amount) * 100);
+                    const { data: user } = await supabase
+                        .from('users').select('balance_cents').eq('id', p.user_id).single();
+                    const newBal = (user?.balance_cents || 0) + refundCents;
+                    await supabase.from('users').update({ balance_cents: newBal }).eq('id', p.user_id);
+                    console.log(`🏆 Refunded $${p.buy_in_amount} to ${p.user_id}`);
+                }
+            }
+        }
+        
+        // Mark competition as cancelled
+        await supabase.from('competitions')
+            .update({ status: 'completed', completed_at: new Date().toISOString() })
+            .eq('id', competitionId);
+        
+        console.log(`🏆 Competition "${comp.name}" cancelled by creator ${userId}`);
+        
+        // Email all participants about cancellation
+        try {
+            const { data: participants } = await supabase
+                .from('competition_participants')
+                .select('user_id')
+                .eq('competition_id', competitionId)
+                .eq('status', 'active');
+            
+            const buyIn = parseFloat(comp.buy_in_amount) || 0;
+            
+            for (const p of (participants || [])) {
+                const { data: pUser } = await supabase
+                    .from('users').select('email, full_name').eq('id', p.user_id).single();
+                if (!pUser?.email) continue;
+                
+                const refundNote = buyIn > 0 && comp.status === 'active'
+                    ? ` Your $${buyIn} entry has been refunded to your EOS balance.`
+                    : '';
+                
+                await emailTransporter.sendMail({
+                    from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+                    to: pUser.email,
+                    subject: `Competition "${comp.name}" has been cancelled`,
+                    text: `Hi ${pUser.full_name || 'there'}, the competition "${comp.name}" has been ended early by the creator.${refundNote} Thanks for participating!`,
+                    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">Competition Cancelled</h2><p>Hi ${pUser.full_name || 'there'},</p><p>The competition <strong>"${comp.name}"</strong> has been ended early by the creator.${refundNote}</p><p>Thanks for participating!</p><p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p></div>`
+                });
+                console.log(`📧 Cancellation email sent to ${pUser.email}`);
+            }
+        } catch (emailErr) {
+            console.error('Cancellation email error (non-fatal):', emailErr.message);
+        }
+        
+        res.json({ success: true });
+        
+    } catch (error) {
+        console.error('Cancel competition error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // List competitions for a user
 app.get('/compete/user/:userId', async (req, res) => {
     try {
@@ -4880,9 +4978,10 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 // Single objective type — sort by date for streak
                 const sorted = allSessions.sort((a, b) => a.session_date.localeCompare(b.session_date));
                 for (const s of sorted) {
+                    // Always count reps/miles for cumulative scoring
+                    totalCount += parseFloat(s.completed_count) || 0;
                     if (s.status === 'completed') {
                         daysCompleted++;
-                        totalCount += parseFloat(s.completed_count) || 0;
                         currentStreak++;
                     } else {
                         currentStreak = 0;
@@ -5016,9 +5115,9 @@ app.post('/compete/check-completed', async (req, res) => {
                     }
                 } else {
                     for (const s of allSessions) {
+                        totalCount += parseFloat(s.completed_count) || 0;
                         if (s.status === 'completed') {
                             daysCompleted++;
-                            totalCount += parseFloat(s.completed_count) || 0;
                         }
                     }
                 }

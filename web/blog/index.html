@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOS Blog — Fitness Habits, Accountability & Morning Routines</title>
+    <meta name="description" content="EOS Blog — Science-backed guides on building fitness habits, morning routines, accountability, and staying consistent with workouts.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --gold: #D9A600;
+            --gold-light: rgba(217, 166, 0, 0.08);
+            --gold-medium: rgba(217, 166, 0, 0.25);
+            --gold-dark: #B38F00;
+            --dark: #0A0A0A;
+            --gray: #888;
+            --light-gray: #1a1a1a;
+            --white: #ffffff;
+        }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: #080808;
+            color: var(--white);
+            overflow-x: hidden;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            padding: 18px 0;
+            transition: all 0.3s ease;
+            background: transparent;
+        }
+        nav.scrolled {
+            background: rgba(5,5,5,0.9);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(217,166,0,0.1);
+        }
+        .nav-container {
+            max-width: 1200px; margin: 0 auto; padding: 0 32px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .logo-section { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+        .logo-img { height: 36px; width: 36px; border-radius: 10px; }
+        .logo-text { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 800; color: var(--gold); letter-spacing: -0.5px; }
+        .nav-links { display: flex; list-style: none; gap: 32px; align-items: center; }
+        .nav-links a { color: var(--white); text-decoration: none; font-size: 14px; font-weight: 500; opacity: 0.7; transition: opacity 0.3s; }
+        .nav-links a:hover { opacity: 1; }
+        .nav-cta {
+            background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+            color: var(--dark) !important; opacity: 1 !important;
+            padding: 10px 24px; border-radius: 50px; font-weight: 700 !important; font-size: 13px !important;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .nav-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(217,166,0,0.3); }
+        .nav-signin { color: var(--gold) !important; font-weight: 600 !important; opacity: 1 !important; }
+        .mobile-toggle { display: none; flex-direction: column; gap: 5px; cursor: pointer; }
+        .mobile-toggle span { width: 24px; height: 2px; background: var(--white); transition: 0.3s; }
+
+        .page-hero {
+            padding: 140px 32px 72px;
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(ellipse at 20% 30%, rgba(217,166,0,0.08) 0%, transparent 55%),
+                radial-gradient(ellipse at 80% 70%, rgba(217,166,0,0.05) 0%, transparent 45%);
+        }
+        .page-hero::before {
+            content: ''; position: absolute; inset: 0;
+            background-image:
+                linear-gradient(rgba(217,166,0,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(217,166,0,0.03) 1px, transparent 1px);
+            background-size: 80px 80px;
+            mask-image: radial-gradient(ellipse at center, black 25%, transparent 75%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 25%, transparent 75%);
+            pointer-events: none;
+        }
+        .page-hero-inner {
+            max-width: 720px; margin: 0 auto; text-align: center; position: relative; z-index: 1;
+        }
+        .page-hero h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: clamp(36px, 6vw, 52px);
+            font-weight: 800;
+            letter-spacing: -1.5px;
+            line-height: 1.1;
+            margin-bottom: 20px;
+        }
+        .page-hero h1 .gold {
+            background: linear-gradient(135deg, var(--gold), #f0c040);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .page-hero p {
+            font-size: 17px;
+            color: var(--gray);
+            line-height: 1.65;
+        }
+
+        .blog-section {
+            flex: 1;
+            padding: 0 32px 100px;
+        }
+        .blog-grid {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .blog-card {
+            display: flex;
+            flex-direction: column;
+            text-decoration: none;
+            color: inherit;
+            background: var(--light-gray);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 20px;
+            padding: 28px;
+            min-height: 100%;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+        }
+        .blog-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            padding: 1px;
+            background: linear-gradient(135deg, transparent 40%, rgba(217,166,0,0.15) 50%, transparent 60%);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            opacity: 0;
+            transition: opacity 0.35s ease;
+            pointer-events: none;
+        }
+        .blog-card:hover {
+            transform: translateY(-6px);
+            border-color: transparent;
+            box-shadow:
+                0 0 0 1px rgba(217,166,0,0.2),
+                0 20px 50px rgba(0,0,0,0.45),
+                0 0 60px rgba(217,166,0,0.12);
+        }
+        .blog-card:hover::before {
+            opacity: 1;
+            background: linear-gradient(135deg, rgba(217,166,0,0.35), rgba(179,143,0,0.2), rgba(240,192,64,0.25));
+        }
+
+        .blog-card-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .category-tag {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--gold);
+            background: var(--gold-light);
+            border: 1px solid var(--gold-medium);
+            padding: 6px 12px;
+            border-radius: 999px;
+        }
+        .read-time {
+            font-size: 13px;
+            color: var(--gray);
+            font-weight: 500;
+        }
+        .blog-card h2 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 700;
+            line-height: 1.35;
+            letter-spacing: -0.3px;
+            margin-bottom: 12px;
+            transition: color 0.25s ease;
+        }
+        .blog-card:hover h2 {
+            color: #f0d060;
+        }
+        .blog-card .excerpt {
+            font-size: 14px;
+            color: var(--gray);
+            line-height: 1.65;
+            flex: 1;
+            margin-bottom: 20px;
+        }
+        .read-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gold);
+            margin-top: auto;
+        }
+        .read-link svg { transition: transform 0.25s ease; }
+        .blog-card:hover .read-link svg { transform: translateX(4px); }
+
+        footer {
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding: 40px 32px; text-align: center;
+            margin-top: auto;
+        }
+        footer p { font-size: 13px; color: var(--gray); }
+        footer a { color: var(--gold); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+
+        .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.8s ease, transform 0.8s ease; }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+            .nav-links.active {
+                display: flex; flex-direction: column;
+                position: absolute; top: 70px; left: 0; right: 0;
+                background: rgba(5,5,5,0.95); padding: 24px; gap: 20px;
+                backdrop-filter: blur(20px);
+            }
+            .mobile-toggle { display: flex; }
+            .blog-grid { grid-template-columns: 1fr; }
+            .page-hero { padding-top: 120px; }
+        }
+    </style>
+</head>
+<body>
+
+    <nav id="navbar">
+        <div class="nav-container">
+            <a href="/" class="logo-section">
+                <img src="/eos-logo.png" alt="EOS" class="logo-img">
+                <span class="logo-text">EOS</span>
+            </a>
+            <ul class="nav-links">
+                <li><a href="/blog">Blog</a></li>
+                <li><a href="/portal" class="nav-signin">Sign In</a></li>
+                <li><a href="https://apps.apple.com/app/the-eos/id6758569221" class="nav-cta">Download</a></li>
+            </ul>
+            <div class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('active')" aria-label="Menu">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+    </nav>
+
+    <header class="page-hero">
+        <div class="page-hero-inner reveal">
+            <h1><span class="gold">EOS</span> Blog</h1>
+            <p>Guides, science, and honest advice on building fitness habits that actually stick.</p>
+        </div>
+    </header>
+
+    <main class="blog-section">
+        <div class="blog-grid">
+            <a href="/blog/wake-up-early.html" class="blog-card reveal">
+                <div class="blog-card-meta">
+                    <span class="category-tag">Morning Routine</span>
+                    <span class="read-time">7 min read</span>
+                </div>
+                <h2>How to Actually Wake Up Early and Stop Hitting Snooze</h2>
+                <p class="excerpt">Your alarm isn't the problem. Your motivation is. Here's how putting real stakes on your morning changes everything.</p>
+                <span class="read-link">Read article <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+            </a>
+
+            <a href="/blog/accountability-science.html" class="blog-card reveal">
+                <div class="blog-card-meta">
+                    <span class="category-tag">Habits</span>
+                    <span class="read-time">8 min read</span>
+                </div>
+                <h2>The Science of Accountability: Why You Can't Do It Alone</h2>
+                <p class="excerpt">Research shows you're 95% more likely to hit your goals when someone else is watching. Here's why — and how to use it.</p>
+                <span class="read-link">Read article <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+            </a>
+
+            <a href="/blog/fitness-competitions.html" class="blog-card reveal">
+                <div class="blog-card-meta">
+                    <span class="category-tag">Fitness</span>
+                    <span class="read-time">6 min read</span>
+                </div>
+                <h2>How Fitness Competitions With Friends Actually Make You Stronger</h2>
+                <p class="excerpt">Your friend group has an untapped superpower: competitive drive. Learn how friendly bets and competitions transform lazy weeks into personal records.</p>
+                <span class="read-link">Read article <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+            </a>
+
+            <a href="/blog/morning-routine" class="blog-card reveal">
+                <div class="blog-card-meta">
+                    <span class="category-tag">Morning Routine</span>
+                    <span class="read-time">9 min read</span>
+                </div>
+                <h2>The 5AM Morning Routine That Successful People Won't Shut Up About</h2>
+                <p class="excerpt">Everyone talks about morning routines. Nobody talks about what actually gets you out of bed. Hint: it's not willpower.</p>
+                <span class="read-link">Read article <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+            </a>
+
+            <a href="/blog/commitment-stakes" class="blog-card reveal">
+                <div class="blog-card-meta">
+                    <span class="category-tag">Mindset</span>
+                    <span class="read-time">7 min read</span>
+                </div>
+                <h2>Why Putting Money on Your Goals Is the Smartest Thing You'll Ever Do</h2>
+                <p class="excerpt">Behavioral economists at Yale discovered something powerful: pre-commitment changes behavior. Here's how to use it for fitness.</p>
+                <span class="read-link">Read article <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+            </a>
+
+            <a href="/blog/workout-consistency" class="blog-card reveal">
+                <div class="blog-card-meta">
+                    <span class="category-tag">Fitness</span>
+                    <span class="read-time">8 min read</span>
+                </div>
+                <h2>How to Stay Consistent With Workouts When Motivation Dies</h2>
+                <p class="excerpt">Motivation is a lie. Systems, stakes, and social pressure are what actually keep you in the gym. Build a framework that doesn't rely on feelings.</p>
+                <span class="read-link">Read article <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></span>
+            </a>
+        </div>
+    </main>
+
+    <footer>
+        <p>© 2026 The EOS · <a href="/blog/about">About the Team</a> · <a href="/terms">Terms of Service</a> · <a href="mailto:connect@live-eos.com">Contact</a></p>
+        <p style="margin-top:8px;font-size:11px;opacity:0.4">Dawn of Better Habits</p>
+    </footer>
+
+    <script>
+        window.addEventListener('scroll', () => {
+            document.getElementById('navbar').classList.toggle('scrolled', window.scrollY > 50);
+        });
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1 });
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>

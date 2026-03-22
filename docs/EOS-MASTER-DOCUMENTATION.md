@@ -1,10 +1,94 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: March 16, 2026
-> Version: 3.5 - Server Migration, Competitions, Invite System
+> Last Updated: March 21, 2026
+> Version: 4.0 - App Store Live, Website Redesign, Blog, Competition Fixes
 
 ---
 
-## 🆕 Latest Updates (Mar 16, 2026) - Server Migration & Major Features
+## 🆕 Latest Updates (Mar 17-21, 2026) - App Store Launch & Polish
+
+### App Store Approved & Live ✅
+- **Version 1.0 Build 6** approved and live on App Store
+- **Version 1.2** created for screenshot/metadata updates
+- Forced dark mode app-wide (`preferredColorScheme(.dark)`) to ensure consistent display for Apple reviewers
+- Contest rules page added (Guideline 5.3.2 compliance)
+- Apple disclaimer on all competition leaderboards and contest rules
+- Updated App Review Notes with StickK/StepBet precedent references
+
+### Website Full Redesign
+- Dark theme with gold accents, scroll-triggered animations, floating gold orbs/particles
+- EOS logo watermark in hero at 20% opacity
+- Grid pattern background, section glow dividers
+- New copy: "Dawn of Better Habits", competitive/accountability-focused messaging
+- Sign In link in nav, Blog link added
+- Responsive mobile design
+- Deployed at `live-eos.com`
+
+### Blog & SEO (6 Articles + About Page)
+- **Blog index**: `live-eos.com/blog/`
+- **About/Team page**: `live-eos.com/blog/about` — establishes E-E-A-T for Google
+- **6 SEO-optimized articles**:
+  1. `/blog/wake-up-early` — Morning accountability, early alarms
+  2. `/blog/accountability-science` — Psychology of accountability partners
+  3. `/blog/fitness-competitions` — Competing with friends for consistency
+  4. `/blog/morning-routine` — 5AM routine framework
+  5. `/blog/commitment-stakes` — Behavioral economics of pre-commitment
+  6. `/blog/workout-consistency` — Systems over motivation
+- All articles have: JSON-LD Article schema, author attribution to "The EOS Team", canonical URLs, Open Graph tags, meta robots
+- `robots.txt` created (allows all crawlers including AI bots)
+- `sitemap.xml` updated with all 11 pages
+- Google Search Console verified and sitemap submitted
+
+### Competition Scoring Fix
+- **Cumulative scoring bug fixed**: Was only counting reps from fully completed sessions. Now counts ALL reps/miles regardless of daily completion status
+- Both leaderboard endpoint and check-completed endpoint fixed
+- Leaderboard now shows real-time progress during competitions
+
+### Competition Strava Webhook
+- Strava webhook now processes runs for users in active run/both competitions even without individual run objective enabled
+- Manual Strava entries rejected (`activity.manual === true`)
+
+### New User Defaults Changed
+- New users no longer have pushups auto-enabled
+- `pushupsEnabled` defaults to `false` — users must set their own objectives
+- Start Pushup Session button always visible on main screen regardless of objective settings
+
+### Deadline Removal Feature
+- Users can now fully remove their deadline (set to null)
+- Confirmation alert: "Removing deadlines will pause daily stake deductions..."
+- `check-missed` cron skips users with null deadline — no deductions fire
+- Competitions unaffected by personal deadline changes
+
+### Competition UI Additions
+- Start Pushup Session button added to competition leaderboard view
+- Only shows for pushup/both type competitions
+
+### Notification Duplicate Fix
+- Fixed double notifications by clearing ALL objective notification IDs (daily + all weekday) before scheduling new ones
+
+### Pushup Motion Capture Improvements
+- Specific joint tracking (nose, wrists, elbows) instead of random confident point
+- Signal smoothing with 5-frame rolling average
+- Better Y-position thresholds (0.4 down, 0.55 up)
+
+### Anti-Cheat
+- Strava pace check: rejects activities faster than 4:00/mile
+- Manual Strava entries blocked
+
+### Key Files Changed
+| File | Changes |
+|------|---------|
+| `ContentView.swift` | Dark mode, contest rules, pushup button always visible, deadline removal, comp pushup session, notification fix, motion cap |
+| `morning_wouldApp.swift` | `preferredColorScheme(.dark)`, gold segmented controls |
+| `SplashView.swift` | "Dawn of Better Habits" tagline |
+| `server.js` | Cumulative scoring fix, deadline null support, Strava webhook comp support, manual entry block, pace check |
+| `branding/eos-website-improved.html` | Full redesign |
+| `web/blog/*` | 6 blog posts + index + about page |
+| `web/terms.html` | Apple disclaimer added |
+| `Eos.xcodeproj` | Version 1.2, build numbers |
+
+---
+
+## Previous Updates (Mar 16, 2026) - Server Migration & Major Features
 
 ### Server Migration
 - **Old server**: `143.198.143.204` (decommissioned)

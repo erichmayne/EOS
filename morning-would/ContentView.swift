@@ -32,10 +32,7 @@ class ObjectiveSettings: ObservableObject {
     }
     
     init() {
-        // Load from UserDefaults with sensible defaults
-        // Note: bool(forKey:) returns false if key doesn't exist, so we check object(forKey:) first
-        self.pushupsEnabled = defaults.object(forKey: "pushupsEnabled") != nil 
-            ? defaults.bool(forKey: "pushupsEnabled") : true
+        self.pushupsEnabled = defaults.bool(forKey: "pushupsEnabled")
         self.pushupsIsSet = defaults.bool(forKey: "pushupsIsSet")
         self.runEnabled = defaults.bool(forKey: "runEnabled")
         self.runIsSet = defaults.bool(forKey: "runIsSet")
@@ -44,10 +41,8 @@ class ObjectiveSettings: ObservableObject {
         self.scheduleIsSet = defaults.bool(forKey: "scheduleIsSet")
     }
     
-    /// Refresh all values from UserDefaults (call after external updates like sign-in)
     func refreshFromDefaults() {
-        pushupsEnabled = defaults.object(forKey: "pushupsEnabled") != nil 
-            ? defaults.bool(forKey: "pushupsEnabled") : true
+        pushupsEnabled = defaults.bool(forKey: "pushupsEnabled")
         pushupsIsSet = defaults.bool(forKey: "pushupsIsSet")
         runEnabled = defaults.bool(forKey: "runEnabled")
         runIsSet = defaults.bool(forKey: "runIsSet")
@@ -359,8 +354,7 @@ struct ContentView: View {
                         .frame(maxWidth: 350)
                         .padding(.horizontal)
 
-                        // Action button - show pushup session if pushups enabled
-                        if objectiveSettings.pushupsEnabled {
+                        // Action button - always available for pushup tracking
                         Button(action: {
                             showPushUpSession = true
                         }) {
@@ -388,7 +382,6 @@ struct ContentView: View {
                             )
                             .shadow(color: Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.3)), radius: 10, x: 0, y: 5)
                             }
-                        }
 
                         // Navigation buttons - triangle layout
                         VStack(spacing: 10) {
@@ -848,6 +841,8 @@ struct PushUpSessionView: View {
     @StateObject private var cameraViewModel = CameraViewModel()
     @State private var sessionCount = 0
     @State private var isStaging = true
+    @State private var isCalibrating = false
+    @State private var calibrationCountdown = 0
     @State private var showCompletionBanner = false
     @AppStorage("userId") private var userId: String = ""
 
@@ -885,20 +880,56 @@ struct PushUpSessionView: View {
                                 )
                             }
                             
-                            Text("Position yourself in frame")
-                                .font(.system(.title2, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.white)
-                                .padding()
-                                .background(
-                                    RoundedRectangle(cornerRadius: 15)
-                                        .fill(Color.black.opacity(0.7))
-                                )
+                            // Positioning guide
+                            VStack(spacing: 16) {
+                                Text("Setup Guide")
+                                    .font(.system(.title3, design: .rounded, weight: .bold))
+                                    .foregroundStyle(Color.white)
+                                
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "iphone.gen3")
+                                            .font(.title3)
+                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                            .frame(width: 30)
+                                        Text("Prop phone 3-5 ft away, facing you")
+                                            .font(.system(.subheadline, design: .rounded))
+                                            .foregroundStyle(Color.white.opacity(0.9))
+                                    }
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "person.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                            .frame(width: 30)
+                                        Text("Your head & upper body should be visible")
+                                            .font(.system(.subheadline, design: .rounded))
+                                            .foregroundStyle(Color.white.opacity(0.9))
+                                    }
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "arrow.up.arrow.down")
+                                            .font(.title3)
+                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                            .frame(width: 30)
+                                        Text("Do 1 slow rep to calibrate, then go")
+                                            .font(.system(.subheadline, design: .rounded))
+                                            .foregroundStyle(Color.white.opacity(0.9))
+                                    }
+                                }
+                            }
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.black.opacity(0.8))
+                            )
+                            .padding(.horizontal, 20)
 
                             Button(action: {
                                 isStaging = false
-                                cameraViewModel.startTracking()
+                                isCalibrating = true
+                                calibrationCountdown = 1
+                                cameraViewModel.startCalibration()
                             }) {
-                                Text("Press to begin count")
+                                Text("Start Calibration Rep")
                                     .font(.system(.headline, design: .rounded))
                                     .foregroundStyle(Color.black)
                                     .padding(.horizontal, 40)
@@ -909,6 +940,40 @@ struct PushUpSessionView: View {
                                     )
                             }
                         }
+                        .padding(.bottom, 80)
+                    } else if isCalibrating {
+                        VStack(spacing: 16) {
+                            Text("Do 1 slow pushup now")
+                                .font(.system(.title2, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color.white)
+                            
+                            // Animated arrow showing up/down motion
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 40, weight: .bold))
+                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                .symbolEffect(.pulse, options: .repeating)
+                            
+                            Text("Go all the way down, then back up")
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundStyle(Color.white.opacity(0.7))
+                            
+                            if cameraViewModel.calibrationComplete {
+                                Text("Calibrated! Starting count...")
+                                    .font(.system(.headline, design: .rounded, weight: .bold))
+                                    .foregroundStyle(Color.green)
+                                    .onAppear {
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                                            isCalibrating = false
+                                            cameraViewModel.startTracking()
+                                        }
+                                    }
+                            }
+                        }
+                        .padding(28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(Color.black.opacity(0.8))
+                        )
                         .padding(.bottom, 100)
                     } else {
                         VStack(spacing: 10) {
@@ -1090,6 +1155,7 @@ struct ObjectiveSettingsView: View {
     @State private var showLockConfirmation: Bool = false
     @State private var showQuickLockConfirmation: Bool = false
     @State private var showStravaRequiredAlert: Bool = false
+    @State private var showUnsetDeadlineConfirm: Bool = false
     
     // Success feedback
     @State private var showSuccessBanner: Bool = false
@@ -1417,8 +1483,8 @@ struct ObjectiveSettingsView: View {
                         // Set or Update
                         setSchedule()
                     } else {
-                        // Unset
-                        unsetSchedule()
+                        // Unset - show confirmation
+                        showUnsetDeadlineConfirm = true
                     }
                 }) {
                     HStack(spacing: 4) {
@@ -1844,6 +1910,14 @@ struct ObjectiveSettingsView: View {
             } message: {
                 Text("Connect Strava in your Profile to track run objectives. Go to Profile → Account → Strava.")
             }
+            .alert("Remove Deadline?", isPresented: $showUnsetDeadlineConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Yes, Remove", role: .destructive) {
+                    unsetSchedule()
+                }
+            } message: {
+                Text("Removing your deadline will pause daily stake deductions from your balance for missing your workout objectives. This will not affect stakes set for competitions. Do you want to proceed?")
+            }
             .overlay(alignment: .top) {
                 if showSuccessBanner {
                     HStack(spacing: 8) {
@@ -2056,11 +2130,11 @@ struct ObjectiveSettingsView: View {
     private func unsetSchedule() {
         isSavingSchedule = true
         print("📅 Unsetting schedule")
-        
-        // Reset schedule to defaults on backend
+
+        // Clear deadline on backend - null deadline means no missed check fires
         let body: [String: Any] = [
             "objective_schedule": "daily",
-            "objective_deadline": "22:00"  // Default to 10 PM
+            "objective_deadline": NSNull()
         ]
         
         saveObjectiveToBackend(body: body) { success in
@@ -2227,6 +2301,14 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var currentFrame: UIImage?
     @Published var pushupCount: Int = 0
     @Published var isTracking = false
+    @Published var isCalibrating = false
+    @Published var calibrationComplete = false
+    
+    private var calibrationMinY: CGFloat = 1.0
+    private var calibrationMaxY: CGFloat = 0.0
+    private var calibratedDownThreshold: CGFloat = 0.4
+    private var calibratedUpThreshold: CGFloat = 0.55
+    private var calibrationFrameCount: Int = 0
 
     private var captureSession: AVCaptureSession?
     private var videoOutput = AVCaptureVideoDataOutput()
@@ -2251,7 +2333,16 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
     }
 
+    func startCalibration() {
+        isCalibrating = true
+        calibrationComplete = false
+        calibrationMinY = 1.0
+        calibrationMaxY = 0.0
+        calibrationFrameCount = 0
+    }
+    
     func startTracking() {
+        isCalibrating = false
         isTracking = true
     }
 
@@ -2297,14 +2388,43 @@ final class CameraViewModel: NSObject, ObservableObject {
                 self.currentFrame = uiImage
             }
 
-            if isTracking {
+            if isCalibrating || isTracking {
                 poseEstimator.detectPose(in: cgImage) { [weak self] keypoints in
-                    self?.processPoseForPushups(keypoints: keypoints)
+                    if self?.isCalibrating == true {
+                        self?.processCalibrationFrame(keypoints: keypoints)
+                    } else {
+                        self?.processPoseForPushups(keypoints: keypoints)
+                    }
                 }
             }
         }
     }
 
+    private func processCalibrationFrame(keypoints: [VNRecognizedPoint]) {
+        let confidentPoints = keypoints.filter { $0.confidence > 0.3 }
+        guard !confidentPoints.isEmpty else { return }
+        
+        let headPoint = confidentPoints.max(by: { $0.location.y < $1.location.y })!
+        let y = headPoint.location.y
+        
+        calibrationMinY = min(calibrationMinY, y)
+        calibrationMaxY = max(calibrationMaxY, y)
+        calibrationFrameCount += 1
+        
+        let range = calibrationMaxY - calibrationMinY
+        
+        // Need enough frames and a meaningful range of motion to confirm calibration
+        if calibrationFrameCount > 30 && range > 0.08 {
+            // Set thresholds at 35% and 65% of the observed range
+            calibratedDownThreshold = calibrationMinY + range * 0.35
+            calibratedUpThreshold = calibrationMinY + range * 0.65
+            
+            DispatchQueue.main.async {
+                self.calibrationComplete = true
+            }
+        }
+    }
+    
     private var noseHistory: [CGFloat] = []
     
     private func processPoseForPushups(keypoints: [VNRecognizedPoint]) {
@@ -2325,11 +2445,11 @@ final class CameraViewModel: NSObject, ObservableObject {
         if noseHistory.count > 5 { noseHistory.removeFirst() }
         let smoothedY = noseHistory.reduce(0, +) / CGFloat(noseHistory.count)
         
-        if smoothedY < 0.4 {
+        if smoothedY < calibratedDownThreshold {
             if !poseEstimator.wasInUpPosition {
                 poseEstimator.wasInUpPosition = true
             }
-        } else if smoothedY > 0.55 && poseEstimator.wasInUpPosition {
+        } else if smoothedY > calibratedUpThreshold && poseEstimator.wasInUpPosition {
             poseEstimator.wasInUpPosition = false
             DispatchQueue.main.async {
                 self.pushupCount += 1
@@ -6303,6 +6423,10 @@ struct CompetitionDetailView: View {
     @State private var showInsufficientFunds: Bool = false
     @State private var startError: String? = nil
     @State private var insufficientNames: String = ""
+    @State private var showPushUpSession: Bool = false
+    @State private var todayPushUpCount: Int = 0
+    @State private var showCancelConfirm: Bool = false
+    @State private var isCancelling: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     
@@ -6339,6 +6463,17 @@ struct CompetitionDetailView: View {
                 Button("OK") { }
             } message: {
                 Text(insufficientNames)
+            }
+            .sheet(isPresented: $showPushUpSession) {
+                PushUpSessionView(todayPushUpCount: $todayPushUpCount, objective: 0, isInCompetition: true)
+            }
+            .alert("End Competition?", isPresented: $showCancelConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("End & Refund All", role: .destructive) {
+                    cancelCompetition()
+                }
+            } message: {
+                Text("All stakes will be returned in full to every participant. This cannot be undone.")
             }
         }
     }
@@ -6538,6 +6673,21 @@ struct CompetitionDetailView: View {
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
+                
+                // Cancel button (creator only, lobby)
+                Section {
+                    Button(action: { showCancelConfirm = true }) {
+                        HStack {
+                            Image(systemName: "xmark.circle")
+                            Text("Cancel Competition")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        }
+                        .foregroundStyle(Color.red)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowBackground(Color.clear)
             }
         }
     }
@@ -6671,6 +6821,52 @@ struct CompetitionDetailView: View {
             }
             .listRowBackground(Color.white)
             
+            // Start Pushup Session button
+            if (competition?["objectiveType"] as? String) == "pushups" || (competition?["objectiveType"] as? String) == "both" {
+                Section {
+                    Button(action: { showPushUpSession = true }) {
+                        HStack {
+                            Image(systemName: "figure.strengthtraining.traditional")
+                                .font(.title3)
+                            Text("Start Pushup Session")
+                                .font(.system(.headline, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(goldColor)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+            
+            // End Competition button (creator only, active)
+            if (competition?["creatorUserId"] as? String) == userId && status == "active" {
+                Section {
+                    Button(action: { showCancelConfirm = true }) {
+                        HStack {
+                            if isCancelling {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "xmark.circle")
+                            }
+                            Text("End Competition")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        }
+                        .foregroundStyle(Color.red)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isCancelling)
+                }
+                .listRowBackground(Color.clear)
+            }
+            
             // Powered by Strava + Apple disclaimer
             Section {
                 VStack(spacing: 12) {
@@ -6776,6 +6972,33 @@ struct CompetitionDetailView: View {
         }
         .padding(.vertical, 4)
         .background(isMe ? goldColor.opacity(0.05) : Color.clear)
+    }
+    
+    private func cancelCompetition() {
+        isCancelling = true
+        
+        guard let url = URL(string: "https://api.live-eos.com/compete/cancel") else {
+            isCancelling = false
+            return
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId, "competitionId": competitionId])
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isCancelling = false
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   json["success"] as? Bool == true {
+                    self.dismiss()
+                } else {
+                    self.startError = "Failed to cancel competition"
+                }
+            }
+        }.resume()
     }
     
     private func startCompetition() {
@@ -6892,7 +7115,7 @@ struct SignInView: View {
     @AppStorage("objectiveType") private var objectiveType: String = "pushups"
     
     // Multi-objective settings
-    @AppStorage("pushupsEnabled") private var pushupsEnabled: Bool = true
+    @AppStorage("pushupsEnabled") private var pushupsEnabled: Bool = false
     @AppStorage("runEnabled") private var runEnabled: Bool = false
     @AppStorage("runDistance") private var runDistance: Double = 2.0
     

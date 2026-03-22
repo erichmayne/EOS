@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About the EOS Team — Fitness Accountability App | EOS</title>
+    <meta name="description" content="Meet the EOS team — developers, fitness enthusiasts, and behavioral science nerds dedicated to building the most effective accountability tool for fitness habits.">
+    <meta name="author" content="The EOS Team">
+    <meta name="robots" content="index, follow">
+    <meta name="googlebot" content="index, follow, max-snippet:-1">
+    <link rel="canonical" href="https://live-eos.com/blog/about">
+    <meta property="og:title" content="About the EOS Team">
+    <meta property="og:description" content="Developers, fitness enthusiasts, and behavioral science nerds building the most effective accountability tool for fitness.">
+    <meta property="og:url" content="https://live-eos.com/blog/about">
+    <meta property="og:type" content="website">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "The EOS Team",
+        "url": "https://live-eos.com",
+        "description": "Developers and fitness enthusiasts building accountability tools that actually work.",
+        "foundingDate": "2026",
+        "sameAs": ["https://apps.apple.com/app/the-eos/id6758569221"]
+    }
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --gold: #D9A600; --gold-light: rgba(217,166,0,0.08); --gold-medium: rgba(217,166,0,0.25); }
+        body { font-family: 'Inter', -apple-system, sans-serif; background: #080808; color: #fff; }
+        a { color: var(--gold); text-decoration: none; }
+        
+        nav { padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto; }
+        .nav-logo { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 800; color: var(--gold); text-decoration: none; display: flex; align-items: center; gap: 10px; }
+        .nav-logo img { height: 32px; width: 32px; border-radius: 8px; }
+        .nav-links { display: flex; gap: 24px; align-items: center; font-size: 14px; }
+        .nav-links a { color: #888; transition: color 0.3s; }
+        .nav-links a:hover { color: #fff; }
+        .nav-cta { background: linear-gradient(135deg, var(--gold), #B38F00); color: #080808 !important; padding: 8px 20px; border-radius: 50px; font-weight: 700; font-size: 13px; }
+
+        .about-hero { max-width: 800px; margin: 80px auto 0; padding: 0 32px; text-align: center; }
+        .about-hero h1 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: clamp(32px, 5vw, 52px); font-weight: 800; line-height: 1.1; letter-spacing: -1.5px; margin-bottom: 20px; }
+        .about-hero h1 span { color: var(--gold); }
+        .about-hero .subtitle { font-size: 18px; color: #888; line-height: 1.7; max-width: 600px; margin: 0 auto; }
+
+        .about-content { max-width: 720px; margin: 60px auto; padding: 0 32px; }
+        .about-content h2 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 28px; font-weight: 800; margin: 48px 0 16px; letter-spacing: -0.5px; }
+        .about-content h2:first-child { margin-top: 0; }
+        .about-content p { font-size: 16px; color: rgba(255,255,255,0.8); line-height: 1.8; margin-bottom: 20px; }
+        .about-content strong { color: var(--gold); font-weight: 600; }
+
+        .values-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin: 40px 0; }
+        .value-card { background: #1a1a1a; border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 28px; }
+        .value-icon { font-size: 28px; margin-bottom: 12px; }
+        .value-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+        .value-card p { font-size: 14px; color: #888; line-height: 1.6; margin: 0; }
+
+        .team-section { background: #0d0d0d; border-radius: 20px; padding: 40px; margin: 48px 0; border: 1px solid rgba(255,255,255,0.06); }
+        .team-section h3 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+        .team-section .team-role { color: var(--gold); font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+        .team-section p { font-size: 15px; color: rgba(255,255,255,0.75); line-height: 1.8; }
+
+        .cta-box { text-align: center; margin: 60px 0; padding: 48px 32px; background: #0d0d0d; border-radius: 20px; border: 1px solid rgba(217,166,0,0.15); }
+        .cta-box h2 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 28px; font-weight: 800; margin-bottom: 12px; }
+        .cta-box p { color: #888; margin-bottom: 24px; }
+        .cta-btn { display: inline-block; background: linear-gradient(135deg, var(--gold), #B38F00); color: #080808; padding: 14px 32px; border-radius: 50px; font-weight: 700; font-size: 15px; transition: transform 0.3s; }
+        .cta-btn:hover { transform: translateY(-2px); }
+
+        footer { border-top: 1px solid rgba(255,255,255,0.05); padding: 32px; text-align: center; font-size: 13px; color: #888; margin-top: 40px; }
+
+        @media (max-width: 768px) {
+            .values-grid { grid-template-columns: 1fr; }
+            .nav-links { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="nav-logo"><img src="/eos-logo.png" alt="EOS">EOS</a>
+        <div class="nav-links">
+            <a href="/blog">Blog</a>
+            <a href="/portal">Sign In</a>
+            <a href="https://apps.apple.com/app/the-eos/id6758569221" class="nav-cta">Download</a>
+        </div>
+    </nav>
+
+    <div class="about-hero">
+        <h1>We build tools that make <span>quitting harder than showing up.</span></h1>
+        <p class="subtitle">EOS is built by a small team of developers and fitness obsessives who got tired of setting goals and breaking them. So we built something that makes that really expensive to do.</p>
+    </div>
+
+    <div class="about-content">
+        <h2>Why EOS Exists</h2>
+        <p>We've all been there. You set the alarm for 5:30 AM. You tell yourself tonight is different. Tomorrow you're going to wake up, work out, and start becoming the person you keep promising yourself you'll be.</p>
+        <p>Then the alarm goes off and you hit snooze nine times.</p>
+        <p>The problem isn't motivation. It's that <strong>there's no cost to quitting</strong>. Breaking a promise to yourself is free. Skipping the gym has no consequences. Rolling over and going back to sleep costs you nothing — except another day of being exactly where you are.</p>
+        <p>EOS changes that equation. When your morning alarm means your money is on the line, you get out of bed. When your friend can see your score on a leaderboard, you do the pushups. When missing your deadline means your stakes go to someone else, you find a way to show up.</p>
+        <p>It's not punishment. It's <strong>skin in the game</strong>. The same behavioral economics that Fortune 500 companies use to drive performance, applied to your 6 AM pushup goal.</p>
+
+        <h2>What We Believe</h2>
+        <div class="values-grid">
+            <div class="value-card">
+                <div class="value-icon">🎯</div>
+                <h3>Accountability Over Motivation</h3>
+                <p>Motivation is temporary. Systems and stakes are permanent. We build tools around what actually works, not what sounds inspirational.</p>
+            </div>
+            <div class="value-card">
+                <div class="value-icon">🤝</div>
+                <h3>Social Pressure Is a Feature</h3>
+                <p>Your friends seeing your score isn't embarrassing — it's the point. Competition and transparency drive consistency better than any notification.</p>
+            </div>
+            <div class="value-card">
+                <div class="value-icon">💰</div>
+                <h3>Skin in the Game</h3>
+                <p>Optional, voluntary, and entirely your choice. But when your own money is behind your goals, you stop treating them like suggestions.</p>
+            </div>
+        </div>
+
+        <h2>The Team</h2>
+        <div class="team-section">
+            <h3>The EOS Team</h3>
+            <div class="team-role">Builders, lifters, runners, and accountability nerds</div>
+            <p>We're a small team of software engineers and fitness enthusiasts based in the U.S. We built EOS because we needed it ourselves. Every feature — from the push-up camera counter to the competition leaderboards to the commitment stakes system — came from a real problem we had and solved for ourselves first.</p>
+            <p>We test every feature by using it. We set our own stakes. We compete against each other. We've lost money to each other when we missed workouts. That's how we know it works.</p>
+            <p>Every blog post, guide, and piece of advice on this site comes from real experience building and using the platform. We don't write fluff. We write what we know — because we live it every morning at 5:30 AM when the alarm goes off and we have $25 riding on whether we get out of bed.</p>
+        </div>
+
+        <div class="cta-box">
+            <h2>Ready to hold yourself accountable?</h2>
+            <p>Free to download. Free to use. Stakes are always optional — but they work.</p>
+            <a href="https://apps.apple.com/app/the-eos/id6758569221" class="cta-btn">Download EOS</a>
+        </div>
+    </div>
+
+    <footer>
+        <p>© 2026 The EOS · <a href="/terms">Terms of Service</a> · <a href="mailto:connect@live-eos.com">Contact</a> · <a href="/blog">Blog</a></p>
+    </footer>
+</body>
+</html>
