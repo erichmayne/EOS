@@ -5644,6 +5644,7 @@ struct CompeteView: View {
 struct CreateCompetitionView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("userId") private var userId: String = ""
+    @AppStorage("profileCashHoldings") private var profileCashHoldings: Double = 0
     
     var onCreated: () -> Void
     
@@ -5652,10 +5653,17 @@ struct CreateCompetitionView: View {
     @State private var scoringType: String = "consistency"
     @State private var durationDays: Int = 7
     @State private var pushupTarget: Int = 50
+    @State private var pushupTargetText: String = "50"
     @State private var runDistance: Double = 2.0
+    @State private var runDistanceText: String = "2.0"
     @State private var buyInAmount: Double = 0
+    @State private var buyInText: String = ""
     @State private var isCreating: Bool = false
     @State private var createdCode: String? = nil
+    @AppStorage("profileEmail") private var profileEmail: String = ""
+    @StateObject private var depositService = DepositPaymentService()
+    @State private var isDepositing: Bool = false
+    @State private var depositError: String?
     @State private var createError: String? = nil
     @State private var showBuyInAgreement: Bool = false
     
@@ -5922,25 +5930,23 @@ struct CreateCompetitionView: View {
                 
                 Spacer()
                 
-                Menu {
-                    Button("Free") { buyInAmount = 0 }
-                    Button("$5") { buyInAmount = 5 }
-                    Button("$10") { buyInAmount = 10 }
-                    Button("$20") { buyInAmount = 20 }
-                    Button("$50") { buyInAmount = 50 }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(buyInAmount == 0 ? "Free" : String(format: "$%.0f", buyInAmount))
-                            .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(buyInAmount > 0 ? goldColor : Color.black)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(buyInAmount > 0 ? goldColor.opacity(0.1) : Color.gray.opacity(0.1))
-                    .cornerRadius(8)
+                HStack(spacing: 4) {
+                    Text("$")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black.opacity(0.5))
+                    TextField("0", text: $buyInText)
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                        .keyboardType(.decimalPad)
+                        .frame(width: 60)
+                        .onChange(of: buyInText) { _, newValue in
+                            buyInAmount = Double(newValue) ?? 0
+                        }
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
             }
             .padding(.vertical, 4)
         } header: {
@@ -5951,7 +5957,64 @@ struct CreateCompetitionView: View {
         }
         .listRowBackground(Color.white)
         
-        // 6. Create button — using onTapGesture for reliable tap handling in Form
+        // 6. Balance check for buy-in competitions
+        if buyInAmount > 0 {
+            Section {
+                HStack {
+                    Text("Your Balance")
+                        .font(.system(.subheadline, design: .rounded))
+                    Spacer()
+                    Text(String(format: "$%.2f", profileCashHoldings))
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(profileCashHoldings >= buyInAmount ? Color.green : Color.red)
+                }
+
+                if profileCashHoldings < buyInAmount {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("You need $\(Int(buyInAmount)) to enter. Add balance to continue.")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.red)
+
+                        if isDepositing {
+                            HStack(spacing: 8) {
+                                ProgressView().scaleEffect(0.7)
+                                Text("Processing deposit…")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.gray)
+                            }
+                        } else {
+                            HStack(spacing: 8) {
+                                ForEach([5, 10, 20, 50], id: \.self) { amt in
+                                    Button(action: { quickDeposit(Double(amt)) }) {
+                                        Text("$\(amt)")
+                                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                                            .foregroundStyle(goldColor)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 8)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(goldColor.opacity(0.1))
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        if let depositError {
+                            Text(depositError)
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.red)
+                        }
+                    }
+                }
+            } header: {
+                Text("Balance")
+            }
+            .listRowBackground(Color.white)
+        }
+
+        // 7. Create button — using onTapGesture for reliable tap handling in Form
         Section {
             HStack {
                 Spacer()
@@ -5969,16 +6032,15 @@ struct CreateCompetitionView: View {
                 .padding(.vertical, 14)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(name.isEmpty || isCreating ? Color.gray.opacity(0.3) : goldColor)
+                        .fill(canCreate ? goldColor : Color.gray.opacity(0.3))
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    if !name.isEmpty && !isCreating {
-                        if buyInAmount > 0 {
-                            showBuyInAgreement = true
-                        } else {
-                            createCompetition()
-                        }
+                    guard canCreate else { return }
+                    if buyInAmount > 0 {
+                        showBuyInAgreement = true
+                    } else {
+                        createCompetition()
                     }
                 }
                 Spacer()
@@ -5986,6 +6048,59 @@ struct CreateCompetitionView: View {
         }
         .listRowBackground(Color.clear)
         .listRowInsets(EdgeInsets())
+    }
+    
+    private var canCreate: Bool {
+        !name.isEmpty && !isCreating && (buyInAmount == 0 || profileCashHoldings >= buyInAmount)
+    }
+    
+    private func quickDeposit(_ amount: Double) {
+        guard !userId.isEmpty else { return }
+        depositError = nil
+        isDepositing = true
+        
+        depositService.preparePaymentSheet(amount: amount, userId: userId) { error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.isDepositing = false
+                    self.depositError = error.localizedDescription
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                self.depositService.present { result in
+                    if case .completed = result {
+                        self.profileCashHoldings += amount
+                        self.syncBalanceToBackend()
+                    }
+                    self.isDepositing = false
+                }
+            }
+        }
+    }
+    
+    private func syncBalanceToBackend() {
+        guard !userId.isEmpty, !profileEmail.isEmpty else { return }
+        
+        let body: [String: Any] = [
+            "email": profileEmail,
+            "balanceCents": Int((profileCashHoldings * 100).rounded())
+        ]
+        
+        guard let url = URL(string: "/users/profile", relativeTo: StripeConfig.backendURL) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                print("✅ Balance synced to backend after deposit")
+            } else {
+                print("❌ Balance sync failed: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            }
+        }.resume()
     }
     
     @ViewBuilder
@@ -5997,23 +6112,23 @@ struct CreateCompetitionView: View {
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.black.opacity(0.6))
                     
-                    Menu {
-                        ForEach([0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0], id: \.self) { miles in
-                            Button(String(format: "%.1f miles", miles)) { runDistance = miles }
-                        }
-                    } label: {
-                        HStack {
-                            Text(String(format: "%.1f mi", runDistance))
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
+                    HStack(spacing: 4) {
+                        TextField("2.0", text: $runDistanceText)
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .foregroundStyle(Color.black)
+                            .keyboardType(.decimalPad)
+                            .frame(width: 50)
+                            .onChange(of: runDistanceText) { _, newValue in
+                                runDistance = Double(newValue) ?? 2.0
+                            }
+                        Text("mi")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.5))
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
                 }
                 Spacer()
             }
@@ -6026,23 +6141,23 @@ struct CreateCompetitionView: View {
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.black.opacity(0.6))
                     
-                    Menu {
-                        ForEach([10, 15, 20, 25, 30, 40, 50, 60, 75, 100], id: \.self) { count in
-                            Button("\(count) pushups") { pushupTarget = count }
-                        }
-                    } label: {
-                        HStack {
-                            Text("\(pushupTarget)")
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
+                    HStack(spacing: 4) {
+                        TextField("50", text: $pushupTargetText)
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .foregroundStyle(Color.black)
+                            .keyboardType(.numberPad)
+                            .frame(width: 50)
+                            .onChange(of: pushupTargetText) { _, newValue in
+                                pushupTarget = Int(newValue) ?? 50
+                            }
+                        Text("reps")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.5))
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
                 }
                 Spacer()
             }
@@ -6427,6 +6542,7 @@ struct CompetitionDetailView: View {
     @State private var todayPushUpCount: Int = 0
     @State private var showCancelConfirm: Bool = false
     @State private var isCancelling: Bool = false
+    @State private var messageCopied: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     
@@ -6490,6 +6606,36 @@ struct CompetitionDetailView: View {
         }
     }
     
+    private var lobbyShareMessage: String {
+        let comp = competition ?? [:]
+        let inviteCode = comp["inviteCode"] as? String ?? ""
+        let objType = comp["objectiveType"] as? String ?? "pushups"
+        let scoring = comp["scoringType"] as? String ?? "consistency"
+        let durationDays = comp["durationDays"] as? Int ?? 7
+        let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        
+        let objWord = objType == "run" ? "running" : (objType == "both" ? "workouts" : "pushups")
+        let hookLine: String
+        if scoring == "cumulative" {
+            let mostWord = objType == "run" ? "miles" : objWord
+            hookLine = "Whoever does the most \(mostWord) in \(durationDays) days wins the pot."
+        } else {
+            hookLine = "Whoever hits their daily goal the most days wins."
+        }
+        let buyInLine = buyIn > 0 ? " $\(Int(buyIn)) entry." : ""
+        
+        return "Join my \(durationDays)-day \(objWord) competition on EOS!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
+    }
+    
+    private func objectiveTypeDisplay(_ objType: String, targetValue: Double) -> String {
+        switch objType {
+        case "run": return "Run (\(String(format: "%.1f", targetValue)) mi/day)"
+        case "pushups": return "Pushups (\(Int(targetValue)) reps/day)"
+        case "both": return "Pushups + Run"
+        default: return objType.capitalized
+        }
+    }
+    
     private var lobbyContent: some View {
         let comp = competition ?? [:]
         let creatorId = comp["creatorUserId"] as? String ?? ""
@@ -6499,38 +6645,52 @@ struct CompetitionDetailView: View {
         let inviteCode = comp["inviteCode"] as? String ?? ""
         let objType = comp["objectiveType"] as? String ?? "pushups"
         let scoring = comp["scoringType"] as? String ?? "consistency"
+        let targetValue = comp["targetValue"] as? Double ?? 0
         
         return List {
-            // Lobby header
+            // Share message (tap to copy)
             Section {
-                VStack(spacing: 16) {
-                    Image(systemName: "hourglass")
-                        .font(.system(size: 36))
-                        .foregroundStyle(Color.orange)
+                VStack(spacing: 12) {
+                    Text("Tap to copy & share:")
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.gray)
                     
-                    Text("Waiting to Start")
-                        .font(.system(.title3, design: .rounded, weight: .bold))
+                    Button(action: {
+                        UIPasteboard.general.string = lobbyShareMessage
+                        withAnimation { messageCopied = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation { messageCopied = false }
+                        }
+                    }) {
+                        Text(lobbyShareMessage)
+                            .font(.system(.subheadline, design: .rounded))
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(.white)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(goldColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(messageCopied ? Color.green : Color.clear, lineWidth: 2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    if messageCopied {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.green)
+                            Text("Copied to clipboard — paste in iMessage, WhatsApp, etc.")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(Color.green)
+                        }
+                    }
                     
                     Text(isCreator ? "Share the code and tap Start when everyone is ready." : "Waiting for the creator to start the competition.")
-                        .font(.system(.subheadline, design: .rounded))
+                        .font(.system(.caption, design: .rounded))
                         .foregroundStyle(Color.gray)
                         .multilineTextAlignment(.center)
-                    
-                    // Invite code
-                    HStack(spacing: 8) {
-                        Text(inviteCode)
-                            .font(.system(size: 28, weight: .bold, design: .monospaced))
-                            .foregroundStyle(goldColor)
-                            .minimumScaleFactor(0.6)
-                            .lineLimit(1)
-                        Button(action: { UIPasteboard.general.string = inviteCode }) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.subheadline)
-                                .foregroundStyle(goldColor)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.vertical, 4)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
@@ -6542,7 +6702,7 @@ struct CompetitionDetailView: View {
                 HStack {
                     Label("Type", systemImage: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
                     Spacer()
-                    Text(objType == "run" ? "Run" : (objType == "both" ? "Both" : "Pushups"))
+                    Text(objectiveTypeDisplay(objType, targetValue: targetValue))
                         .foregroundStyle(Color.gray)
                 }
                 HStack {
@@ -6550,6 +6710,19 @@ struct CompetitionDetailView: View {
                     Spacer()
                     Text(scoring == "cumulative" ? "Total Count" : "Days Completed")
                         .foregroundStyle(Color.gray)
+                }
+                if scoring == "consistency" && targetValue > 0 {
+                    HStack {
+                        Label("Daily Target", systemImage: "target")
+                        Spacer()
+                        if objType == "run" {
+                            Text("\(String(format: "%.1f", targetValue)) miles")
+                                .foregroundStyle(Color.gray)
+                        } else if objType == "pushups" {
+                            Text("\(Int(targetValue)) pushups")
+                                .foregroundStyle(Color.gray)
+                        }
+                    }
                 }
                 HStack {
                     Label("Duration", systemImage: "clock.fill")
@@ -6559,7 +6732,7 @@ struct CompetitionDetailView: View {
                 }
                 if buyIn > 0 {
                     HStack {
-                        Label("Buy-In", systemImage: "dollarsign.circle.fill")
+                        Label("Entry", systemImage: "dollarsign.circle.fill")
                         Spacer()
                         Text("$\(Int(buyIn)) per player")
                             .foregroundStyle(goldColor)

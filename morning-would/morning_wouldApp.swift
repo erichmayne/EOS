@@ -12,6 +12,7 @@ import StripePaymentSheet
 @main
 struct EOSApp: App {
     let persistenceController = PersistenceController.shared
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @State private var isShowingSplash = true
 
     init() {
@@ -24,18 +25,34 @@ struct EOSApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                ContentView()
-                    .environment(\.managedObjectContext, persistenceController.container.viewContext)
-                    .preferredColorScheme(.dark)
-                
-                // Splash screen overlay
+                if hasCompletedOnboarding {
+                    ContentView()
+                        .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                        .preferredColorScheme(.dark)
+                } else if !isShowingSplash {
+                    OnboardingView()
+                        .preferredColorScheme(.light)
+                        .transition(.opacity)
+                }
+
                 if isShowingSplash {
                     SplashViewWithLogo(isShowingSplash: $isShowingSplash)
                         .transition(.opacity)
                 }
             }
+            .animation(.easeInOut(duration: 0.3), value: isShowingSplash)
+            .animation(.easeInOut(duration: 0.3), value: hasCompletedOnboarding)
+            .onAppear {
+                if !hasCompletedOnboarding {
+                    let d = UserDefaults.standard
+                    let existingUser = d.bool(forKey: "isSignedIn")
+                        || d.bool(forKey: "pushupsEnabled")
+                        || d.bool(forKey: "runEnabled")
+                        || !(d.string(forKey: "userId") ?? "").isEmpty
+                    if existingUser { hasCompletedOnboarding = true }
+                }
+            }
             .onOpenURL { url in
-                // Handle Stripe payment redirects
                 let stripeHandled = StripeAPI.handleURLCallback(with: url)
                 if stripeHandled {
                     print("✅ Stripe handled URL: \(url)")
