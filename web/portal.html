@@ -320,6 +320,31 @@
             padding: 24px;
         }
         
+        .strava-banner {
+            max-width: 800px;
+            margin: 20px auto 0;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 500;
+            text-align: center;
+            display: none;
+        }
+        
+        .strava-banner.success {
+            background: rgba(22, 163, 74, 0.08);
+            color: #16A34A;
+            border: 1px solid rgba(22, 163, 74, 0.2);
+            display: block;
+        }
+        
+        .strava-banner.error {
+            background: rgba(239, 68, 68, 0.08);
+            color: #DC2626;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            display: block;
+        }
+        
         .invite-link {
             text-align: center;
             margin-top: 20px;
@@ -379,6 +404,7 @@
             </div>
         </div>
         
+        <div id="strava-banner" class="strava-banner"></div>
         <div class="container">
             <div class="balance-card">
                 <div class="balance-label">Available Balance</div>
@@ -605,7 +631,27 @@
             });
         }
         
+        // Check for Strava connection status in URL
+        function checkStravaStatus() {
+            const params = new URLSearchParams(window.location.search);
+            const strava = params.get('strava');
+            const banner = document.getElementById('strava-banner');
+            if (!strava || !banner) return;
+            
+            if (strava === 'connected') {
+                banner.textContent = '✅ Strava connected successfully! You can close this page and return to the app.';
+                banner.className = 'strava-banner success';
+            } else if (strava === 'already_linked') {
+                banner.textContent = '⚠️ This Strava account is already linked to another EOS user. Each Strava account can only be connected to one EOS account.';
+                banner.className = 'strava-banner error';
+            } else if (strava === 'error') {
+                banner.textContent = '❌ Failed to connect Strava. Please try again from the app.';
+                banner.className = 'strava-banner error';
+            }
+        }
+        
         // Initialize
+        checkStravaStatus();
         checkSession();
     </script>
 </body>

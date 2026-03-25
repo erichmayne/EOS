@@ -894,6 +894,20 @@ struct OnboardingView: View {
                         .foregroundStyle(Color.gray)
                         .multilineTextAlignment(.center)
                 }
+                
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.caption)
+                    Text("All runs must be started and ended on Strava. Completed runs are automatically logged toward your EOS goals and competitions.")
+                        .font(.system(.caption, design: .rounded))
+                }
+                .foregroundStyle(Color.black.opacity(0.5))
+                .multilineTextAlignment(.leading)
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.gray.opacity(0.08))
+                )
 
                 Button(action: connectStrava) {
                     HStack(spacing: 8) {

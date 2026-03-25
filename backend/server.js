@@ -1881,11 +1881,38 @@ app.post("/objectives/check-missed", async (req, res) => {
             
             const userBalance = user?.balance_cents || 0;
             const payoutAmount = user?.missed_goal_payout || 0;
-            if (userBalance <= 0 || payoutAmount <= 0) continue;
+            
+            if (payoutAmount <= 0) continue;
             
             const payoutAmountCents = Math.round(payoutAmount * 100);
             const destination = user.committed_destination || user.payout_destination || "charity";
             const recipientId = user.committed_recipient_id || user.custom_recipient_id;
+            
+            // Zero balance: mark as missed but don't attempt deduction or transfer
+            if (userBalance <= 0) {
+                await supabase.from("objective_sessions").update({ 
+                    status: "missed", 
+                    payout_triggered: true
+                }).eq("user_id", user.id).eq("session_date", today);
+                
+                await supabase.from("users").update({ 
+                    settings_locked_until: null
+                }).eq("id", user.id);
+                
+                console.log(`⚠️ User ${user.email} missed objectives but has $0 balance — marked as missed, no deduction`);
+                
+                results.push({
+                    userId: user.id,
+                    sessionId: session?.id,
+                    missedObjectives: missedObjectives,
+                    amount: 0,
+                    destination: "none (zero balance)",
+                    stripeTransferId: null,
+                    newBalanceCents: 0,
+                    settingsLockReset: true
+                });
+                continue;
+            }
             
             let stripeTransferId = null;
             
@@ -2531,6 +2558,18 @@ app.get('/strava/callback', async (req, res) => {
             return res.redirect('https://live-eos.com/portal?strava=error');
         }
         
+        // Check if another user already has this Strava account linked
+        const { data: existingUsers } = await supabase
+            .from('users')
+            .select('id, email')
+            .eq('strava_connection_id', stravaConn.id)
+            .neq('id', userId);
+        
+        if (existingUsers && existingUsers.length > 0) {
+            console.log(`🚫 Strava account already linked to ${existingUsers[0].email}, rejecting for ${userId}`);
+            return res.redirect('https://live-eos.com/portal?strava=already_linked');
+        }
+        
         // Link to user
         await supabase
             .from('users')
@@ -2620,12 +2659,13 @@ app.post('/strava/webhook', async (req, res) => {
         }
         
         // Find user linked to this Strava connection
-        const { data: user, error: userError } = await supabase
+        const { data: users, error: userError } = await supabase
             .from('users')
             .select('*')
             .eq('strava_connection_id', stravaConn.id)
-            .single();
+            .limit(1);
         
+        const user = users?.[0];
         if (userError || !user) {
             console.log(`No user found for Strava connection ${stravaConn.id}`);
             return;
@@ -2767,13 +2807,14 @@ app.post('/strava/webhook', async (req, res) => {
         
         let sessionError;
         if (existingRunSession) {
-            // Update existing run session (accumulate distance if multiple runs)
-            const newCompleted = Math.max(existingRunSession.completed_count || 0, runMiles);
+            // Accumulate distance from multiple runs in the same day
+            const newCompleted = parseFloat((existingRunSession.completed_count || 0)) + runMiles;
+            const newRounded = parseFloat(newCompleted.toFixed(2));
             const { error } = await supabase
                 .from('objective_sessions')
                 .update({
-                    completed_count: newCompleted,
-                    status: newCompleted >= goalMiles ? 'completed' : 'pending'
+                    completed_count: newRounded,
+                    status: goalMiles > 0 && newRounded >= goalMiles ? 'completed' : (goalMiles === 0 ? 'completed' : 'pending')
                 })
                 .eq('id', existingRunSession.id);
             sessionError = error;
@@ -3724,13 +3765,8 @@ app.post("/objectives/complete/:userId", async (req, res) => {
             }
         }
         
-        // Check if already completed
-        if (session.status === "completed") {
-            return res.json({ message: "Already completed", session });
-        }
-        
-        // Update session
-        const newCount = completedCount || session.target_count;
+        // Always allow count to increase, even if already completed
+        const newCount = Math.max(completedCount || 0, session.completed_count || 0);
         const isComplete = newCount >= session.target_count;
         
         const { data: updated, error: updateError } = await supabase
@@ -4103,7 +4139,7 @@ app.get("/objectives/settings/:userId", async (req, res) => {
             run_distance: objMap.run?.target ?? 2.0,
             // Schedule settings (still on users table)
             objective_schedule: user.objective_schedule ?? "daily",
-            objective_deadline: user.objective_deadline ?? "09:00",
+            objective_deadline: user.objective_deadline || null,
             missed_goal_payout: user.missed_goal_payout ?? 0,
             timezone: user.timezone,
             settings_locked_until: user.settings_locked_until
@@ -4210,7 +4246,7 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         
         // 2. Update/create today's sessions for ENABLED objectives only
         const today = new Date().toISOString().slice(0, 10);
-        const newDeadline = objective_deadline || userData.objective_deadline || "09:00:00";
+        const newDeadline = ('objective_deadline' in req.body) ? objective_deadline : (userData.objective_deadline || "09:00:00");
         const newPayoutAmount = (typeof missed_goal_payout === "number") ? missed_goal_payout : (userData.missed_goal_payout || 0);
         
         // Get all enabled objectives for this user
@@ -4264,6 +4300,27 @@ app.post("/objectives/settings/:userId", async (req, res) => {
                 .select()
                 .single();
                 if (created) sessionResults.push(created);
+            }
+        }
+        
+        // Grace period: if deadline already passed today, pre-mark sessions so cron won't deduct
+        if (newDeadline && newDeadline !== "null") {
+            const userTz = userData.timezone || "America/New_York";
+            const currentTime = new Date().toLocaleTimeString("en-US", { 
+                hour: "2-digit", minute: "2-digit", hour12: false, timeZone: userTz 
+            }).replace(/^24:/, "00:");
+            const deadlineHHMM = parseDeadlineTime(newDeadline);
+            
+            if (currentTime > deadlineHHMM) {
+                for (const sess of sessionResults) {
+                    if (!sess.payout_triggered && sess.status === "pending") {
+                        await supabase.from("objective_sessions").update({
+                            status: "grace",
+                            payout_triggered: true
+                        }).eq("id", sess.id);
+                    }
+                }
+                console.log(`⏰ Deadline ${deadlineHHMM} already passed (now ${currentTime} in ${userTz}) — today's sessions marked as grace for user ${userId}`);
             }
         }
         
@@ -4429,7 +4486,7 @@ app.post("/admin/charity-payout/:charityName", async (req, res) => {
 // Create a competition (LOBBY — no money deducted, status = pending)
 app.post('/compete/create', async (req, res) => {
     try {
-        const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue } = req.body;
+        const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue, pushupTarget, runTarget } = req.body;
         
         if (!userId || !name || !objectiveType || !durationDays) {
             return res.status(400).json({ error: 'Missing required fields: userId, name, objectiveType, durationDays' });
@@ -4471,6 +4528,8 @@ app.post('/compete/create', async (req, res) => {
                 status: 'pending',
                 invite_code: inviteCode,
                 target_value: targetValue || 0,
+                pushup_target: pushupTarget || 0,
+                run_target: runTarget || 0,
                 buy_in_amount: buyIn,
                 duration_days: days
             })
@@ -4533,6 +4592,8 @@ app.get('/compete/verify/:code', async (req, res) => {
             endDate: competition.end_date,
             status: competition.status,
             targetValue: competition.target_value || 0,
+            pushupTarget: competition.pushup_target || 0,
+            runTarget: competition.run_target || 0,
             buyInAmount: competition.buy_in_amount,
             durationDays: competition.duration_days || 7,
             creatorUserId: competition.creator_user_id,
@@ -4709,13 +4770,39 @@ app.post('/compete/start', async (req, res) => {
         const startDate = today.toISOString().split('T')[0];
         const endDate = new Date(today.getTime() + durationDays * 86400000).toISOString().split('T')[0];
         
+        const startedAt = new Date().toISOString();
         await supabase.from('competitions')
             .update({
                 status: 'active',
                 start_date: startDate,
-                end_date: endDate
+                end_date: endDate,
+                started_at: startedAt
             })
             .eq('id', competitionId);
+        
+        // Snapshot each participant's current-day counts as baselines
+        for (const p of participants) {
+            const { data: todaySessions } = await supabase
+                .from('objective_sessions')
+                .select('objective_type, completed_count')
+                .eq('user_id', p.user_id)
+                .eq('session_date', startDate);
+            
+            let bPushups = 0, bRun = 0;
+            for (const s of (todaySessions || [])) {
+                if (s.objective_type === 'pushups') bPushups = s.completed_count || 0;
+                if (s.objective_type === 'run') bRun = parseFloat(s.completed_count) || 0;
+            }
+            
+            await supabase.from('competition_participants')
+                .update({ baseline_pushups: bPushups, baseline_run: bRun })
+                .eq('competition_id', competitionId)
+                .eq('user_id', p.user_id);
+            
+            if (bPushups > 0 || bRun > 0) {
+                console.log(`📊 Baseline for ${p.user_id}: pushups=${bPushups}, run=${bRun}`);
+            }
+        }
         
         // Return updated balance for the requesting user
         const { data: updatedUser } = await supabase
@@ -4884,6 +4971,8 @@ app.get('/compete/user/:userId', async (req, res) => {
                 status: comp.status,
                 inviteCode: comp.invite_code,
                 targetValue: comp.target_value || 0,
+                pushupTarget: comp.pushup_target || 0,
+                runTarget: comp.run_target || 0,
                 buyInAmount: comp.buy_in_amount,
                 durationDays: comp.duration_days || 7,
                 creatorUserId: comp.creator_user_id,
@@ -4915,10 +5004,10 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
             return res.status(404).json({ error: 'Competition not found' });
         }
         
-        // Get all active participants with user info
+        // Get all active participants with user info and baselines
         const { data: participants, error: partError } = await supabase
             .from('competition_participants')
-            .select('user_id, users!user_id(full_name, email)')
+            .select('user_id, baseline_pushups, baseline_run, users!user_id(full_name, email)')
             .eq('competition_id', competitionId)
             .eq('status', 'active');
         
@@ -4932,7 +5021,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
             // Query their sessions within the competition date range
             let sessionsQuery = supabase
                 .from('objective_sessions')
-                .select('status, completed_count, session_date, objective_type')
+                .select('status, completed_count, target_count, session_date, objective_type')
                 .eq('user_id', p.user_id)
                 .gte('session_date', competition.start_date)
                 .lte('session_date', competition.end_date);
@@ -4950,23 +5039,38 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
             let currentStreak = 0;
             
             const allSessions = sessions || [];
+            const startDate = competition.start_date;
+            const bPushups = p.baseline_pushups || 0;
+            const bRun = p.baseline_run || 0;
+            const compPushupTarget = competition.pushup_target || 0;
+            const compRunTarget = competition.run_target || 0;
+            
+            // Helper: check if a session meets the COMPETITION target (not personal)
+            function meetsCompTarget(s, adjustedCount) {
+                let target;
+                if (s.objective_type === 'pushups') target = compPushupTarget;
+                else if (s.objective_type === 'run') target = compRunTarget;
+                else target = competition.target_value || 0;
+                return target > 0 ? adjustedCount >= target : adjustedCount > 0;
+            }
             
             if (competition.objective_type === 'both') {
-                // Group sessions by date, day counts only if ALL objective types completed
                 const byDate = {};
                 for (const s of allSessions) {
                     if (!byDate[s.session_date]) byDate[s.session_date] = {};
-                    byDate[s.session_date][s.objective_type] = s;
-                    // Weighted scoring: 1 mile = 100 pts, 1 pushup = 1 pt
-                    const pts = s.objective_type === 'run' 
-                        ? (parseFloat(s.completed_count) || 0) * 100 
-                        : (parseFloat(s.completed_count) || 0);
+                    let count = parseFloat(s.completed_count) || 0;
+                    if (s.session_date === startDate) {
+                        if (s.objective_type === 'pushups') count = Math.max(0, count - bPushups);
+                        if (s.objective_type === 'run') count = Math.max(0, count - bRun);
+                    }
+                    byDate[s.session_date][s.objective_type] = { ...s, _adjustedCount: count };
+                    const pts = s.objective_type === 'run' ? count * 100 : count;
                     totalCount += pts;
                 }
                 const sortedDates = Object.keys(byDate).sort();
                 for (const date of sortedDates) {
                     const dayEntries = byDate[date];
-                    const allDone = Object.values(dayEntries).every(s => s.status === 'completed');
+                    const allDone = Object.values(dayEntries).every(e => meetsCompTarget(e, e._adjustedCount));
                     if (allDone && Object.keys(dayEntries).length >= 2) {
                         daysCompleted++;
                         currentStreak++;
@@ -4975,12 +5079,15 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                     }
                 }
             } else {
-                // Single objective type — sort by date for streak
                 const sorted = allSessions.sort((a, b) => a.session_date.localeCompare(b.session_date));
                 for (const s of sorted) {
-                    // Always count reps/miles for cumulative scoring
-                    totalCount += parseFloat(s.completed_count) || 0;
-                    if (s.status === 'completed') {
+                    let count = parseFloat(s.completed_count) || 0;
+                    if (s.session_date === startDate) {
+                        if (s.objective_type === 'pushups') count = Math.max(0, count - bPushups);
+                        if (s.objective_type === 'run') count = Math.max(0, count - bRun);
+                    }
+                    totalCount += count;
+                    if (meetsCompTarget(s, count)) {
                         daysCompleted++;
                         currentStreak++;
                     } else {
@@ -4991,13 +5098,36 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
             
             score = competition.scoring_type === 'cumulative' ? totalCount : daysCompleted;
             
+            // Extract today's progress, adjusted for baseline on start day
+            const todayStr = new Date().toISOString().split('T')[0];
+            const todaySessions = allSessions.filter(s => s.session_date === todayStr);
+            const todayProgress = {};
+            for (const s of todaySessions) {
+                let completed = parseFloat(s.completed_count) || 0;
+                if (s.session_date === startDate) {
+                    if (s.objective_type === 'pushups') completed = Math.max(0, completed - bPushups);
+                    if (s.objective_type === 'run') completed = Math.max(0, completed - bRun);
+                }
+                let compTarget;
+                if (s.objective_type === 'pushups') compTarget = compPushupTarget;
+                else if (s.objective_type === 'run') compTarget = compRunTarget;
+                else compTarget = competition.target_value || 0;
+                const adjustedStatus = compTarget > 0 && completed >= compTarget ? 'completed' : 'pending';
+                todayProgress[s.objective_type] = {
+                    completed,
+                    target: compTarget,
+                    status: adjustedStatus
+                };
+            }
+            
             leaderboard.push({
                 userId: p.user_id,
                 name: p.users?.full_name || p.users?.email || 'Unknown',
                 score: Math.round(score * 100) / 100,
                 daysCompleted,
                 totalCount: Math.round(totalCount * 100) / 100,
-                streak: currentStreak
+                streak: currentStreak,
+                todayProgress
             });
         }
         
@@ -5007,13 +5137,20 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
         // Assign ranks
         leaderboard.forEach((entry, i) => { entry.rank = i + 1; });
         
-        // Calculate total days in competition
-        const start = new Date(competition.start_date);
-        const end = new Date(competition.end_date);
-        const today = new Date();
-        const totalDays = Math.ceil((end - start) / 86400000);
-        const daysElapsed = Math.min(Math.ceil((today - start) / 86400000), totalDays);
-        const daysRemaining = Math.max(0, Math.ceil((end - today) / 86400000));
+        // Calculate total days and precise time remaining
+        const startedAt = competition.started_at ? new Date(competition.started_at) : new Date(competition.start_date);
+        const endAt = new Date(startedAt.getTime() + (competition.duration_days || 7) * 86400000);
+        const now = new Date();
+        const totalDays = competition.duration_days || Math.ceil((new Date(competition.end_date) - new Date(competition.start_date)) / 86400000);
+        const msElapsed = Math.max(0, now - startedAt);
+        const msRemaining = Math.max(0, endAt - now);
+        const daysElapsed = Math.min(Math.ceil(msElapsed / 86400000), totalDays);
+        const daysRemaining = Math.max(0, Math.ceil(msRemaining / 86400000));
+        const hoursRemaining = Math.max(0, Math.floor(msRemaining / 3600000));
+        const endsAt = endAt.toISOString();
+        
+        let compPushupTarget = competition.pushup_target ?? 0;
+        let compRunTarget = competition.run_target ?? 0;
         
         res.json({
             competition: {
@@ -5026,12 +5163,17 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 status: competition.status,
                 inviteCode: competition.invite_code,
                 targetValue: competition.target_value || 0,
+                pushupTarget: compPushupTarget,
+                runTarget: compRunTarget,
                 buyInAmount: competition.buy_in_amount,
                 durationDays: competition.duration_days || 7,
                 creatorUserId: competition.creator_user_id,
                 totalDays,
                 daysElapsed,
-                daysRemaining
+                daysRemaining,
+                hoursRemaining,
+                startedAt: competition.started_at || competition.start_date,
+                endsAt
             },
             leaderboard
         });
@@ -5044,13 +5186,22 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
 // Cron: check and complete ended competitions, determine winners, pay out
 app.post('/compete/check-completed', async (req, res) => {
     try {
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
         
-        const { data: ended, error } = await supabase
+        // Get all active competitions, then filter by precise end time
+        const { data: activeComps, error } = await supabase
             .from('competitions')
             .select('*')
-            .eq('status', 'active')
-            .lt('end_date', today);
+            .eq('status', 'active');
+        
+        const ended = (activeComps || []).filter(comp => {
+            if (comp.started_at) {
+                const endAt = new Date(new Date(comp.started_at).getTime() + (comp.duration_days || 7) * 86400000);
+                return now >= endAt;
+            }
+            return comp.end_date < today;
+        });
         
         if (error) {
             return res.status(500).json({ error: error.message });
@@ -5063,7 +5214,7 @@ app.post('/compete/check-completed', async (req, res) => {
             // --- Determine the winner via leaderboard calculation ---
             const { data: participants } = await supabase
                 .from('competition_participants')
-                .select('user_id, buy_in_amount')
+                .select('user_id, buy_in_amount, baseline_pushups, baseline_run')
                 .eq('competition_id', comp.id)
                 .eq('status', 'active');
             
@@ -5091,32 +5242,52 @@ app.post('/compete/check-completed', async (req, res) => {
                 
                 const { data: sessions } = await sessionsQuery;
                 const allSessions = sessions || [];
+                const startDate = comp.start_date;
+                const bPushups = p.baseline_pushups || 0;
+                const bRun = p.baseline_run || 0;
                 
                 let daysCompleted = 0;
                 let totalCount = 0;
+                const cPushTarget = comp.pushup_target || 0;
+                const cRunTarget = comp.run_target || 0;
+                
+                function meetsTarget(objType, count) {
+                    let target;
+                    if (objType === 'pushups') target = cPushTarget;
+                    else if (objType === 'run') target = cRunTarget;
+                    else target = comp.target_value || 0;
+                    return target > 0 ? count >= target : count > 0;
+                }
                 
                 if (comp.objective_type === 'both') {
                     const byDate = {};
                     for (const s of allSessions) {
                         if (!byDate[s.session_date]) byDate[s.session_date] = {};
-                        byDate[s.session_date][s.objective_type] = s;
-                        // Weighted: 1 mile = 100 pts, 1 pushup = 1 pt
-                        const pts = s.objective_type === 'run'
-                            ? (parseFloat(s.completed_count) || 0) * 100
-                            : (parseFloat(s.completed_count) || 0);
+                        let count = parseFloat(s.completed_count) || 0;
+                        if (s.session_date === startDate) {
+                            if (s.objective_type === 'pushups') count = Math.max(0, count - bPushups);
+                            if (s.objective_type === 'run') count = Math.max(0, count - bRun);
+                        }
+                        byDate[s.session_date][s.objective_type] = { ...s, _adj: count };
+                        const pts = s.objective_type === 'run' ? count * 100 : count;
                         totalCount += pts;
                     }
                     for (const date of Object.keys(byDate)) {
                         const dayEntries = byDate[date];
-                        const allDone = Object.values(dayEntries).every(s => s.status === 'completed');
+                        const allDone = Object.values(dayEntries).every(e => meetsTarget(e.objective_type, e._adj));
                         if (allDone && Object.keys(dayEntries).length >= 2) {
                             daysCompleted++;
                         }
                     }
                 } else {
                     for (const s of allSessions) {
-                        totalCount += parseFloat(s.completed_count) || 0;
-                        if (s.status === 'completed') {
+                        let count = parseFloat(s.completed_count) || 0;
+                        if (s.session_date === startDate) {
+                            if (s.objective_type === 'pushups') count = Math.max(0, count - bPushups);
+                            if (s.objective_type === 'run') count = Math.max(0, count - bRun);
+                        }
+                        totalCount += count;
+                        if (meetsTarget(s.objective_type, count)) {
                             daysCompleted++;
                         }
                     }

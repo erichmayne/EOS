@@ -4,6 +4,9 @@ import Vision
 import StripePaymentSheet
 import ContactsUI
 import Combine
+import QuickPoseCore
+import QuickPoseSwiftUI
+import QuickPoseCamera
 
 // MARK: - Shared Objective Settings (Observable)
 
@@ -86,6 +89,12 @@ struct ContentView: View {
     @State private var activeCompetition: [String: Any]? = nil
     @State private var compLeaderboard: [[String: Any]] = []
     
+    // Tutorial
+    @AppStorage("hasCompletedTutorial") private var hasCompletedTutorial = false
+    @State private var showTutorial = false
+    @State private var tutorialStep = 0
+    @State private var tutorialFrames: [String: CGRect] = [:]
+    
     // Timer for live countdown updates
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -147,9 +156,12 @@ struct ContentView: View {
             return "No objective today"
         }
 
-        // Check if objective is already met
         if objectiveMet {
             return "✓ Completed"
+        }
+        
+        if !objectiveSettings.scheduleIsSet {
+            return "No deadline set"
         }
 
         let todayDeadline = combineDateWithTodayTime(objectiveDeadline)
@@ -188,6 +200,7 @@ struct ContentView: View {
     }
 
     var body: some View {
+      ZStack {
         NavigationView {
             ZStack {
                 Color.white.ignoresSafeArea()
@@ -221,6 +234,7 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                                     .fill(Color.white)
                                     .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+                                    .tutorialTarget("goals-card")
 
                             VStack(spacing: 16) {
                                 // Show both objectives or single based on what's enabled
@@ -341,13 +355,14 @@ struct ContentView: View {
                                             (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
                                             Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
                                         )
-                                    if shouldShowObjective && hasAnyObjective {
+                                    if shouldShowObjective && hasAnyObjective && objectiveSettings.scheduleIsSet {
                                         let deadline = combineDateWithTodayTime(objectiveDeadline)
                                         Text("Deadline: \(deadline, style: .time)")
                                             .font(.system(.caption, design: .rounded))
                                             .foregroundStyle(Color.black.opacity(0.5))
                                     }
                                 }
+                                .tutorialTarget("timer")
                             }
                             .padding(24)
                         }
@@ -381,57 +396,60 @@ struct ContentView: View {
                                     )
                             )
                             .shadow(color: Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.3)), radius: 10, x: 0, y: 5)
-                            }
+                        }
+                        .tutorialTarget("pushup-button")
 
                         // Navigation buttons - triangle layout
                         VStack(spacing: 10) {
-                            HStack(spacing: 15) {
-                                Button(action: {
-                                    showObjectiveSettings = true
-                                }) {
-                                    HStack {
-                                        Image(systemName: "target")
-                                        Text("My Objective")
-                                    }
-                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                    .foregroundStyle(Color.black)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                    .fill(Color.white)
-                                            )
-                                    )
+                        HStack(spacing: 15) {
+                            Button(action: {
+                                showObjectiveSettings = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "target")
+                                    Text("My Objective")
                                 }
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color.white)
+                                        )
+                                )
+                            }
+                                .tutorialTarget("objective-button")
 
-                                Button(action: {
-                                    showProfileView = true
-                                }) {
-                                    HStack {
-                                        Image(systemName: "person.circle")
-                                        Text("Profile")
-                                        if !profileCompleted {
-                                            Circle()
-                                                .fill(Color.red)
-                                                .frame(width: 8, height: 8)
-                                        }
+                            Button(action: {
+                                showProfileView = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "person.circle")
+                                    Text("Profile")
+                                    if !profileCompleted {
+                                        Circle()
+                                            .fill(Color.red)
+                                            .frame(width: 8, height: 8)
                                     }
-                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                    .foregroundStyle(Color.black)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                    .fill(Color.white)
-                                            )
-                                    )
                                 }
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .fill(Color.white)
+                                        )
+                                )
+                            }
+                                .tutorialTarget("profile-button")
                             }
                             
                             // Compete button - centered below, completing the triangle
@@ -455,6 +473,7 @@ struct ContentView: View {
                                         )
                                 )
                             }
+                            .tutorialTarget("compete-button")
                         }
                     }
 
@@ -466,7 +485,8 @@ struct ContentView: View {
                         .scaledToFit()
                         .frame(height: 14)
                         .opacity(0.7)
-                    .padding(.bottom, 8)
+                        .padding(.bottom, 8)
+                        .tutorialTarget("strava-badge")
                 }
             }
             .sheet(isPresented: $showPushUpSession) {
@@ -517,6 +537,29 @@ struct ContentView: View {
         .onReceive(countdownTimer) { time in
             currentTime = time
         }
+        .onPreferenceChange(TutorialFrameKey.self) { frames in
+            tutorialFrames = frames
+        }
+
+        if showTutorial {
+            TutorialOverlay(
+                currentStep: $tutorialStep,
+                isActive: $showTutorial,
+                frames: tutorialFrames,
+                steps: appTutorialSteps,
+                onComplete: { hasCompletedTutorial = true }
+            )
+            .transition(.opacity)
+        }
+      }
+      .animation(.easeInOut(duration: 0.3), value: showTutorial)
+      .onAppear {
+          if !hasCompletedTutorial {
+              DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                  showTutorial = true
+              }
+            }
+        }
     }
 
     private func checkAndResetDaily() {
@@ -555,11 +598,14 @@ struct ContentView: View {
                     let status = session["status"] as? String ?? "pending"
                     
                     if objType == "run" {
-                        self.todayRunDistance = completedCount
-                        self.hasCompletedTodayRun = (status == "completed")
+                        self.todayRunDistance = max(self.todayRunDistance, completedCount)
+                        self.hasCompletedTodayRun = self.hasCompletedTodayRun || (status == "completed")
                     } else if objType == "pushups" {
-                        self.todayPushUpCount = Int(completedCount)
-                        self.hasCompletedTodayPushUps = (status == "completed")
+                        let serverCount = Int(completedCount)
+                        if serverCount >= self.todayPushUpCount {
+                            self.todayPushUpCount = serverCount
+                        }
+                        self.hasCompletedTodayPushUps = self.hasCompletedTodayPushUps || (status == "completed")
                     }
                 }
             }
@@ -838,192 +884,236 @@ struct PushUpSessionView: View {
     let objective: Int
     var isInCompetition: Bool = false
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var cameraViewModel = CameraViewModel()
-    @State private var sessionCount = 0
+    
+    #if DEBUG
+    var quickPose = QuickPose(sdkKey: "01KMGZKANM1NARDA4QEC0WN06T")
+    #else
+    var quickPose = QuickPose(sdkKey: "01KMHEK59VAAEJXW58WV974VD0")
+    #endif
+    @State private var overlayImage: UIImage?
+    @State private var counter = QuickPoseThresholdCounter(enterThreshold: 0.5, exitThreshold: 0.2)
+    @State private var pushupCount: Int = 0
+    @State private var feedbackText: String?
+    @State private var kneesBentFrames: Int = 0
+    
     @State private var isStaging = true
-    @State private var isCalibrating = false
-    @State private var calibrationCountdown = 0
+    @State private var isCountdown = false
+    @State private var countdownNumber = 3
     @State private var showCompletionBanner = false
     @AppStorage("userId") private var userId: String = ""
 
     var body: some View {
         NavigationView {
             ZStack {
-                Color.black.ignoresSafeArea()
-
-                if let image = cameraViewModel.currentFrame {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+                // Single camera view always active
+                QuickPoseCameraView(useFrontCamera: true, delegate: quickPose)
+                    .ignoresSafeArea()
+                
+                // Overlay only when not staging
+                if !isStaging {
+                    QuickPoseOverlayView(overlayImage: $overlayImage)
                         .ignoresSafeArea()
-                        .scaleEffect(x: -1, y: 1)
+                }
+                
+                // UI layers
+                if isStaging {
+                    stagingUI
+                } else if isCountdown {
+                    countdownUI
+                } else if !showCompletionBanner {
+                    countingUI
                 }
 
+                if showCompletionBanner {
+                    completionUI
+                }
+            }
+            .navigationBarHidden(true)
+            .overlay(alignment: .topTrailing) {
+                closeButton
+            }
+        }
+        .onAppear {
+            quickPose.start(features: [.fitness(.pushUps)], onFrame: { status, image, features, feedback, landmarks in
+                // Compute everything on this thread, then push UI updates to main
+                var newOverlay: UIImage? = nil
+                var newFeedback: String? = nil
+                var newCount: Int? = nil
+                var bentDelta = 0
+                
+                switch status {
+                case .success:
+                    newOverlay = image
+                    if !isStaging && !isCountdown {
+                        var frameBent = false
+                        if let lm = landmarks {
+                            let lh = lm.landmark(forBody: .hip(side: .left))
+                            let lk = lm.landmark(forBody: .knee(side: .left))
+                            let la = lm.landmark(forBody: .ankle(side: .left))
+                            
+                            let rh = lm.landmark(forBody: .hip(side: .right))
+                            let rk = lm.landmark(forBody: .knee(side: .right))
+                            let ra = lm.landmark(forBody: .ankle(side: .right))
+                            
+                            let leftAngle = angleBetweenPoints(
+                                ax: lh.x, ay: lh.y,
+                                bx: lk.x, by: lk.y,
+                                cx: la.x, cy: la.y
+                            )
+                            let rightAngle = angleBetweenPoints(
+                                ax: rh.x, ay: rh.y,
+                                bx: rk.x, by: rk.y,
+                                cx: ra.x, cy: ra.y
+                            )
+                            let bestAngle = max(leftAngle, rightAngle)
+                            if bestAngle < 140 { frameBent = true }
+                        }
+                        
+                        bentDelta = frameBent ? 1 : -2
+                        let projectedBent = max(0, kneesBentFrames + bentDelta)
+                        let legsValid = projectedBent < 10
+                        
+                        if let result = features.values.first {
+                            let counterState = counter.count(result.value)
+                            if legsValid {
+                                newCount = counterState.count
+                            }
+                        }
+                        
+                        if !legsValid {
+                            newFeedback = "Straighten your legs"
+                        }
+                    }
+                    if let fb = feedback.values.first, fb.isRequired {
+                        newFeedback = fb.displayString
+                    }
+                case .noPersonFound:
+                    newFeedback = "Stand in view"
+                case .sdkValidationError:
+                    newFeedback = "SDK validation error"
+                @unknown default:
+                    break
+                }
+                
+                let wasSuccess = newOverlay != nil
+                DispatchQueue.main.async {
+                    overlayImage = newOverlay
+                    if bentDelta != 0 {
+                        kneesBentFrames = max(0, kneesBentFrames + bentDelta)
+                    }
+                    if let count = newCount {
+                        pushupCount = count
+                    }
+                    if let fb = newFeedback {
+                        feedbackText = fb
+                    } else if wasSuccess {
+                        feedbackText = nil
+                    }
+                }
+            })
+        }
+        .onDisappear {
+            quickPose.stop()
+        }
+    }
+    
+    private var stagingUI: some View {
                 VStack {
                     Spacer()
-
-                    if isStaging {
                         VStack(spacing: 20) {
-                            if isInCompetition {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "trophy.fill")
-                                        .font(.caption2)
-                                    Text("Activity will be logged for individual and competition goals")
-                                        .font(.system(.caption2, design: .rounded))
-                                }
-                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.15))
-                                )
-                            }
-                            
-                            // Positioning guide
-                            VStack(spacing: 16) {
-                                Text("Setup Guide")
-                                    .font(.system(.title3, design: .rounded, weight: .bold))
-                                    .foregroundStyle(Color.white)
-                                
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "iphone.gen3")
-                                            .font(.title3)
-                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                            .frame(width: 30)
-                                        Text("Prop phone 3-5 ft away, facing you")
-                                            .font(.system(.subheadline, design: .rounded))
-                                            .foregroundStyle(Color.white.opacity(0.9))
-                                    }
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "person.fill")
-                                            .font(.title3)
-                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                            .frame(width: 30)
-                                        Text("Your head & upper body should be visible")
-                                            .font(.system(.subheadline, design: .rounded))
-                                            .foregroundStyle(Color.white.opacity(0.9))
-                                    }
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "arrow.up.arrow.down")
-                                            .font(.title3)
-                                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                            .frame(width: 30)
-                                        Text("Do 1 slow rep to calibrate, then go")
-                                            .font(.system(.subheadline, design: .rounded))
-                                            .foregroundStyle(Color.white.opacity(0.9))
-                                    }
-                                }
-                            }
-                            .padding(24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.black.opacity(0.8))
-                            )
-                            .padding(.horizontal, 20)
+                if isInCompetition {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trophy.fill").font(.caption2)
+                        Text("Counts for individual + competition goals").font(.system(.caption2, design: .rounded))
+                    }
+                    .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                    .padding(.horizontal, 14).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.15)))
+                }
+                
+                if let feedback = feedbackText {
+                    Text(feedback)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.white)
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.6)))
+                }
+
+                            Text("Position yourself in frame")
+                                .font(.system(.title2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.white)
+                                .padding()
+                    .background(RoundedRectangle(cornerRadius: 15).fill(Color.black.opacity(0.7)))
 
                             Button(action: {
                                 isStaging = false
-                                isCalibrating = true
-                                calibrationCountdown = 1
-                                cameraViewModel.startCalibration()
+                    isCountdown = true
+                    countdownNumber = 3
+                    startCountdown()
                             }) {
-                                Text("Start Calibration Rep")
+                                Text("Press to begin count")
                                     .font(.system(.headline, design: .rounded))
                                     .foregroundStyle(Color.black)
                                     .padding(.horizontal, 40)
                                     .padding(.vertical, 15)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 25)
-                                            .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                    )
+                        .background(RoundedRectangle(cornerRadius: 25).fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
                             }
                         }
-                        .padding(.bottom, 80)
-                    } else if isCalibrating {
-                        VStack(spacing: 16) {
-                            Text("Do 1 slow pushup now")
-                                .font(.system(.title2, design: .rounded, weight: .bold))
-                                .foregroundStyle(Color.white)
-                            
-                            // Animated arrow showing up/down motion
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 40, weight: .bold))
-                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                .symbolEffect(.pulse, options: .repeating)
-                            
-                            Text("Go all the way down, then back up")
-                                .font(.system(.subheadline, design: .rounded))
-                                .foregroundStyle(Color.white.opacity(0.7))
-                            
-                            if cameraViewModel.calibrationComplete {
-                                Text("Calibrated! Starting count...")
-                                    .font(.system(.headline, design: .rounded, weight: .bold))
-                                    .foregroundStyle(Color.green)
-                                    .onAppear {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                                            isCalibrating = false
-                                            cameraViewModel.startTracking()
-                                        }
-                                    }
-                            }
-                        }
-                        .padding(28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color.black.opacity(0.8))
-                        )
                         .padding(.bottom, 100)
-                    } else {
+        }
+    }
+    
+    private var countdownUI: some View {
+        Text("\(countdownNumber)")
+            .font(.system(size: 96, weight: .bold, design: .rounded))
+            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+            .shadow(color: Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.5)), radius: 20)
+    }
+    
+    private var countingUI: some View {
+        VStack {
+            Spacer()
                         VStack(spacing: 10) {
+                if let feedback = feedbackText {
+                    Text(feedback)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                }
                             Text("Pushups")
                                 .font(.system(.headline, design: .rounded))
                                 .foregroundStyle(Color.white)
-
-                            Text("\(cameraViewModel.pushupCount)")
+                Text("\(pushupCount)")
                                 .font(.system(size: 72, weight: .bold, design: .rounded))
                                 .foregroundStyle(Color.white)
-
-                            if cameraViewModel.pushupCount >= objective {
-                                Text("Pushups complete!")
+                if objective > 0 && pushupCount >= objective {
+                    Text("Goal reached!")
                                     .font(.system(.title3, design: .rounded, weight: .medium))
                                     .foregroundStyle(Color.green)
-                                    .padding()
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 15)
-                                            .fill(Color.black.opacity(0.7))
-                                    )
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.7)))
                             }
                         }
                         .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color.black.opacity(0.7))
-                        )
+            .background(RoundedRectangle(cornerRadius: 20).fill(Color.black.opacity(0.7)))
                         .padding(.bottom, 100)
                     }
                 }
 
-                if showCompletionBanner {
-                    VStack {
+    private var completionUI: some View {
                         VStack(spacing: 20) {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 60))
                                 .foregroundStyle(Color.green)
-
                             Text("Great job!")
                                 .font(.system(.title, design: .rounded, weight: .bold))
                                 .foregroundStyle(Color.white)
-
-                            Text("You completed \(cameraViewModel.pushupCount) pushups")
+            Text("You completed \(pushupCount) pushups")
                                 .font(.system(.body, design: .rounded))
                                 .foregroundStyle(Color.white.opacity(0.9))
-
                             Button(action: {
-                                let newCount = todayPushUpCount + cameraViewModel.pushupCount
-                                todayPushUpCount = newCount
-                                syncPushupProgress(count: newCount)
+                let newCount = todayPushUpCount + pushupCount
+                todayPushUpCount = newCount
+                syncPushupProgress(count: newCount)
                                 dismiss()
                             }) {
                                 Text("Done")
@@ -1031,82 +1121,58 @@ struct PushUpSessionView: View {
                                     .foregroundStyle(Color.black)
                                     .padding(.horizontal, 50)
                                     .padding(.vertical, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 25)
-                                            .fill(Color.white)
-                                    )
+                    .background(RoundedRectangle(cornerRadius: 25).fill(Color.white))
                             }
                         }
                         .padding(40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 30)
-                                .fill(Color.black.opacity(0.95))
-                        )
-                    }
-                }
-            }
-            .navigationBarHidden(true)
-            .overlay(alignment: .topTrailing) {
+        .background(RoundedRectangle(cornerRadius: 30).fill(Color.black.opacity(0.95)))
+    }
+    
+    private var closeButton: some View {
                 Button(action: {
-                    if cameraViewModel.pushupCount > 0 {
-                        showCompletionBanner = true
-                    } else {
-                        dismiss()
-                    }
+            if pushupCount > 0 { showCompletionBanner = true } else { dismiss() }
                 }) {
                     Image(systemName: "xmark")
                         .font(.title2)
                         .foregroundStyle(Color.white)
                         .padding()
-                        .background(
-                            Circle()
-                                .fill(Color.black.opacity(0.5))
-                        )
+                .background(Circle().fill(Color.black.opacity(0.5)))
                 }
                 .padding()
             }
-        }
-        .onAppear {
-            cameraViewModel.startSession()
-        }
-        .onDisappear {
-            cameraViewModel.stopSession()
-        }
+
+    private func angleBetweenPoints(ax: Double, ay: Double, bx: Double, by: Double, cx: Double, cy: Double) -> Double {
+        let bax = ax - bx, bay = ay - by
+        let bcx = cx - bx, bcy = cy - by
+        let dot = bax * bcx + bay * bcy
+        let magBA = sqrt(bax * bax + bay * bay)
+        let magBC = sqrt(bcx * bcx + bcy * bcy)
+        guard magBA > 0, magBC > 0 else { return 180 }
+        return acos(max(-1, min(1, dot / (magBA * magBC)))) * 180 / .pi
     }
     
+    private func startCountdown() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            countdownNumber = 2
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                countdownNumber = 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    isCountdown = false
+                }
+            }
+        }
+    }
+
     private func syncPushupProgress(count: Int) {
-        guard !userId.isEmpty else {
-            print("⚠️ No userId, skipping pushup sync")
-            return
-        }
-        
-        let body: [String: Any] = [
-            "completedCount": count,
-            "objectiveType": "pushups"  // Multi-objective support
-        ]
-        
-        guard let url = URL(string: "https://api.live-eos.com/objectives/complete/\(userId)") else {
-            print("⚠️ Invalid URL for pushup sync")
-            return
-        }
-        
+        guard !userId.isEmpty else { return }
+        guard let url = URL(string: "https://api.live-eos.com/objectives/complete/\(userId)") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                print("❌ Pushup sync error: \(error.localizedDescription)")
-                return
-            }
-            
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 200 {
-                    print("✅ Pushup progress synced: \(count)")
-                } else {
-                    print("⚠️ Pushup sync status: \(httpResponse.statusCode)")
-                }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["completedCount": count, "objectiveType": "pushups"])
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                print("Pushup progress synced: \(count)")
             }
         }.resume()
     }
@@ -1618,7 +1684,7 @@ struct ObjectiveSettingsView: View {
                 }
                 .foregroundStyle(Color.orange)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                        .padding(.vertical, 8)
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -1936,7 +2002,7 @@ struct ObjectiveSettingsView: View {
                     )
                     .padding(.top, 60)
                     .transition(.move(edge: .top).combined(with: .opacity))
-                    .onAppear {
+        .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                             withAnimation(.easeOut(duration: 0.3)) {
                                 showSuccessBanner = false
@@ -1949,7 +2015,7 @@ struct ObjectiveSettingsView: View {
         .onAppear {
             // Initialize temp values from bindings on first load
             if !hasInitializedFromBindings {
-                tempDeadline = deadline
+            tempDeadline = deadline
                 tempPushupCount = max(objective, tempPushupCount)  // Use higher of binding or persisted
                 hasInitializedFromBindings = true
             }
@@ -2301,14 +2367,6 @@ final class CameraViewModel: NSObject, ObservableObject {
     @Published var currentFrame: UIImage?
     @Published var pushupCount: Int = 0
     @Published var isTracking = false
-    @Published var isCalibrating = false
-    @Published var calibrationComplete = false
-    
-    private var calibrationMinY: CGFloat = 1.0
-    private var calibrationMaxY: CGFloat = 0.0
-    private var calibratedDownThreshold: CGFloat = 0.4
-    private var calibratedUpThreshold: CGFloat = 0.55
-    private var calibrationFrameCount: Int = 0
 
     private var captureSession: AVCaptureSession?
     private var videoOutput = AVCaptureVideoDataOutput()
@@ -2333,16 +2391,7 @@ final class CameraViewModel: NSObject, ObservableObject {
         }
     }
 
-    func startCalibration() {
-        isCalibrating = true
-        calibrationComplete = false
-        calibrationMinY = 1.0
-        calibrationMaxY = 0.0
-        calibrationFrameCount = 0
-    }
-    
     func startTracking() {
-        isCalibrating = false
         isTracking = true
     }
 
@@ -2356,19 +2405,22 @@ final class CameraViewModel: NSObject, ObservableObject {
         else {
             return
         }
+        
+        // Zoom out to widest field of view for full body capture
+        do {
+            try device.lockForConfiguration()
+            device.videoZoomFactor = device.minAvailableVideoZoomFactor
+            device.unlockForConfiguration()
+        } catch {
+            print("Could not set zoom: \(error)")
+        }
 
         session.addInput(input)
         videoOutput.setSampleBufferDelegate(outputDelegate, queue: sessionQueue)
         session.addOutput(videoOutput)
 
         if let connection = videoOutput.connection(with: .video) {
-            if connection.isVideoRotationAngleSupported(90) {
                 connection.videoRotationAngle = 90
-            } else {
-                #if !targetEnvironment(simulator)
-                connection.videoOrientation = .portrait
-                #endif
-            }
             connection.isVideoMirrored = false
         }
 
@@ -2388,71 +2440,31 @@ final class CameraViewModel: NSObject, ObservableObject {
                 self.currentFrame = uiImage
             }
 
-            if isCalibrating || isTracking {
+            if isTracking {
                 poseEstimator.detectPose(in: cgImage) { [weak self] keypoints in
-                    if self?.isCalibrating == true {
-                        self?.processCalibrationFrame(keypoints: keypoints)
-                    } else {
-                        self?.processPoseForPushups(keypoints: keypoints)
-                    }
+                    self?.processPoseForPushups(keypoints: keypoints)
                 }
             }
         }
     }
 
-    private func processCalibrationFrame(keypoints: [VNRecognizedPoint]) {
-        let confidentPoints = keypoints.filter { $0.confidence > 0.3 }
-        guard !confidentPoints.isEmpty else { return }
-        
-        let headPoint = confidentPoints.max(by: { $0.location.y < $1.location.y })!
-        let y = headPoint.location.y
-        
-        calibrationMinY = min(calibrationMinY, y)
-        calibrationMaxY = max(calibrationMaxY, y)
-        calibrationFrameCount += 1
-        
-        let range = calibrationMaxY - calibrationMinY
-        
-        // Need enough frames and a meaningful range of motion to confirm calibration
-        if calibrationFrameCount > 30 && range > 0.08 {
-            // Set thresholds at 35% and 65% of the observed range
-            calibratedDownThreshold = calibrationMinY + range * 0.35
-            calibratedUpThreshold = calibrationMinY + range * 0.65
-            
-            DispatchQueue.main.async {
-                self.calibrationComplete = true
-            }
-        }
-    }
-    
-    private var noseHistory: [CGFloat] = []
-    
+    private var wasInUpPosition = false
+
     private func processPoseForPushups(keypoints: [VNRecognizedPoint]) {
         guard keypoints.count > 0 else { return }
-        
-        // Find specific body parts by checking known joint positions
-        // Sort by Y to find the likely nose (highest point on body in pushup position)
-        let confidentPoints = keypoints.filter { $0.confidence > 0.3 }
-        guard !confidentPoints.isEmpty else { return }
-        
-        // Use the highest Y point as proxy for head/nose position
-        // In Vision coordinates, Y=1 is top of frame, Y=0 is bottom
-        let headPoint = confidentPoints.max(by: { $0.location.y < $1.location.y })!
-        let yPosition = headPoint.location.y
-        
-        // Smooth the signal with a rolling average to reduce jitter
-        noseHistory.append(yPosition)
-        if noseHistory.count > 5 { noseHistory.removeFirst() }
-        let smoothedY = noseHistory.reduce(0, +) / CGFloat(noseHistory.count)
-        
-        if smoothedY < calibratedDownThreshold {
-            if !poseEstimator.wasInUpPosition {
-                poseEstimator.wasInUpPosition = true
-            }
-        } else if smoothedY > calibratedUpThreshold && poseEstimator.wasInUpPosition {
-            poseEstimator.wasInUpPosition = false
-            DispatchQueue.main.async {
-                self.pushupCount += 1
+
+        if let nose = keypoints.first(where: { $0.confidence > 0.3 }) {
+            let yPosition = nose.location.y
+
+            if yPosition < 0.4 {
+                if !wasInUpPosition {
+                    wasInUpPosition = true
+                }
+            } else if yPosition > 0.6 && wasInUpPosition {
+                wasInUpPosition = false
+                DispatchQueue.main.async {
+                    self.pushupCount += 1
+                }
             }
         }
     }
@@ -2481,7 +2493,6 @@ private final class CameraOutputDelegate: NSObject, AVCaptureVideoDataOutputSamp
 // MARK: - Pose estimator
 
 final class PoseEstimator {
-    var wasInUpPosition = false
 
     func detectPose(in image: CGImage, completion: @escaping ([VNRecognizedPoint]) -> Void) {
         let request = VNDetectHumanBodyPoseRequest { request, error in
@@ -2493,28 +2504,8 @@ final class PoseEstimator {
             }
 
             do {
-                // Get specific joints relevant to pushup detection
-                var points: [VNRecognizedPoint] = []
-                if let nose = try? pose.recognizedPoint(.nose), nose.confidence > 0.3 {
-                    points.append(nose)
-                }
-                if let leftWrist = try? pose.recognizedPoint(.leftWrist), leftWrist.confidence > 0.2 {
-                    points.append(leftWrist)
-                }
-                if let rightWrist = try? pose.recognizedPoint(.rightWrist), rightWrist.confidence > 0.2 {
-                    points.append(rightWrist)
-                }
-                if let leftElbow = try? pose.recognizedPoint(.leftElbow), leftElbow.confidence > 0.2 {
-                    points.append(leftElbow)
-                }
-                if let rightElbow = try? pose.recognizedPoint(.rightElbow), rightElbow.confidence > 0.2 {
-                    points.append(rightElbow)
-                }
-                // Fallback: if no specific joints found, use all
-                if points.isEmpty {
-                    let keypoints = try pose.recognizedPoints(.all)
-                    points = keypoints.values.map { $0 }
-                }
+                let keypoints = try pose.recognizedPoints(.all)
+                let points = keypoints.values.map { $0 }
                 completion(points)
             } catch {
                 completion([])
@@ -2547,7 +2538,7 @@ final class NotificationManager {
         if runEnabled && runDistance > 0 {
             goals.append(String(format: "%.1f mile run", runDistance))
         }
-        
+
         let content = UNMutableNotificationContent()
         if goals.isEmpty {
             content.title = "Objective Missed"
@@ -2604,7 +2595,7 @@ final class DepositPaymentService: ObservableObject {
 
     func preparePaymentSheet(amount: Double, userId: String, completion: @escaping (Error?) -> Void) {
         let cents = max(1, Int((amount * 100).rounded()))
-        
+
         print("💳 preparePaymentSheet - amount: \(cents) cents, userId: '\(userId)'")
         
         guard !userId.isEmpty else {
@@ -3049,7 +3040,7 @@ struct ProfileView: View {
                 
                 // Terms & Legal Section
                 Section {
-                    HStack {
+                                        HStack {
                         Spacer()
                         Button(action: {
                             if let url = URL(string: "https://live-eos.com/terms") {
@@ -3248,11 +3239,11 @@ struct ProfileView: View {
         
         return Section {
             VStack(spacing: 16) {
-                HStack {
+                                        HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Available Balance")
                             .font(.system(.caption, design: .rounded))
-                            .foregroundStyle(Color.black.opacity(0.6))
+                                                .foregroundStyle(Color.black.opacity(0.6))
                         Text("$\(profileCashHoldings, specifier: "%.2f")")
                             .font(.system(.title2, design: .rounded, weight: .semibold))
                             .foregroundStyle(goldColor)
@@ -3264,7 +3255,7 @@ struct ProfileView: View {
                 }
 
                 HStack(spacing: 12) {
-                    HStack {
+                                        HStack {
                         Text("$")
                             .foregroundStyle(Color.black.opacity(0.6))
                         TextField("0.00", text: $depositAmount)
@@ -3278,18 +3269,18 @@ struct ProfileView: View {
                     
                     Button(action: startDeposit) {
                         if isProcessingDeposit {
-                            ProgressView()
+                                                ProgressView()
                                 .scaleEffect(0.8)
-                        } else {
+                                            } else {
                             Text("Deposit")
                                 .font(.system(.body, design: .rounded, weight: .medium))
-                        }
-                    }
+                                            }
+                                        }
                     .buttonStyle(.borderless)
                     .disabled(depositAmount.isEmpty || isProcessingDeposit)
                     .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(
+                                        .padding(.vertical, 8)
+                                        .background(
                         goldColor
                             .opacity(depositAmount.isEmpty || isProcessingDeposit ? 0.5 : 1.0)
                     )
@@ -3298,14 +3289,14 @@ struct ProfileView: View {
                 }
                 
                 Text(isWithdrawLocked ? "🔒 Withdraw Locked" : "Withdraw")
-                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                                .font(.system(.subheadline, design: .rounded, weight: .medium))
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                                        .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
                     .background(isWithdrawLocked ? Color.gray.opacity(0.3) : Color.white)
                     .foregroundStyle(isWithdrawLocked ? Color.gray : Color.black)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                                            RoundedRectangle(cornerRadius: 8)
                             .stroke(isWithdrawLocked ? Color.gray : Color.black, lineWidth: 1)
                     )
                     .cornerRadius(8)
@@ -3321,23 +3312,23 @@ struct ProfileView: View {
                     HStack {
                         Image(systemName: "exclamationmark.circle.fill")
                             .font(.caption)
-                        Text(error)
+                                            Text(error)
                             .font(.system(.caption, design: .rounded))
-                    }
-                    .foregroundStyle(Color.red)
-                }
-            }
-        } header: {
+                                        }
+                                        .foregroundStyle(Color.red)
+                                    }
+                            }
+                        } header: {
             Text("Balance")
-                .foregroundStyle(Color.white.opacity(0.95))
+                                .foregroundStyle(Color.white.opacity(0.95))
         } footer: {
             Text("Add funds to back your commitment")
                 .font(.system(.caption2, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.8))
-        }
-        .listRowBackground(Color.white)
-    }
-    
+                        }
+                        .listRowBackground(Color.white)
+                    }
+                
     // MARK: - Recipient Section (extracted for compiler performance)
     
     private var recipientSection: some View {
@@ -3345,13 +3336,13 @@ struct ProfileView: View {
         
         return Section {
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Recipients")
-                                .font(.system(.subheadline, design: .rounded))
-                                .foregroundStyle(Color.black.opacity(0.6))
-                            Spacer()
+                            VStack(alignment: .leading, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("Recipients")
+                                        .font(.system(.subheadline, design: .rounded))
+                                        .foregroundStyle(Color.black.opacity(0.6))
+                                    Spacer()
                             if isSettingsLocked {
                                 HStack(spacing: 4) {
                                     Image(systemName: "lock.fill")
@@ -3361,53 +3352,53 @@ struct ProfileView: View {
                                 }
                                 .foregroundStyle(Color.orange)
                             } else {
-                                Button(action: { showingAddRecipient = true }) {
-                                    Label("Add", systemImage: "plus.circle.fill")
-                                        .font(.system(.caption, design: .rounded))
+                                    Button(action: { showingAddRecipient = true }) {
+                                        Label("Add", systemImage: "plus.circle.fill")
+                                            .font(.system(.caption, design: .rounded))
                                 }
-                            }
-                        }
-                        
-                        if customRecipients.isEmpty {
-                            HStack {
-                                Image(systemName: "person.crop.circle.badge.plus")
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                                Text("No recipients yet")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.6))
-                            }
-                            .padding(.vertical, 8)
-                        } else {
-                            VStack(spacing: 8) {
-                                ForEach(Array(customRecipients.enumerated()), id: \.element.id) { index, recipient in
-                                    HStack(spacing: 12) {
-                                        RecipientRow(
-                                            recipient: recipient,
-                                            isSelected: selectedRecipientId == recipient.id,
-                                            onSelect: {
+                                    }
+                                }
+                                
+                                if customRecipients.isEmpty {
+                                    HStack {
+                                        Image(systemName: "person.crop.circle.badge.plus")
+                                            .foregroundStyle(Color.black.opacity(0.6))
+                                        Text("No recipients yet")
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(Color.black.opacity(0.6))
+                                    }
+                                    .padding(.vertical, 8)
+                                } else {
+                                    VStack(spacing: 8) {
+                                        ForEach(Array(customRecipients.enumerated()), id: \.element.id) { index, recipient in
+                                            HStack(spacing: 12) {
+                                                RecipientRow(
+                                                    recipient: recipient,
+                                                    isSelected: selectedRecipientId == recipient.id,
+                                                    onSelect: { 
                                                 guard !isSettingsLocked else { return }
                                                 if recipient.status == "active" || recipient.status == "available" {
                                                     selectRecipient(recipient.id)
                                                 }
-                                            }
-                                        )
+                                                    }
+                                                )
                                         .opacity(isSettingsLocked ? 0.7 : 1)
-                                        
+                                                
                                         if !isSettingsLocked {
-                                            Button(action: {
+                                                Button(action: {
                                                 recipientIndexToDelete = index
                                                 showDeleteRecipientConfirm = true
-                                            }) {
-                                                Image(systemName: "trash.circle.fill")
-                                                    .font(.title2)
-                                                    .foregroundStyle(Color.red.opacity(0.8))
+                                                }) {
+                                                    Image(systemName: "trash.circle.fill")
+                                                        .font(.title2)
+                                                        .foregroundStyle(Color.red.opacity(0.8))
+                                                }
+                                                .buttonStyle(BorderlessButtonStyle())
+                                        }
                                             }
-                                            .buttonStyle(BorderlessButtonStyle())
                                         }
                                     }
-                                }
-                            }
-                            .padding(.vertical, 4)
+                                    .padding(.vertical, 4)
                         }
                     }
                 }
@@ -3455,35 +3446,35 @@ struct ProfileView: View {
                     }
                 }
                 
-                Button(action: commitDestination) {
-                    HStack {
+                        Button(action: commitDestination) {
+                            HStack {
                         Image(systemName: isSettingsLocked ? "lock.fill" : (isCommitButtonDisabled ? "exclamationmark.circle.fill" : (destinationCommitted ? "checkmark.circle.fill" : "lock.fill")))
-                            .font(.body)
+                                    .font(.body)
                         Text(isSettingsLocked ? "Locked" : lockButtonText)
-                            .font(.system(.body, design: .rounded, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
+                                    .font(.system(.body, design: .rounded, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
                             .fill((isCommitButtonDisabled || isSettingsLocked)
                                 ? Color.gray.opacity(0.3)
                                 : goldColor)
-                    )
+                            )
                     .foregroundStyle((isCommitButtonDisabled || isSettingsLocked) ? .gray : .white)
-                }
-                .buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
                 .disabled(isCommitButtonDisabled || isSettingsLocked)
-                .padding(.top, 8)
-            }
-            .listRowBackground(Color.white)
-        } header: {
+                        .padding(.top, 8)
+                    }
+                    .listRowBackground(Color.white)
+                } header: {
             Text("Designated Recipient")
-                .foregroundStyle(Color.white.opacity(0.95))
-        } footer: {
+                        .foregroundStyle(Color.white.opacity(0.95))
+                } footer: {
             Text(isSettingsLocked ? "Recipient is locked until your commitment period ends." : (destinationCommitted ? "Recipient locked." : "Select who receives your committed stakes if you miss your goal."))
-                .font(.system(.caption2, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.8))
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.8))
         }
     }
     
@@ -3493,7 +3484,7 @@ struct ProfileView: View {
         let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
         
         return Section {
-            VStack(spacing: 16) {
+                    VStack(spacing: 16) {
                 if isSettingsLocked {
                     HStack {
                         Image(systemName: "lock.fill")
@@ -3512,32 +3503,32 @@ struct ProfileView: View {
                     .padding(.vertical, 8)
                     .opacity(0.7)
                 } else if payoutCommitted && !showPayoutSelector {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            showPayoutSelector = true
-                        }
-                    }) {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.title2)
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    showPayoutSelector = true
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.title2)
                                 .foregroundStyle(goldColor)
-                            VStack(alignment: .leading, spacing: 2) {
+                                    VStack(alignment: .leading, spacing: 2) {
                                 Text("$\(committedPayoutAmount, specifier: "%.0f") stakes committed")
-                                    .font(.system(.body, design: .rounded, weight: .semibold))
-                                    .foregroundStyle(Color.black)
+                                            .font(.system(.body, design: .rounded, weight: .semibold))
+                                            .foregroundStyle(Color.black)
                                 Text("Tap to change stakes amount")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.5))
+                                            .font(.system(.caption, design: .rounded))
+                                            .foregroundStyle(Color.black.opacity(0.5))
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
+                                        .foregroundStyle(Color.black.opacity(0.4))
+                                }
+                                .padding(.vertical, 8)
                             }
-                            Spacer()
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                                .foregroundStyle(Color.black.opacity(0.4))
-                        }
-                        .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.plain)
-                } else {
+                            .buttonStyle(.plain)
+                        } else {
                     stakesFullSelector
                 }
             }
@@ -3566,97 +3557,97 @@ struct ProfileView: View {
         let isCustomAmount = missedGoalPayout != 10 && missedGoalPayout != 50 && missedGoalPayout != 100 && missedGoalPayout != 0
         
         return VStack(spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
                     Text("Stakes Amount")
-                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
                     Text("Amount at risk per goal")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundStyle(Color.black.opacity(0.6))
-                }
-                Spacer()
-                HStack(spacing: 4) {
-                    Text("$")
-                        .font(.system(.title2, design: .rounded, weight: .bold))
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.6))
+                            }
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Text("$")
+                                    .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(goldColor)
-                    TextField("0.00", value: $missedGoalPayout, format: .number)
-                        .font(.system(.title2, design: .rounded, weight: .bold))
+                                TextField("0.00", value: $missedGoalPayout, format: .number)
+                                    .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(goldColor)
-                        .keyboardType(.decimalPad)
-                        .frame(width: 80)
-                        .multilineTextAlignment(.trailing)
-                        .focused($isPayoutAmountFocused)
-                }
-            }
-            
-            VStack(spacing: 12) {
-                HStack(spacing: 10) {
-                    ForEach([10.0, 50.0, 100.0], id: \.self) { amount in
-                        Button(action: {
-                            missedGoalPayout = amount
-                            isPayoutAmountFocused = false
-                        }) {
-                            Text("$\(Int(amount))")
-                                .font(.system(.body, design: .rounded, weight: .semibold))
+                                    .keyboardType(.decimalPad)
+                                    .frame(width: 80)
+                                    .multilineTextAlignment(.trailing)
+                                    .focused($isPayoutAmountFocused)
+                            }
+                        }
+                        
+                        VStack(spacing: 12) {
+                            HStack(spacing: 10) {
+                                ForEach([10.0, 50.0, 100.0], id: \.self) { amount in
+                                    Button(action: { 
+                                        missedGoalPayout = amount
+                                            isPayoutAmountFocused = false
+                                    }) {
+                                        Text("$\(Int(amount))")
+                                            .font(.system(.body, design: .rounded, weight: .semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 12)
+                                        .fill(missedGoalPayout == amount ? goldColor : Color.gray.opacity(0.25))
+                                            )
+                                            .foregroundStyle(Color.black)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            
+                            Button(action: { 
+                                if missedGoalPayout == 10 || missedGoalPayout == 50 || missedGoalPayout == 100 {
+                                        missedGoalPayout = 0
+                                }
+                                    isPayoutAmountFocused = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "pencil.circle.fill")
+                                        .font(.body)
+                                    Text("Custom Amount")
+                                        .font(.system(.body, design: .rounded, weight: .medium))
+                                }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(missedGoalPayout == amount ? goldColor : Color.gray.opacity(0.25))
+                            .fill(isCustomAmount ? goldColor : Color.gray.opacity(0.25))
                                 )
                                 .foregroundStyle(Color.black)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                Button(action: {
-                    if missedGoalPayout == 10 || missedGoalPayout == 50 || missedGoalPayout == 100 {
-                        missedGoalPayout = 0
-                    }
-                    isPayoutAmountFocused = true
-                }) {
-                    HStack {
-                        Image(systemName: "pencil.circle.fill")
-                            .font(.body)
-                        Text("Custom Amount")
-                            .font(.system(.body, design: .rounded, weight: .medium))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(isCustomAmount ? goldColor : Color.gray.opacity(0.25))
-                    )
-                    .foregroundStyle(Color.black)
-                }
-                .buttonStyle(.plain)
-            }
-            
+                            }
+                            .buttonStyle(.plain)
+                            }
+                            
             if !payoutCommitted && missedGoalPayout > 0 {
                 stakesAcknowledgments
             }
             
-            Button(action: commitPayout) {
-                HStack {
-                    Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
-                        .font(.body)
+                            Button(action: commitPayout) {
+                                HStack {
+                                    Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
+                                        .font(.body)
                     Text(payoutCommitted ? "Update Stakes" : "Set Your Stakes")
-                        .font(.system(.body, design: .rounded, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
+                                        .font(.system(.body, design: .rounded, weight: .semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
                         .fill(canSetStakes ? goldColor : Color.gray.opacity(0.3))
-                )
+                                )
                 .foregroundStyle(canSetStakes ? Color.white : Color.black.opacity(0.4))
-            }
-            .buttonStyle(.plain)
+                            }
+                            .buttonStyle(.plain)
             .disabled(!canSetStakes)
-            .padding(.top, 4)
-        }
-    }
+                            .padding(.top, 4)
+                        }
+                    }
     
     private var stakesAcknowledgments: some View {
         let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
@@ -3730,10 +3721,10 @@ struct ProfileView: View {
             }
             
             VStack(spacing: 8) {
-                HStack {
+                        HStack {
                     Image(systemName: "person")
                         .font(.caption)
-                        .foregroundStyle(Color.black.opacity(0.6))
+                                    .foregroundStyle(Color.black.opacity(0.6))
                         .frame(width: 20)
                     TextField("Name", text: $profileUsername)
                         .font(.system(.subheadline, design: .rounded))
@@ -3754,10 +3745,10 @@ struct ProfileView: View {
                 }
                 Divider()
                 
-                HStack {
+                            HStack {
                     Image(systemName: "lock")
                         .font(.caption)
-                        .foregroundStyle(Color.black.opacity(0.6))
+                                    .foregroundStyle(Color.black.opacity(0.6))
                         .frame(width: 20)
                     SecureField("Password", text: $profilePassword, prompt: Text("Password").foregroundColor(Color.black.opacity(0.5)))
                         .font(.system(.subheadline, design: .rounded))
@@ -3769,20 +3760,20 @@ struct ProfileView: View {
             Button(action: saveProfile) {
                 HStack {
                     if isSavingProfile {
-                        ProgressView()
+                                    ProgressView()
                             .scaleEffect(0.7)
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    } else {
+                                } else {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.caption)
-                    }
+                                }
                     Text("Update")
                         .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                }
+                            }
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(
+                            .padding(.vertical, 8)
+                            .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(goldColor.opacity(isSavingProfile || !isProfileValid ? 0.6 : 1.0))
                 )
@@ -3821,13 +3812,13 @@ struct ProfileView: View {
                 isAccountExpanded = false
                 profilePassword = ""
             }) {
-                HStack {
+                            HStack {
                     Image(systemName: "arrow.right.square")
-                        .font(.caption)
+                                    .font(.caption)
                     Text("Sign Out")
                         .font(.system(.subheadline, design: .rounded, weight: .medium))
-                }
-                .foregroundStyle(Color.red)
+                            }
+                            .foregroundStyle(Color.red)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
                 .background(
@@ -3844,20 +3835,20 @@ struct ProfileView: View {
                 showDeleteAccountAlert = true
             }) {
                 Text("Delete Account")
-                    .font(.system(.caption2, design: .rounded))
+                        .font(.system(.caption2, design: .rounded))
                     .foregroundStyle(Color.gray)
-            }
+                }
             .padding(.top, 8)
             .buttonStyle(.plain)
-            
-            if let error = profileErrorMessage {
+
+                if let error = profileErrorMessage {
                 HStack(spacing: 4) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.caption2)
-                    Text(error)
+                        Text(error)
                         .font(.system(.caption2, design: .rounded))
                 }
-                .foregroundStyle(Color.red)
+                            .foregroundStyle(Color.red)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -3989,8 +3980,8 @@ struct ProfileView: View {
                 }
             }
             .buttonStyle(.plain)
+            }
         }
-    }
     
     private var isProfileValid: Bool {
         // Password only required for new accounts, not updates
@@ -5059,7 +5050,7 @@ struct AddRecipientSheet: View {
             }
         }.resume()
     }
-    
+
     // ## SMS INVITE FUNCTION - DISABLED FOR NOW ##
     /*
     private func sendInvite() {
@@ -5467,55 +5458,92 @@ struct CompeteView: View {
         let active = competitions.filter { ($0["status"] as? String) == "active" }
         let completed = competitions.filter { ($0["status"] as? String) == "completed" }
         
-        return List {
-            if !pending.isEmpty {
-                Section {
-                    ForEach(pending.indices, id: \.self) { i in
-                        competitionCard(pending[i])
+        return ScrollView {
+            VStack(spacing: 20) {
+                
+                // Active competitions
+                if !active.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 8, height: 8)
+                            Text("Active")
+                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.9))
+                        }
+                        .padding(.horizontal, 4)
+                        
+                        VStack(spacing: 10) {
+                            ForEach(active.indices, id: \.self) { i in
+                                competitionCard(active[i])
+                            }
+                        }
                     }
-                } header: {
-                    Text("Lobby — Waiting to Start").foregroundStyle(Color.white.opacity(0.8))
+                    .padding(.horizontal, 20)
                 }
-                .listRowBackground(Color.white)
-            }
-            
-            if !active.isEmpty {
-                Section {
-                    ForEach(active.indices, id: \.self) { i in
-                        competitionCard(active[i])
-                    }
-                } header: {
-                    Text("Active").foregroundStyle(Color.white.opacity(0.8))
-                }
-                .listRowBackground(Color.white)
-            }
-            
-            if !completed.isEmpty {
-                Section {
-                    Button(action: { withAnimation { showPastCompetitions.toggle() } }) {
-                        HStack {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.caption)
-                                .foregroundStyle(Color.gray)
-                            Text(showPastCompetitions ? "Hide Past Competitions" : "Past Competitions (\(completed.count))")
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.gray)
-                            Spacer()
-                            Image(systemName: showPastCompetitions ? "chevron.up" : "chevron.down")
+                
+                // Pending / lobby
+                if !pending.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "hourglass")
                                 .font(.caption2)
-                                .foregroundStyle(Color.gray.opacity(0.5))
+                                .foregroundStyle(Color.orange)
+                            Text("Lobby — Waiting to Start")
+                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.9))
+                        }
+                        .padding(.horizontal, 4)
+                        
+                        VStack(spacing: 10) {
+                            ForEach(pending.indices, id: \.self) { i in
+                                competitionCard(pending[i])
+                            }
                         }
                     }
-                    .buttonStyle(.plain)
-                    
-                    if showPastCompetitions {
-                        ForEach(completed.indices, id: \.self) { i in
-                            competitionCard(completed[i])
-                        }
-                    }
+                    .padding(.horizontal, 20)
                 }
-                .listRowBackground(Color.white)
+                
+                // Past competitions
+                if !completed.isEmpty {
+                    VStack(spacing: 10) {
+                        Button(action: { withAnimation(.easeInOut(duration: 0.25)) { showPastCompetitions.toggle() } }) {
+                            HStack {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.gray)
+                                Text("Past Competitions (\(completed.count))")
+                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.white.opacity(0.7))
+                                Spacer()
+                                Image(systemName: showPastCompetitions ? "chevron.up" : "chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.white.opacity(0.4))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color.white.opacity(0.08))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if showPastCompetitions {
+                            VStack(spacing: 10) {
+                                ForEach(completed.indices, id: \.self) { i in
+                                    competitionCard(completed[i])
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+                
+                Spacer().frame(height: 20)
             }
+            .padding(.top, 16)
         }
     }
     
@@ -5527,6 +5555,8 @@ struct CompeteView: View {
         let status = comp["status"] as? String ?? "active"
         let code = comp["inviteCode"] as? String ?? ""
         let target = comp["targetValue"] as? Double ?? 0
+        let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let poolTotal = buyIn * Double(participants)
         
         let targetLabel: String = {
             if objType == "run" && target > 0 {
@@ -5546,72 +5576,112 @@ struct CompeteView: View {
             return 0
         }()
         
+        let isCompleted = status == "completed"
+        let isActive = status == "active"
+        let isPending = status == "pending"
+        
         return Button(action: {
             selectedCompetition = comp
             showDetail = true
         }) {
-            HStack(spacing: 14) {
-                // Icon
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(status == "completed" ? Color.gray.opacity(0.15) : goldColor.opacity(0.15))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
-                        .font(.title3)
-                        .foregroundStyle(status == "completed" ? Color.gray : goldColor)
-                }
-                
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(name)
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                        .foregroundStyle(Color.black)
+            VStack(spacing: 0) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(isCompleted ? Color.gray.opacity(0.1) : goldColor.opacity(0.12))
+                            .frame(width: 48, height: 48)
+                        Image(systemName: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                            .font(.title3)
+                            .foregroundStyle(isCompleted ? Color.gray : goldColor)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(name)
+                            .font(.system(.subheadline, design: .rounded, weight: .bold))
+                            .foregroundStyle(Color.black)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "person.2.fill")
+                                    .font(.system(size: 9))
+                                Text("\(participants)")
+                            }
+                            if !targetLabel.isEmpty {
+                                Text("·")
+                                Text(targetLabel)
+                            }
+                            if isActive {
+                                Text("·")
+                                Text("\(daysLeft)d left")
+                                    .foregroundStyle(goldColor)
+                            }
+                        }
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray)
                         .lineLimit(1)
-                    HStack(spacing: 6) {
-                        Label("\(participants)", systemImage: "person.2.fill")
-                        if !targetLabel.isEmpty {
-                            Text("·")
-                            Text(targetLabel)
-                        }
-                        if status == "pending" {
-                            Text("·")
-                            Text("Lobby")
+                    }
+                    
+                    Spacer()
+                    
+                    if isPending {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(code)
+                                .font(.system(.caption2, design: .monospaced, weight: .bold))
                                 .foregroundStyle(Color.orange)
-                        } else if status == "active" {
-                            Text("·")
-                            Text("\(daysLeft)d left")
+                            Text("Waiting")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.orange)
+                        }
+                    } else if isActive {
+                        HStack(spacing: 8) {
+                            Text(code)
+                                .font(.system(.caption2, design: .monospaced, weight: .bold))
+                                .foregroundStyle(goldColor)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(Color.gray.opacity(0.4))
+                        }
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "trophy.fill")
+                                .font(.caption)
+                                .foregroundStyle(Color.gray.opacity(0.4))
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(Color.gray.opacity(0.3))
                         }
                     }
-                    .font(.system(.caption2, design: .rounded))
-                    .foregroundStyle(Color.gray)
-                    .lineLimit(1)
                 }
+                .padding(14)
                 
-                Spacer()
-                
-                if status == "pending" {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(code)
-                            .font(.system(.caption2, design: .monospaced, weight: .bold))
-                            .foregroundStyle(Color.orange)
-                        Text("Waiting")
-                            .font(.system(.caption2, design: .rounded))
-                            .foregroundStyle(Color.orange)
-                    }
-                } else if status == "active" {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(code)
-                            .font(.system(.caption2, design: .monospaced, weight: .bold))
+                if (isActive || isPending) && buyIn > 0 {
+                    Divider().padding(.horizontal, 14)
+                    HStack(spacing: 6) {
+                        Image(systemName: "dollarsign.circle.fill")
+                            .font(.system(size: 10))
                             .foregroundStyle(goldColor)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(Color.gray)
+                        Text("$\(Int(buyIn)) buy-in")
+                            .font(.system(.caption2, design: .rounded, weight: .medium))
+                            .foregroundStyle(Color.black.opacity(0.6))
+                        Text("·")
+                            .foregroundStyle(Color.gray.opacity(0.4))
+                        Text("$\(Int(poolTotal)) pool")
+                            .font(.system(.caption2, design: .rounded, weight: .bold))
+                            .foregroundStyle(goldColor)
                     }
-                } else {
-                    Image(systemName: "trophy.fill")
-                        .foregroundStyle(Color.gray.opacity(0.5))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                 }
             }
-            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isActive ? goldColor.opacity(0.15) : (isPending ? Color.orange.opacity(0.15) : Color.clear), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
         }
         .buttonStyle(.plain)
     }
@@ -6196,6 +6266,8 @@ struct CreateCompetitionView: View {
             "scoringType": scoringType,
             "durationDays": durationDays,
             "targetValue": scoringType == "cumulative" ? 0 : targetValue,
+            "pushupTarget": pushupTarget,
+            "runTarget": runDistance,
             "buyInAmount": buyInAmount
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -6555,6 +6627,8 @@ struct CompetitionDetailView: View {
                     ProgressView()
                 } else if (competition?["status"] as? String) == "pending" {
                     lobbyContent
+                } else if (competition?["status"] as? String) == "completed" {
+                    completedContent
                 } else {
                     leaderboardContent
                 }
@@ -6580,7 +6654,7 @@ struct CompetitionDetailView: View {
             } message: {
                 Text(insufficientNames)
             }
-            .sheet(isPresented: $showPushUpSession) {
+            .sheet(isPresented: $showPushUpSession, onDismiss: { loadLeaderboard() }) {
                 PushUpSessionView(todayPushUpCount: $todayPushUpCount, objective: 0, isInCompetition: true)
             }
             .alert("End Competition?", isPresented: $showCancelConfirm) {
@@ -6646,14 +6720,115 @@ struct CompetitionDetailView: View {
         let objType = comp["objectiveType"] as? String ?? "pushups"
         let scoring = comp["scoringType"] as? String ?? "consistency"
         let targetValue = comp["targetValue"] as? Double ?? 0
+        let lobbyPushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
+        let lobbyRunTarget = comp["runTarget"] as? Double ?? 0
+        let poolTotal = buyIn * Double(leaderboard.count)
+        let durationLabel = durationDays == 7 ? "1 Week" : (durationDays == 14 ? "2 Weeks" : (durationDays == 30 ? "1 Month" : "\(durationDays) days"))
         
-        return List {
-            // Share message (tap to copy)
-            Section {
-                VStack(spacing: 12) {
-                    Text("Tap to copy & share:")
-                        .font(.system(.caption, design: .rounded))
+        return ScrollView {
+            VStack(spacing: 0) {
+                
+                // Hero section
+                VStack(spacing: 16) {
+                    ZStack {
+                        Circle()
+                            .fill(goldColor.opacity(0.15))
+                            .frame(width: 100, height: 100)
+                        Circle()
+                            .fill(goldColor.opacity(0.08))
+                            .frame(width: 140, height: 140)
+                        Image(systemName: "hourglass")
+                            .font(.system(size: 40))
+                            .foregroundStyle(goldColor)
+                            .symbolEffect(.pulse, options: .repeating)
+                    }
+                    .padding(.top, 24)
+                    
+                    Text(isCreator ? "Waiting for Players" : "Waiting to Start")
+                        .font(.system(.title, design: .rounded, weight: .bold))
+                        .foregroundStyle(goldColor)
+                    
+                    Text(isCreator ? "Share the invite and start when everyone's in." : "The creator will start when everyone's ready.")
+                        .font(.system(.subheadline, design: .rounded))
                         .foregroundStyle(Color.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 30)
+                    
+                    if buyIn > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundStyle(goldColor)
+                            Text("$\(Int(poolTotal)) pool so far")
+                                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                .foregroundStyle(goldColor)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(goldColor.opacity(0.1))
+                        .clipShape(Capsule())
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 24)
+                
+                // Invite code card
+                VStack(spacing: 14) {
+                    Text("Invite Code")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.gray)
+                    
+                    Text(inviteCode)
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .foregroundStyle(goldColor)
+                        .kerning(4)
+                    
+                    Button(action: {
+                        UIPasteboard.general.string = inviteCode
+                        withAnimation { messageCopied = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            withAnimation { messageCopied = false }
+                        }
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: messageCopied ? "checkmark" : "doc.on.doc")
+                                .font(.caption)
+                            Text(messageCopied ? "Copied!" : "Copy Code")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        }
+                        .foregroundStyle(messageCopied ? Color.green : goldColor)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(messageCopied ? Color.green : goldColor, lineWidth: 1.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.white)
+                        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 4)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(goldColor.opacity(0.15), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Share message card
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.caption)
+                            .foregroundStyle(goldColor)
+                        Text("Share with friends")
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            .foregroundStyle(Color.black)
+                    }
                     
                     Button(action: {
                         UIPasteboard.general.string = lobbyShareMessage
@@ -6663,206 +6838,770 @@ struct CompetitionDetailView: View {
                         }
                     }) {
                         Text(lobbyShareMessage)
-                            .font(.system(.subheadline, design: .rounded))
+                            .font(.system(.caption, design: .rounded))
                             .multilineTextAlignment(.leading)
                             .foregroundStyle(.white)
-                            .padding(12)
+                            .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(goldColor)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(messageCopied ? Color.green : Color.clear, lineWidth: 2)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(
+                                        LinearGradient(colors: [goldColor.opacity(0.85), goldColor], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                    )
                             )
                     }
                     .buttonStyle(.plain)
                     
-                    if messageCopied {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(Color.green)
-                            Text("Copied to clipboard — paste in iMessage, WhatsApp, etc.")
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundStyle(Color.green)
-                        }
-                    }
-                    
-                    Text(isCreator ? "Share the code and tap Start when everyone is ready." : "Waiting for the creator to start the competition.")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundStyle(Color.gray)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-            }
-            .listRowBackground(Color.white)
-            
-            // Competition details
-            Section {
-                HStack {
-                    Label("Type", systemImage: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
-                    Spacer()
-                    Text(objectiveTypeDisplay(objType, targetValue: targetValue))
+                    Text("Tap to copy — paste in iMessage, WhatsApp, etc.")
+                        .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.gray)
                 }
-                HStack {
-                    Label("Scoring", systemImage: "chart.bar.fill")
-                    Spacer()
-                    Text(scoring == "cumulative" ? "Total Count" : "Days Completed")
-                        .foregroundStyle(Color.gray)
-                }
-                if scoring == "consistency" && targetValue > 0 {
-                    HStack {
-                        Label("Daily Target", systemImage: "target")
-                        Spacer()
-                        if objType == "run" {
-                            Text("\(String(format: "%.1f", targetValue)) miles")
-                                .foregroundStyle(Color.gray)
-                        } else if objType == "pushups" {
-                            Text("\(Int(targetValue)) pushups")
-                                .foregroundStyle(Color.gray)
-                        }
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.white)
+                        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 4)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Stats grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    completedStatCard(
+                        icon: "clock.fill",
+                        value: durationLabel,
+                        label: "Duration",
+                        accent: false
+                    )
+                    completedStatCard(
+                        icon: "person.2.fill",
+                        value: "\(leaderboard.count)",
+                        label: "Players",
+                        accent: false
+                    )
+                    if buyIn > 0 {
+                        completedStatCard(
+                            icon: "dollarsign.circle.fill",
+                            value: "$\(Int(buyIn))",
+                            label: "Buy-in",
+                            accent: true
+                        )
+                        completedStatCard(
+                            icon: "banknote.fill",
+                            value: "$\(Int(poolTotal))",
+                            label: "Prize Pool",
+                            accent: true
+                        )
                     }
                 }
-                HStack {
-                    Label("Duration", systemImage: "clock.fill")
-                    Spacer()
-                    Text(durationDays == 7 ? "1 Week" : (durationDays == 14 ? "2 Weeks" : (durationDays == 30 ? "1 Month" : "\(durationDays) days")))
-                        .foregroundStyle(Color.gray)
-                }
-                if buyIn > 0 {
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                
+                // Goal card
+                goalCard(objType: objType, scoring: scoring, targetValue: targetValue, pushupTarget: lobbyPushupTarget, runTarget: lobbyRunTarget)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                
+                // Participants card
+                VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Label("Entry", systemImage: "dollarsign.circle.fill")
-                        Spacer()
-                        Text("$\(Int(buyIn)) per player")
-                            .foregroundStyle(goldColor)
-                            .fontWeight(.semibold)
-                    }
-                }
-            } header: {
-                Text("Details")
-            }
-            .listRowBackground(Color.white)
-            .font(.system(.subheadline, design: .rounded))
-            
-            // Participants
-            Section {
-                ForEach(leaderboard.indices, id: \.self) { i in
-                    let entry = leaderboard[i]
-                    let name = entry["name"] as? String ?? "Unknown"
-                    let entryUserId = entry["userId"] as? String ?? ""
-                    let isMe = entryUserId == userId
-                    
-                    HStack {
-                        Image(systemName: "person.circle.fill")
-                            .foregroundStyle(isMe ? goldColor : Color.gray.opacity(0.5))
-                        Text(name)
-                            .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .regular))
+                        Text("\(leaderboard.count) Player\(leaderboard.count == 1 ? "" : "s") Joined")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
                             .foregroundStyle(Color.black)
-                        if isMe {
-                            Text("(you)")
+                        Spacer()
+                        if leaderboard.count < 2 {
+                            Text("Need 2+")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.orange)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange.opacity(0.1))
+                                .clipShape(Capsule())
+                        }
+                    }
+                    
+                    VStack(spacing: 0) {
+                        ForEach(leaderboard.indices, id: \.self) { i in
+                            let entry = leaderboard[i]
+                            let name = entry["name"] as? String ?? "Unknown"
+                            let entryUserId = entry["userId"] as? String ?? ""
+                            let isMe = entryUserId == userId
+                            
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(isMe ? goldColor.opacity(0.15) : Color.gray.opacity(0.08))
+                                        .frame(width: 36, height: 36)
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(isMe ? goldColor : Color.gray.opacity(0.5))
+                                }
+                                
+                                Text(name)
+                                    .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .medium))
+                                    .foregroundStyle(Color.black)
+                                if isMe {
+                                    Text("(you)")
+                                        .font(.system(.caption2, design: .rounded))
+                                        .foregroundStyle(goldColor)
+                                }
+                                
+                                Spacer()
+                                
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Color.green)
+                                    .font(.subheadline)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(isMe ? goldColor.opacity(0.04) : Color.clear)
+                            
+                            if i < leaderboard.count - 1 {
+                                Divider().padding(.leading, 64)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.white)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(goldColor.opacity(0.1), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Buy-in notice
+                if buyIn > 0 {
+                    HStack(spacing: 10) {
+                        Image(systemName: "lock.shield.fill")
+                            .font(.title3)
+                            .foregroundStyle(goldColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("$\(Int(buyIn)) locked from each player at start")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black)
+                            Text("Winner takes the $\(Int(poolTotal)) pot")
                                 .font(.system(.caption2, design: .rounded))
                                 .foregroundStyle(goldColor)
                         }
-                        Spacer()
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color.green)
-                            .font(.caption)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(goldColor.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(goldColor.opacity(0.15), lineWidth: 1)
+                            )
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
                 }
-            } header: {
-                Text("\(leaderboard.count) Participant\(leaderboard.count == 1 ? "" : "s") Joined")
-            }
-            .listRowBackground(Color.white)
-            
-            // Buy-in notice
-            if buyIn > 0 {
-                Section {
+                
+                // Start error
+                if let error = startError {
                     HStack(spacing: 8) {
-                        Image(systemName: "lock.shield.fill")
-                            .foregroundStyle(Color.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("$\(Int(buyIn)) will be locked from each player when started")
-                                .font(.system(.caption, design: .rounded, weight: .medium))
-                            Text("Total pool: $\(Int(buyIn * Double(leaderboard.count))) → awarded to the winner")
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundStyle(Color.gray)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .listRowBackground(Color.orange.opacity(0.08))
-            }
-            
-            // Start error
-            if let error = startError {
-                Section {
-                    HStack {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(Color.red)
                         Text(error)
                             .font(.system(.caption, design: .rounded))
                             .foregroundStyle(Color.red)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.red.opacity(0.06))
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
                 }
-                .listRowBackground(Color.red.opacity(0.08))
-            }
-            
-            // Start button (creator only)
-            if isCreator {
-                Section {
-                    HStack {
-                        Spacer()
-                        HStack {
+                
+                // Start button (creator only)
+                if isCreator {
+                    Button(action: {
+                        if leaderboard.count >= 2 && !isStarting {
+                            showStartConfirm = true
+                        }
+                    }) {
+                        HStack(spacing: 10) {
                             if isStarting {
-                                ProgressView().scaleEffect(0.8)
+                                ProgressView()
+                                    .tint(.black)
+                                    .scaleEffect(0.8)
                             } else {
                                 Image(systemName: "flag.checkered")
+                                    .font(.title3)
                             }
                             Text("Start Competition")
-                                .font(.system(.headline, design: .rounded))
+                                .font(.system(.headline, design: .rounded, weight: .bold))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(leaderboard.count < 2 || isStarting ? Color.gray : Color.black)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                        .padding(.vertical, 16)
                         .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(leaderboard.count < 2 || isStarting ? Color.gray.opacity(0.3) : goldColor)
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(leaderboard.count < 2 || isStarting ? Color.gray.opacity(0.15) : goldColor)
+                                .shadow(color: leaderboard.count >= 2 ? goldColor.opacity(0.3) : Color.clear, radius: 10, x: 0, y: 5)
                         )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if leaderboard.count >= 2 && !isStarting {
-                                showStartConfirm = true
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(leaderboard.count < 2 || isStarting)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+                    
+                    if leaderboard.count < 2 {
+                        Text("Need at least 2 participants to start")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.orange)
+                            .padding(.bottom, 12)
+                    }
+                    
+                    // Cancel button
+                    Button(action: { showCancelConfirm = true }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "xmark.circle")
+                                .font(.subheadline)
+                            Text("Cancel Competition")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        }
+                        .foregroundStyle(Color.red.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 20)
+                }
+                
+                // Strava + Apple disclaimer
+                VStack(spacing: 12) {
+                    Image("powered_by_strava")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 14)
+                        .opacity(0.5)
+                    
+                    Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 40)
+                .padding(.vertical, 20)
+            }
+        }
+        .background(Color(UIColor.systemGroupedBackground))
+    }
+    
+    // MARK: - Completed Competition View
+    
+    private var completedContent: some View {
+        let comp = competition ?? [:]
+        let objType = comp["objectiveType"] as? String ?? "pushups"
+        let scoring = comp["scoringType"] as? String ?? "consistency"
+        let totalDays = comp["totalDays"] as? Int ?? 1
+        let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let targetValue = comp["targetValue"] as? Double ?? 0
+        let pushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
+        let runTarget = comp["runTarget"] as? Double ?? 0
+        let poolTotal = buyIn * Double(leaderboard.count)
+        
+        let scoreUnit: String = {
+            if scoring == "consistency" { return "days" }
+            switch objType {
+            case "run": return "mi"
+            case "pushups": return "reps"
+            default: return "pts"
+            }
+        }()
+        
+        let winner = leaderboard.first
+        let winnerName = winner?["name"] as? String ?? "Unknown"
+        let winnerScore = winner?["score"] as? Double ?? 0
+        let winnerScoreText = winnerScore == floor(winnerScore) ? "\(Int(winnerScore))" : String(format: "%.1f", winnerScore)
+        let winnerUserId = winner?["userId"] as? String ?? ""
+        let iWon = winnerUserId == userId
+        let maxScore = leaderboard.compactMap { $0["score"] as? Double }.max() ?? 1
+        
+        return ScrollView {
+            VStack(spacing: 0) {
+                
+                // Hero winner section
+                VStack(spacing: 16) {
+                    ZStack {
+                        Circle()
+                            .fill(goldColor.opacity(0.15))
+                            .frame(width: 100, height: 100)
+                        Circle()
+                            .fill(goldColor.opacity(0.08))
+                            .frame(width: 140, height: 140)
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 44))
+                            .foregroundStyle(goldColor)
+                    }
+                    .padding(.top, 24)
+                    
+                    Text(iWon ? "You Won!" : "\(winnerName) Wins!")
+                        .font(.system(.title, design: .rounded, weight: .bold))
+                        .foregroundStyle(goldColor)
+                    
+                    Text("\(winnerScoreText) \(scoreUnit) over \(totalDays) days")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                    
+                    if buyIn > 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundStyle(goldColor)
+                            Text("$\(Int(poolTotal)) prize pool awarded")
+                                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                .foregroundStyle(goldColor)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(goldColor.opacity(0.1))
+                        .clipShape(Capsule())
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 28)
+                
+                // Stats grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    completedStatCard(
+                        icon: "person.2.fill",
+                        value: "\(leaderboard.count)",
+                        label: "Players",
+                        accent: false
+                    )
+                    completedStatCard(
+                        icon: "calendar",
+                        value: "\(totalDays)",
+                        label: "Days",
+                        accent: false
+                    )
+                    if buyIn > 0 {
+                        completedStatCard(
+                            icon: "dollarsign.circle.fill",
+                            value: "$\(Int(buyIn))",
+                            label: "Buy-in",
+                            accent: true
+                        )
+                        completedStatCard(
+                            icon: "banknote.fill",
+                            value: "$\(Int(poolTotal))",
+                            label: "Prize Pool",
+                            accent: true
+                        )
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                
+                // Goal card
+                goalCard(objType: objType, scoring: scoring, targetValue: targetValue, pushupTarget: pushupTarget, runTarget: runTarget)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                
+                // Final standings with ranks
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Final Standings")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    
+                    VStack(spacing: 14) {
+                        ForEach(leaderboard.indices, id: \.self) { i in
+                            let entry = leaderboard[i]
+                            let name = entry["name"] as? String ?? "Unknown"
+                            let score = entry["score"] as? Double ?? 0
+                            let entryUserId = entry["userId"] as? String ?? ""
+                            let isMe = entryUserId == userId
+                            let rank = entry["rank"] as? Int ?? (i + 1)
+                            let barFraction = maxScore > 0 ? CGFloat(score / maxScore) : 0
+                            let scoreText = score == floor(score) ? "\(Int(score))" : String(format: "%.1f", score)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    if rank == 1 {
+                                        Image(systemName: "crown.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(goldColor)
+                                    } else {
+                                        Text("\(rank)")
+                                            .font(.system(.caption, design: .rounded, weight: .bold))
+                                            .foregroundStyle(Color.gray)
+                                            .frame(width: 14)
+                                    }
+                                    Text(name)
+                                        .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .medium))
+                                        .foregroundStyle(Color.black)
+                                    if isMe {
+                                        Text("(you)")
+                                            .font(.system(.caption2, design: .rounded))
+                                            .foregroundStyle(goldColor)
+                                    }
+                                    Spacer()
+                                    Text("\(scoreText) \(scoreUnit)")
+                                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                        .foregroundStyle(rank == 1 ? goldColor : Color.black.opacity(0.7))
+                                }
+                                
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(Color.gray.opacity(0.08))
+                                            .frame(height: 10)
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(rank == 1 ? goldColor : Color.gray.opacity(0.3))
+                                            .frame(width: max(4, geo.size.width * barFraction), height: 10)
+                                    }
+                                }
+                                .frame(height: 10)
                             }
                         }
-                        Spacer()
                     }
-                } footer: {
-                    if leaderboard.count < 2 {
-                        Text("Need at least 2 participants to start.")
+                }
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.white)
+                        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 4)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                
+                // Strava + Apple disclaimer
+                VStack(spacing: 12) {
+                    Image("powered_by_strava")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 14)
+                        .opacity(0.5)
+                    
+                    Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 40)
+                .padding(.vertical, 20)
+            }
+        }
+        .background(Color(UIColor.systemGroupedBackground))
+    }
+    
+    private func completedStatCard(icon: String, value: String, label: String, accent: Bool) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(accent ? goldColor : Color.black.opacity(0.5))
+            Text(value)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(accent ? goldColor : Color.black)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(Color.gray)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(accent ? goldColor.opacity(0.08) : Color.white)
+                .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+        )
+    }
+    
+    private func goalCard(objType: String, scoring: String, targetValue: Double, pushupTarget: Int = 0, runTarget: Double = 0) -> some View {
+        VStack(spacing: 10) {
+            if scoring == "consistency" {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(goldColor)
+                Text("Days Completing")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                
+                VStack(spacing: 4) {
+                    if objType == "both" {
+                        if pushupTarget > 0 {
+                            Text("\(pushupTarget) pushups")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        } else {
+                            Text("Pushups")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        }
+                        if runTarget > 0 {
+                            Text("\(String(format: "%.1f", runTarget)) miles")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        } else if targetValue > 0 {
+                            Text("\(String(format: "%.1f", targetValue)) miles")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        } else {
+                            Text("Runs")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        }
+                    } else if objType == "pushups" {
+                        if targetValue > 0 || pushupTarget > 0 {
+                            let target = pushupTarget > 0 ? pushupTarget : Int(targetValue)
+                            Text("\(target) pushups / day")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        }
+                    } else if objType == "run" {
+                        let dist = runTarget > 0 ? runTarget : targetValue
+                        if dist > 0 {
+                            Text("\(String(format: "%.1f", dist)) miles / day")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.7))
+                        }
+                    }
+                }
+            } else {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.title2)
+                    .foregroundStyle(goldColor)
+                Text("Total Score")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                
+                let typeLabel = objType == "run" ? "Running" : (objType == "both" ? "Pushups & Runs" : "Pushups")
+                Text(typeLabel)
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.7))
+                
+                if objType == "both" {
+                    Text("1 pushup = 1 pt  ·  1 mile = 100 pts")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(goldColor)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white)
+                .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(goldColor.opacity(0.15), lineWidth: 1)
+        )
+    }
+    
+    private func dailyProgressCard(objType: String, leaderboard: [[String: Any]], userId: String, pushupTarget: Int, runTarget: Double, targetValue: Double) -> some View {
+        let myEntry = leaderboard.first { ($0["userId"] as? String) == userId }
+        let todayProgress = myEntry?["todayProgress"] as? [String: Any] ?? [:]
+        
+        let pushupData = todayProgress["pushups"] as? [String: Any]
+        let runData = todayProgress["run"] as? [String: Any]
+        
+        let pushupCompleted = pushupData?["completed"] as? Double ?? 0
+        let pushupSessionTarget = pushupData?["target"] as? Double ?? Double(pushupTarget)
+        let pushupGoal = pushupTarget > 0 ? Double(pushupTarget) : pushupSessionTarget
+        let pushupDone = pushupGoal > 0 && pushupCompleted >= pushupGoal
+        
+        let runCompleted = runData?["completed"] as? Double ?? 0
+        let runSessionTarget = runData?["target"] as? Double ?? (runTarget > 0 ? runTarget : targetValue)
+        let runGoal = runTarget > 0 ? runTarget : (runSessionTarget > 0 ? runSessionTarget : targetValue)
+        let runDone = runGoal > 0 && runCompleted >= runGoal
+        
+        let allDone: Bool = {
+            if objType == "both" {
+                return pushupDone && runDone
+            } else if objType == "pushups" {
+                return pushupDone
+            } else {
+                return runDone
+            }
+        }()
+        
+        return VStack(spacing: 16) {
+            HStack {
+                Text(allDone ? "Today's Goals Complete!" : "Today's Goals")
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Spacer()
+                if allDone {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.title3)
+                        .foregroundStyle(goldColor)
+                }
+            }
+            
+            if objType == "pushups" || objType == "both" {
+                dailyObjectiveRow(
+                    icon: "figure.strengthtraining.traditional",
+                    label: "Pushups",
+                    completed: pushupCompleted,
+                    goal: pushupGoal,
+                    unit: "reps",
+                    isDone: pushupDone,
+                    formatAsInt: true
+                )
+            }
+            
+            if objType == "run" || objType == "both" {
+                dailyObjectiveRow(
+                    icon: "figure.run",
+                    label: "Run",
+                    completed: runCompleted,
+                    goal: runGoal,
+                    unit: "mi",
+                    isDone: runDone,
+                    formatAsInt: false
+                )
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(allDone ? goldColor.opacity(0.06) : Color.white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(allDone ? goldColor.opacity(0.3) : Color.clear, lineWidth: 1.5)
+        )
+    }
+    
+    private func dailyObjectiveRow(icon: String, label: String, completed: Double, goal: Double, unit: String, isDone: Bool, formatAsInt: Bool) -> some View {
+        let fraction = goal > 0 ? min(1.0, completed / goal) : 0
+        let completedText = formatAsInt ? "\(Int(completed))" : String(format: "%.1f", completed)
+        let goalText = formatAsInt ? "\(Int(goal))" : String(format: "%.1f", goal)
+        
+        return VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(isDone ? goldColor.opacity(0.15) : Color.gray.opacity(0.08))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: isDone ? "checkmark" : icon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isDone ? goldColor : Color.black.opacity(0.5))
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                        .foregroundStyle(Color.black)
+                    Text("\(completedText) / \(goalText) \(unit)")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(isDone ? goldColor : Color.gray)
+                }
+                
+                Spacer()
+                
+                Text(isDone ? "Done" : "\(Int(fraction * 100))%")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(isDone ? goldColor : Color.black.opacity(0.6))
+            }
+            
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.gray.opacity(0.1))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(
+                            isDone
+                            ? LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
+                            : LinearGradient(colors: [goldColor.opacity(0.4), goldColor.opacity(0.6)], startPoint: .leading, endPoint: .trailing)
+                        )
+                        .frame(width: max(fraction > 0 ? 8 : 0, geo.size.width * fraction), height: 8)
+                }
+            }
+            .frame(height: 8)
+        }
+    }
+    
+    private func completedLeaderboardRow(_ entry: [String: Any], index: Int, scoreUnit: String) -> some View {
+        let name = entry["name"] as? String ?? "Unknown"
+        let score = entry["score"] as? Double ?? 0
+        let daysCompleted = entry["daysCompleted"] as? Int ?? 0
+        let streak = entry["streak"] as? Int ?? 0
+        let rank = entry["rank"] as? Int ?? (index + 1)
+        let entryUserId = entry["userId"] as? String ?? ""
+        let isMe = entryUserId == userId
+        let scoreText = score == floor(score) ? "\(Int(score))" : String(format: "%.1f", score)
+        
+        return HStack(spacing: 14) {
+            ZStack {
+                if rank <= 3 {
+                    Circle()
+                        .fill(rank == 1 ? goldColor : (rank == 2 ? Color.gray.opacity(0.35) : Color.orange.opacity(0.25)))
+                        .frame(width: 34, height: 34)
+                    if rank == 1 {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white)
+                            .offset(y: -18)
+                    }
+                    Text("\(rank)")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(rank == 1 ? .white : Color.black)
+                } else {
+                    Text("\(rank)")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.gray)
+                        .frame(width: 34)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(name)
+                        .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .medium))
+                        .foregroundStyle(Color.black)
+                        .lineLimit(1)
+                    if isMe {
+                        Text("(you)")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(goldColor)
+                    }
+                }
+                HStack(spacing: 8) {
+                    if daysCompleted > 0 {
+                        Text("\(daysCompleted) day\(daysCompleted == 1 ? "" : "s") completed")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                    }
+                    if streak > 0 {
+                        Text("\(streak) streak")
                             .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(Color.orange)
                     }
                 }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-                
-                // Cancel button (creator only, lobby)
-                Section {
-                    Button(action: { showCancelConfirm = true }) {
-                        HStack {
-                            Image(systemName: "xmark.circle")
-                            Text("Cancel Competition")
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                        }
-                        .foregroundStyle(Color.red)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .listRowBackground(Color.clear)
             }
+            
+            Spacer(minLength: 8)
+            
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(scoreText)
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(rank == 1 ? goldColor : Color.black)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(scoreUnit)
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(isMe ? goldColor.opacity(0.04) : Color.clear)
     }
     
     private var leaderboardContent: some View {
@@ -6873,12 +7612,63 @@ struct CompetitionDetailView: View {
         let daysElapsed = comp["daysElapsed"] as? Int ?? 0
         let totalDays = comp["totalDays"] as? Int ?? 1
         let inviteCode = comp["inviteCode"] as? String ?? ""
-        let status = comp["status"] as? String ?? "active"
         let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
-        let progress = min(1.0, Double(daysElapsed) / Double(max(1, totalDays)))
-        let poolTotal = buyIn * Double(leaderboard.count)
+        let targetValue = comp["targetValue"] as? Double ?? 0
         
-        // Score unit label
+        let endsAt: Date? = {
+            if let iso = comp["endsAt"] as? String {
+                let fmt = ISO8601DateFormatter()
+                fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = fmt.date(from: iso) { return d }
+                fmt.formatOptions = [.withInternetDateTime]
+                return fmt.date(from: iso)
+            }
+            return nil
+        }()
+        let startedAt: Date? = {
+            if let iso = comp["startedAt"] as? String {
+                let fmt = ISO8601DateFormatter()
+                fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = fmt.date(from: iso) { return d }
+                fmt.formatOptions = [.withInternetDateTime]
+                if let d = fmt.date(from: iso) { return d }
+                let dateFmt = DateFormatter()
+                dateFmt.dateFormat = "yyyy-MM-dd"
+                return dateFmt.date(from: iso)
+            }
+            return nil
+        }()
+        
+        let remainingLabel: String = {
+            if let end = endsAt {
+                let secsLeft = end.timeIntervalSinceNow
+                let hoursLeft = Int(secsLeft / 3600)
+                let minsLeft = Int(secsLeft / 60) % 60
+                if secsLeft <= 0 {
+                    return "<1m"
+                } else if hoursLeft < 1 {
+                    return "\(max(1, Int(secsLeft / 60)))m"
+                } else if hoursLeft < 24 {
+                    return "\(hoursLeft)h \(minsLeft)m"
+                }
+            }
+            return "\(daysRemaining)d"
+        }()
+        let pushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
+        let runTarget = comp["runTarget"] as? Double ?? 0
+        let progress: CGFloat = {
+            if totalDays == 1, let start = startedAt, let end = endsAt {
+                let total = end.timeIntervalSince(start)
+                let elapsed = Date().timeIntervalSince(start)
+                if total > 0 {
+                    return min(1.0, max(0, elapsed / total))
+                }
+            }
+            return min(1.0, Double(daysElapsed) / Double(max(1, totalDays)))
+        }()
+        let poolTotal = buyIn * Double(leaderboard.count)
+        let maxScore = leaderboard.compactMap { $0["score"] as? Double }.max() ?? 1
+        
         let scoreUnit: String = {
             if scoring == "consistency" { return "days" }
             switch objType {
@@ -6888,82 +7678,266 @@ struct CompetitionDetailView: View {
             }
         }()
         
-        return List {
-            // Stats header
-            Section {
-                VStack(spacing: 14) {
-                    HStack(spacing: 16) {
-                        statBubble(value: "\(leaderboard.count)", label: "Players", icon: "person.2.fill")
-                        statBubble(value: status == "active" ? "\(daysRemaining)d" : "Done", label: status == "active" ? "Remaining" : "Completed", icon: "clock.fill")
-                        statBubble(value: objType == "run" ? "Run" : (objType == "both" ? "Both" : "Pushups"), label: "Type", icon: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
-                        if buyIn > 0 {
-                            statBubble(value: "$\(Int(poolTotal))", label: "Prize Pool", icon: "dollarsign.circle.fill")
-                        }
+        let leader = leaderboard.first
+        let leaderName = leader?["name"] as? String ?? "—"
+        let leaderScore = leader?["score"] as? Double ?? 0
+        let leaderScoreText = leaderScore == floor(leaderScore) ? "\(Int(leaderScore))" : String(format: "%.1f", leaderScore)
+        let leaderUserId = leader?["userId"] as? String ?? ""
+        let iLead = leaderUserId == userId
+        
+        return ScrollView {
+            VStack(spacing: 0) {
+                
+                // Hero section with gold accent background
+                VStack(spacing: 16) {
+                    
+                    // Live badge
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("LIVE")
+                            .font(.system(.caption, design: .rounded, weight: .heavy))
+                            .foregroundStyle(Color.green)
+                        Text("·")
+                            .foregroundStyle(Color.gray)
+                        Text(remainingLabel.hasSuffix("h") ? "\(remainingLabel) remaining" : "\(daysRemaining) day\(daysRemaining == 1 ? "" : "s") remaining")
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                            .foregroundStyle(Color.gray)
                     }
+                    .padding(.top, 20)
+                    
+                    // Leader spotlight
+                    ZStack {
+                        Circle()
+                            .fill(goldColor.opacity(0.15))
+                            .frame(width: 100, height: 100)
+                        Circle()
+                            .fill(goldColor.opacity(0.08))
+                            .frame(width: 140, height: 140)
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(goldColor)
+                    }
+                    
+                    Text(iLead ? "You're in the lead!" : "\(leaderName) leads")
+                        .font(.system(.title, design: .rounded, weight: .bold))
+                        .foregroundStyle(goldColor)
+                    
                     
                     // Progress bar
-                    VStack(spacing: 4) {
+                    VStack(spacing: 6) {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.gray.opacity(0.15))
-                                    .frame(height: 6)
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(goldColor)
-                                    .frame(width: geo.size.width * progress, height: 6)
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(Color.gray.opacity(0.1))
+                                    .frame(height: 8)
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(
+                                        LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
+                                    )
+                                    .frame(width: max(8, geo.size.width * progress), height: 8)
                             }
                         }
-                        .frame(height: 6)
+                        .frame(height: 8)
+                        .padding(.horizontal, 20)
                         
                         HStack {
-                            Text("Day \(daysElapsed) of \(totalDays)")
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundStyle(Color.gray)
-                            Spacer()
-                            Text(scoring == "cumulative" ? "Total \(objType == "run" ? "Miles" : (objType == "pushups" ? "Reps" : "Count"))" : "Days Completed")
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundStyle(Color.gray)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                            if totalDays == 1, let start = startedAt {
+                                let secsElapsed = Date().timeIntervalSince(start)
+                                let hrsElapsed = Int(secsElapsed / 3600)
+                                let minsElapsed = Int(secsElapsed / 60) % 60
+                                let elapsedText = hrsElapsed < 1 ? "\(max(1, Int(secsElapsed / 60)))m elapsed" : "\(hrsElapsed)h \(minsElapsed)m elapsed"
+                                Text(elapsedText)
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.gray)
+                                Spacer()
+                                Text(remainingLabel.hasSuffix("h") ? "\(remainingLabel) left" : "\(remainingLabel) remaining")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.gray)
+                            } else {
+                                Text("Day \(daysElapsed) of \(totalDays)")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.gray)
+                                Spacer()
+                                Text(scoring == "cumulative" ? "Total \(objType == "run" ? "Miles" : (objType == "pushups" ? "Reps" : "Count"))" : "Days Completed")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.gray)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
                         }
+                        .padding(.horizontal, 20)
                     }
                     
-                    // Buy-in notice
+                    // Pool total badge (always show for paid comps)
                     if buyIn > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "dollarsign.circle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(goldColor)
-                            Text("$\(Int(buyIn)) buy-in per player")
-                                .font(.system(.caption2, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black.opacity(0.7))
-                            Text("·")
-                                .foregroundStyle(Color.gray)
-                            Text("$\(Int(poolTotal)) total pool")
-                                .font(.system(.caption2, design: .rounded, weight: .bold))
-                                .foregroundStyle(goldColor)
-                        }
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(goldColor.opacity(0.08))
-                        .cornerRadius(8)
-                    }
-                    
-                    // Scoring disclaimer for "both" type
-                    if objType == "both" && scoring == "cumulative" {
                         HStack(spacing: 6) {
-                            Image(systemName: "info.circle")
-                                .font(.caption2)
-                                .foregroundStyle(Color.blue)
-                            Text("Scoring: 1 pushup = 1 pt, 1 mile = 100 pts")
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundStyle(Color.blue)
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundStyle(goldColor)
+                            Text("$\(Int(poolTotal)) in the pool")
+                                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                .foregroundStyle(goldColor)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(goldColor.opacity(0.1))
+                        .clipShape(Capsule())
                     }
                     
-                    // Invite code
+                    // Pushup session button
+                    if objType == "pushups" || objType == "both" {
+                        Button(action: { showPushUpSession = true }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "figure.strengthtraining.traditional")
+                                    .font(.title3)
+                                Text("Start Pushup Session")
+                                    .font(.system(.headline, design: .rounded, weight: .bold))
+                            }
+                            .foregroundStyle(Color.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(goldColor)
+                                    .shadow(color: goldColor.opacity(0.3), radius: 10, x: 0, y: 5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 28)
+                
+                // Today's progress card (consistency comps only)
+                if scoring == "consistency" {
+                    dailyProgressCard(
+                        objType: objType,
+                        leaderboard: leaderboard,
+                        userId: userId,
+                        pushupTarget: pushupTarget,
+                        runTarget: runTarget,
+                        targetValue: targetValue
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                }
+                
+                // Standings with ranks
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Standings")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    
+                    VStack(spacing: 14) {
+                        ForEach(leaderboard.indices, id: \.self) { i in
+                            let entry = leaderboard[i]
+                            let name = entry["name"] as? String ?? "Unknown"
+                            let score = entry["score"] as? Double ?? 0
+                            let entryUserId = entry["userId"] as? String ?? ""
+                            let isMe = entryUserId == userId
+                            let rank = entry["rank"] as? Int ?? (i + 1)
+                            let barFraction = maxScore > 0 ? CGFloat(score / maxScore) : 0
+                            let scoreText = score == floor(score) ? "\(Int(score))" : String(format: "%.1f", score)
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    if rank == 1 {
+                                        Image(systemName: "crown.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(goldColor)
+                                    } else {
+                                        Text("\(rank)")
+                                            .font(.system(.caption, design: .rounded, weight: .bold))
+                                            .foregroundStyle(Color.gray)
+                                            .frame(width: 14)
+                                    }
+                                    Text(name)
+                                        .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .medium))
+                                        .foregroundStyle(Color.black)
+                                    if isMe {
+                                        Text("(you)")
+                                            .font(.system(.caption2, design: .rounded))
+                                            .foregroundStyle(goldColor)
+                                    }
+                                    Spacer()
+                                    Text("\(scoreText) \(scoreUnit)")
+                                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                        .foregroundStyle(rank == 1 ? goldColor : Color.black.opacity(0.7))
+                                }
+                                
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(Color.gray.opacity(0.08))
+                                            .frame(height: 10)
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(
+                                                rank == 1
+                                                ? LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
+                                                : LinearGradient(colors: [Color.gray.opacity(0.25), Color.gray.opacity(0.35)], startPoint: .leading, endPoint: .trailing)
+                                            )
+                                            .frame(width: max(4, geo.size.width * barFraction), height: 10)
+                                    }
+                                }
+                                .frame(height: 10)
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.white)
+                        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 4)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(goldColor.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Goal card
+                goalCard(objType: objType, scoring: scoring, targetValue: targetValue, pushupTarget: pushupTarget, runTarget: runTarget)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                
+                // Stats grid
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    completedStatCard(
+                        icon: "person.2.fill",
+                        value: "\(leaderboard.count)",
+                        label: "Players",
+                        accent: false
+                    )
+                    completedStatCard(
+                        icon: "clock.fill",
+                        value: remainingLabel,
+                        label: "Remaining",
+                        accent: false
+                    )
+                    if buyIn > 0 {
+                        completedStatCard(
+                            icon: "dollarsign.circle.fill",
+                            value: "$\(Int(buyIn))",
+                            label: "Buy-in",
+                            accent: true
+                        )
+                        completedStatCard(
+                            icon: "banknote.fill",
+                            value: "$\(Int(poolTotal))",
+                            label: "Prize Pool",
+                            accent: true
+                        )
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Invite code
+                VStack(spacing: 10) {
                     HStack {
                         Text("Code:")
                             .font(.system(.caption2, design: .rounded))
@@ -6980,171 +7954,47 @@ struct CompetitionDetailView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.vertical, 6)
-            }
-            .listRowBackground(Color.white)
-            
-            // Leaderboard
-            Section {
-                ForEach(leaderboard.indices, id: \.self) { i in
-                    leaderboardRow(leaderboard[i], index: i, scoreUnit: scoreUnit)
-                }
-            } header: {
-                Text("Leaderboard")
-            }
-            .listRowBackground(Color.white)
-            
-            // Start Pushup Session button
-            if (competition?["objectiveType"] as? String) == "pushups" || (competition?["objectiveType"] as? String) == "both" {
-                Section {
-                    Button(action: { showPushUpSession = true }) {
-                        HStack {
-                            Image(systemName: "figure.strengthtraining.traditional")
-                                .font(.title3)
-                            Text("Start Pushup Session")
-                                .font(.system(.headline, design: .rounded))
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(goldColor)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-            }
-            
-            // End Competition button (creator only, active)
-            if (competition?["creatorUserId"] as? String) == userId && status == "active" {
-                Section {
+                .padding(.horizontal, 24)
+                .padding(.bottom, 20)
+                
+                // End Competition (creator only)
+                if (competition?["creatorUserId"] as? String) == userId {
                     Button(action: { showCancelConfirm = true }) {
-                        HStack {
+                        HStack(spacing: 6) {
                             if isCancelling {
                                 ProgressView().scaleEffect(0.8)
                             } else {
                                 Image(systemName: "xmark.circle")
+                                    .font(.subheadline)
                             }
                             Text("End Competition")
                                 .font(.system(.subheadline, design: .rounded, weight: .medium))
                         }
-                        .foregroundStyle(Color.red)
-                        .frame(maxWidth: .infinity)
+                        .foregroundStyle(Color.red.opacity(0.7))
                     }
                     .buttonStyle(.plain)
                     .disabled(isCancelling)
+                    .padding(.bottom, 16)
                 }
-                .listRowBackground(Color.clear)
-            }
-            
-            // Powered by Strava + Apple disclaimer
-            Section {
+                
+                // Strava + Apple disclaimer
                 VStack(spacing: 12) {
                     Image("powered_by_strava")
                         .resizable()
                         .scaledToFit()
                         .frame(height: 14)
-                        .opacity(0.7)
+                        .opacity(0.5)
                     
                     Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
-                        .foregroundStyle(Color.gray.opacity(0.6))
+                        .foregroundStyle(Color.gray.opacity(0.5))
                         .multilineTextAlignment(.center)
                 }
-                .frame(maxWidth: .infinity)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 20)
             }
         }
-    }
-    
-    private func statBubble(value: String, label: String, icon: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundStyle(goldColor)
-            Text(value)
-                .font(.system(.caption, design: .rounded, weight: .bold))
-                .foregroundStyle(Color.black)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(.caption2, design: .rounded))
-                .foregroundStyle(Color.gray)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity)
-    }
-    
-    private func leaderboardRow(_ entry: [String: Any], index: Int, scoreUnit: String) -> some View {
-        let name = entry["name"] as? String ?? "Unknown"
-        let score = entry["score"] as? Double ?? 0
-        let streak = entry["streak"] as? Int ?? 0
-        let rank = entry["rank"] as? Int ?? (index + 1)
-        let entryUserId = entry["userId"] as? String ?? ""
-        let isMe = entryUserId == userId
-        let scoreText = score == floor(score) ? "\(Int(score))" : String(format: "%.1f", score)
-        
-        return HStack(spacing: 14) {
-            // Rank
-            ZStack {
-                if rank <= 3 {
-                    Circle()
-                        .fill(rank == 1 ? goldColor : (rank == 2 ? Color.gray.opacity(0.4) : Color.orange.opacity(0.3)))
-                        .frame(width: 30, height: 30)
-                    Text("\(rank)")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(rank == 1 ? .white : Color.black)
-                } else {
-                    Text("\(rank)")
-                        .font(.system(.subheadline, design: .rounded, weight: .medium))
-                        .foregroundStyle(Color.gray)
-                        .frame(width: 30)
-                }
-            }
-            
-            // Name
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(name)
-                        .font(.system(.subheadline, design: .rounded, weight: isMe ? .bold : .medium))
-                        .foregroundStyle(Color.black)
-                        .lineLimit(1)
-                    if isMe {
-                        Text("(you)")
-                            .font(.system(.caption2, design: .rounded))
-                            .foregroundStyle(goldColor)
-                            .layoutPriority(-1)
-                    }
-                }
-                if streak > 0 {
-                    Text("\(streak) day streak 🔥")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundStyle(Color.orange)
-                }
-            }
-            
-            Spacer(minLength: 8)
-            
-            // Score with unit
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(scoreText)
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(rank == 1 ? goldColor : Color.black)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(scoreUnit)
-                    .font(.system(.caption2, design: .rounded))
-                    .foregroundStyle(Color.gray)
-            }
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .padding(.vertical, 4)
-        .background(isMe ? goldColor.opacity(0.05) : Color.clear)
+        .background(Color(UIColor.systemGroupedBackground))
     }
     
     private func cancelCompetition() {
@@ -7241,6 +8091,23 @@ struct CompetitionDetailView: View {
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
                 self.competition = json["competition"] as? [String: Any]
                 self.leaderboard = json["leaderboard"] as? [[String: Any]] ?? []
+            }
+        }.resume()
+        
+        // Fetch current pushup count so comp session logs correctly
+        guard !userId.isEmpty,
+              let progressUrl = URL(string: "https://api.live-eos.com/objectives/today/\(userId)") else { return }
+        URLSession.shared.dataTask(with: progressUrl) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sessions = json["sessions"] as? [[String: Any]] else { return }
+            let pushupSession = sessions.first(where: { ($0["objective_type"] as? String) == "pushups" })
+            let count: Int
+            if let intVal = pushupSession?["completed_count"] as? Int { count = intVal }
+            else if let dblVal = pushupSession?["completed_count"] as? Double { count = Int(dblVal) }
+            else { return }
+            DispatchQueue.main.async {
+                self.todayPushUpCount = count
             }
         }.resume()
     }

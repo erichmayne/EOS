@@ -13,6 +13,10 @@
 		51463B192F0D725300AB4AC7 /* StripeConnect in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B182F0D725300AB4AC7 /* StripeConnect */; };
 		51463B1B2F0D725300AB4AC7 /* StripeFinancialConnections in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B1A2F0D725300AB4AC7 /* StripeFinancialConnections */; };
 		51463B1D2F0D725300AB4AC7 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = 51463B1C2F0D725300AB4AC7 /* StripePaymentSheet */; };
+		516212952F73448100196569 /* QuickPoseCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 516212942F73448100196569 /* QuickPoseCamera */; };
+		516212972F73448100196569 /* QuickPoseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 516212962F73448100196569 /* QuickPoseCore */; };
+		516212992F73448100196569 /* QuickPoseMP in Frameworks */ = {isa = PBXBuildFile; productRef = 516212982F73448100196569 /* QuickPoseMP */; };
+		516212A02F7346DD00196569 /* QuickPoseSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5162129F2F7346DD00196569 /* QuickPoseSwiftUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,9 +80,13 @@
 			files = (
 				51463B1B2F0D725300AB4AC7 /* StripeFinancialConnections in Frameworks */,
 				51463B172F0D725300AB4AC7 /* StripeCardScan in Frameworks */,
+				516212972F73448100196569 /* QuickPoseCore in Frameworks */,
 				51463B132F0D725300AB4AC7 /* Stripe in Frameworks */,
 				51463B192F0D725300AB4AC7 /* StripeConnect in Frameworks */,
+				516212A02F7346DD00196569 /* QuickPoseSwiftUI in Frameworks */,
+				516212952F73448100196569 /* QuickPoseCamera in Frameworks */,
 				51463B1D2F0D725300AB4AC7 /* StripePaymentSheet in Frameworks */,
+				516212992F73448100196569 /* QuickPoseMP in Frameworks */,
 				51463B152F0D725300AB4AC7 /* StripeApplePay in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -106,6 +114,7 @@
 				51463A8D2F0B8FF300AB4AC7 /* morning-would */,
 				51463AA02F0B8FF400AB4AC7 /* morning-wouldTests */,
 				51463AAA2F0B8FF400AB4AC7 /* morning-wouldUITests */,
+				5162129E2F7346DD00196569 /* Frameworks */,
 				51463A8C2F0B8FF300AB4AC7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -118,6 +127,13 @@
 				51463AA72F0B8FF400AB4AC7 /* morning-wouldUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		5162129E2F7346DD00196569 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -146,6 +162,10 @@
 				51463B182F0D725300AB4AC7 /* StripeConnect */,
 				51463B1A2F0D725300AB4AC7 /* StripeFinancialConnections */,
 				51463B1C2F0D725300AB4AC7 /* StripePaymentSheet */,
+				516212942F73448100196569 /* QuickPoseCamera */,
+				516212962F73448100196569 /* QuickPoseCore */,
+				516212982F73448100196569 /* QuickPoseMP */,
+				5162129F2F7346DD00196569 /* QuickPoseSwiftUI */,
 			);
 			productName = "morning-would";
 			productReference = 51463A8B2F0B8FF300AB4AC7 /* EOS.app */;
@@ -231,6 +251,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */,
+				516212932F73448100196569 /* XCRemoteSwiftPackageReference "quickpose-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51463A8C2F0B8FF300AB4AC7 /* Products */;
@@ -635,6 +656,14 @@
 				minimumVersion = 25.3.1;
 			};
 		};
+		516212932F73448100196569 /* XCRemoteSwiftPackageReference "quickpose-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/quickpose/quickpose-ios-sdk.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -667,6 +696,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 51463B112F0D725300AB4AC7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
 			productName = StripePaymentSheet;
+		};
+		516212942F73448100196569 /* QuickPoseCamera */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 516212932F73448100196569 /* XCRemoteSwiftPackageReference "quickpose-ios-sdk" */;
+			productName = QuickPoseCamera;
+		};
+		516212962F73448100196569 /* QuickPoseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 516212932F73448100196569 /* XCRemoteSwiftPackageReference "quickpose-ios-sdk" */;
+			productName = QuickPoseCore;
+		};
+		516212982F73448100196569 /* QuickPoseMP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 516212932F73448100196569 /* XCRemoteSwiftPackageReference "quickpose-ios-sdk" */;
+			productName = QuickPoseMP;
+		};
+		5162129F2F7346DD00196569 /* QuickPoseSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 516212932F73448100196569 /* XCRemoteSwiftPackageReference "quickpose-ios-sdk" */;
+			productName = QuickPoseSwiftUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
