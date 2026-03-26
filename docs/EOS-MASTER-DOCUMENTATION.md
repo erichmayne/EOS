@@ -1,10 +1,81 @@
 # 🎯 EOS (Morning Would) - Master System Documentation
-> Last Updated: March 21, 2026
-> Version: 4.0 - App Store Live, Website Redesign, Blog, Competition Fixes
+> Last Updated: March 25, 2026
+> Version: 5.0 - QuickPose, Competition Overhaul, Timezone Fix, Strava Hardening
 
 ---
 
-## 🆕 Latest Updates (Mar 17-21, 2026) - App Store Launch & Polish
+## 🆕 Latest Updates (Mar 25, 2026) - v1.4/1.41 Major Update
+
+### QuickPose SDK Integration
+- Replaced custom Apple Vision pushup tracking with QuickPose SDK (MediaPipe-based)
+- `QuickPoseThresholdCounter` with tuned thresholds (`enterThreshold: 0.5, exitThreshold: 0.2`)
+- **Knee-on-ground detection**: Calculates knee angle from hip→knee→ankle landmarks, blocks reps if knees bent below 140°
+- Frame smoothing: `kneesBentFrames` counter requires 10 consecutive bad frames before blocking (prevents jitter false positives)
+- All state updates dispatched to main thread (`DispatchQueue.main.async`) to eliminate UI lag
+- Dev/prod SDK key switching via `#if DEBUG` — dev key for `com.emayne.eos.dev`, prod key for `com.emayne.eos`
+- Pushup session instructions: "Tuck your shirt in • 2-3 ft from camera"
+
+### Competition Scoring Overhaul
+- **Baseline system**: Snapshots each participant's current-day `completed_count` into `baseline_pushups` / `baseline_run` on `competition_participants` when comp starts
+- Leaderboard and check-completed scoring subtract baselines on start day (`Math.max(0, count - baseline)`)
+- **Comp targets vs personal targets**: `daysCompleted` now checks against competition's `pushup_target` / `run_target`, NOT the session's personal `status` field
+- `todayProgress` in leaderboard response uses comp targets and baseline-adjusted counts
+- `pushup_target` and `run_target` columns added to `competitions` table — stored on create, returned in all response endpoints
+- All existing competitions backfilled with targets
+
+### Competition Timestamps
+- `started_at` TIMESTAMPTZ column on `competitions` — precise to the second
+- `hoursRemaining`, `endsAt` (ISO timestamp) returned in leaderboard response
+- `check-completed` cron uses precise end time (`startedAt + duration`) instead of date-only comparison
+- Falls back to `start_date` for older comps without `started_at`
+
+### Timezone-Aware Day Boundaries
+- Global helpers: `getTodayForTimezone(tz)`, `getCurrentTimeForTimezone(tz)`
+- All endpoints now use user's timezone for "today": `/objectives/today`, `/objectives/complete`, `/objectives/settings`, `/objectives/ensure-session`, `/objectives/create-daily-sessions`, Strava webhook
+- Midnight reset cron processes each user based on their local date (creates sessions for local "today", marks local "yesterday" as missed)
+- Cron schedule changed from `0 0 * * *` (midnight UTC only) to `0 * * * *` (every hour) to catch all timezone midnights
+
+### Missed Objective Fixes
+- **Zero balance**: When user misses with $0 balance, session is still marked `missed` + `payout_triggered = true` — cron won't retry when money is deposited later
+- **Deadline behind you**: When user sets a deadline that's already passed today, sessions are immediately marked `status: "grace"` + `payout_triggered = true` — no deduction for that day
+
+### Strava Pipeline Hardening
+- **Run accumulation**: Multiple runs per day now add up (`+= runMiles`) instead of taking max (`Math.max`)
+- **Duplicate connection prevention**: If a Strava account is already linked to another EOS user, new link attempt is rejected with `?strava=already_linked` redirect
+- **User lookup safeguard**: Changed `.single()` to `.limit(1)` to prevent crash if duplicate links exist
+- **Portal banners**: `portal.html` shows success/error/already_linked banners based on `?strava=` URL param
+
+### UI Changes
+- Stakes preset buttons: "No Stakes" (sets to $0) | "$50" | "$100" (removed $10)
+- Auto-refresh comp leaderboard on pushup session dismiss (`onDismiss: { loadLeaderboard() }`)
+- Comp pushup session fetches real `todayPushUpCount` from backend before starting (fixes zero-count bug)
+
+### Infrastructure
+- Killed rogue `user`-account PM2 process that was squatting on port 4242 with old code, blocking all deployments
+- Deleted `user` PM2 `eos-backend` process and saved empty to prevent respawn
+- All PM2 operations now under `root` only
+- App Store builds: v1.4 and v1.41 archived and uploaded to App Store Connect
+
+### Key Files Changed
+| File | Changes |
+|------|---------|
+| `ContentView.swift` | QuickPose integration, knee detection, SDK key switching, comp session fetch, stakes UI, pushup instructions |
+| `server.js` | Baseline system, comp target scoring, timezone-aware dates, missed objective fixes, Strava hardening, timestamps |
+| `portal.html` | Strava connection status banners |
+| `Eos.xcodeproj` | Version 1.41, QuickPose framework references |
+
+### Database Changes
+| Table | Column | Type | Purpose |
+|-------|--------|------|---------|
+| `competition_participants` | `baseline_pushups` | INTEGER DEFAULT 0 | Pre-join pushup count snapshot |
+| `competition_participants` | `baseline_run` | DOUBLE PRECISION DEFAULT 0 | Pre-join run distance snapshot |
+| `competitions` | `pushup_target` | INTEGER DEFAULT 0 | Competition-specific pushup target |
+| `competitions` | `run_target` | DOUBLE PRECISION DEFAULT 0 | Competition-specific run target |
+| `competitions` | `started_at` | TIMESTAMPTZ | Precise competition start timestamp |
+
+---
+
+## Previous Updates (Mar 17-21, 2026) - App Store Launch & Polish
 
 ### App Store Approved & Live ✅
 - **Version 1.0 Build 6** approved and live on App Store

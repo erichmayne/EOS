@@ -43,6 +43,20 @@ app.use(cors());
 app.use(express.json());
 
 // -----------------------------------------------------------------------------
+// Helper: Get today's date (YYYY-MM-DD) in a user's timezone
+// -----------------------------------------------------------------------------
+function getTodayForTimezone(tz) {
+    return new Date().toLocaleDateString("en-CA", { timeZone: tz || "America/New_York" });
+}
+
+// -----------------------------------------------------------------------------
+// Helper: Get current HH:MM in a user's timezone
+// -----------------------------------------------------------------------------
+function getCurrentTimeForTimezone(tz) {
+    return new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz || "America/New_York" }).replace(/^24:/, "00:");
+}
+
+// -----------------------------------------------------------------------------
 // Helper: Extract HH:MM from various time formats (TIME, TIMESTAMPTZ, string)
 // -----------------------------------------------------------------------------
 function parseDeadlineTime(deadline) {
@@ -2790,8 +2804,8 @@ app.post('/strava/webhook', async (req, res) => {
         
         console.log(`🏃 Run detected: ${distanceMiles.toFixed(2)} miles (goal: ${goalMiles} miles)`);
         
-        // Always record the run distance in the session (even if under goal)
-        const today = new Date().toISOString().split('T')[0];
+        // Use user's timezone to determine "today"
+        const today = getTodayForTimezone(user.timezone);
         const isComplete = distanceMiles >= goalMiles;
         const runMiles = parseFloat(distanceMiles.toFixed(2));
         
@@ -3596,12 +3610,10 @@ app.post("/users/:userId/trigger-payout", async (req, res) => {
 // Create daily sessions for all committed users (called at midnight)
 app.post("/objectives/create-daily-sessions", async (req, res) => {
     try {
-        const today = new Date().toISOString().slice(0, 10);
-        
         // Get all users with committed payouts
         const { data: users, error: usersError } = await supabase
             .from("users")
-            .select("id, objective_type, objective_count, objective_deadline, missed_goal_payout")
+            .select("id, timezone, objective_type, objective_count, objective_deadline, missed_goal_payout")
             .eq("payout_committed", true);
         
         if (usersError) {
@@ -3635,6 +3647,8 @@ app.post("/objectives/create-daily-sessions", async (req, res) => {
             }
             
             if (objectivesToCreate.length === 0) continue;
+            
+            const today = getTodayForTimezone(user.timezone);
             
             // Check existing sessions for today
             const { data: existing } = await supabase
@@ -3685,7 +3699,10 @@ app.post("/objectives/create-daily-sessions", async (req, res) => {
 app.get("/objectives/today/:userId", async (req, res) => {
     try {
         const { userId } = req.params;
-        const today = new Date().toISOString().slice(0, 10);
+        
+        // Use user's timezone to determine "today"
+        const { data: userData } = await supabase.from("users").select("timezone").eq("id", userId).single();
+        const today = getTodayForTimezone(userData?.timezone);
         
         // Fetch ALL sessions for today (pushups + run can both exist)
         const { data: sessions, error } = await supabase
@@ -3714,8 +3731,10 @@ app.get("/objectives/today/:userId", async (req, res) => {
 app.post("/objectives/complete/:userId", async (req, res) => {
     try {
         const { userId } = req.params;
-        const { completedCount, objectiveType = "pushups" } = req.body; // Default to pushups for backwards compat
-        const today = new Date().toISOString().slice(0, 10);
+        const { completedCount, objectiveType = "pushups" } = req.body;
+        
+        const { data: userData } = await supabase.from("users").select("timezone").eq("id", userId).single();
+        const today = getTodayForTimezone(userData?.timezone);
         
         // Get today's session for this objective type
         let { data: session, error: getError } = await supabase
@@ -3800,30 +3819,36 @@ app.post("/objectives/complete/:userId", async (req, res) => {
 // Reset all sessions at midnight (mark missed ones, create new ones)
 app.post("/objectives/midnight-reset", async (req, res) => {
     try {
-        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-        const today = new Date().toISOString().slice(0, 10);
-        
-        // 1. Mark any pending sessions from yesterday as missed
-        const { data: missedSessions } = await supabase
-            .from("objective_sessions")
-            .update({ status: "missed" })
-            .eq("session_date", yesterday)
-            .in("status", ["pending", "missed"])
-            .select();
-        
-        // 2. Create new sessions for today
+        // Get all users with committed payouts
         const { data: users } = await supabase
             .from("users")
-            .select("id, objective_type, objective_count, objective_deadline, missed_goal_payout")
+            .select("id, timezone, objective_type, objective_count, objective_deadline, missed_goal_payout")
             .eq("payout_committed", true);
         
+        let missedCount = 0;
         const newSessions = [];
+        
         for (const user of users || []) {
+            const userTz = user.timezone || "America/New_York";
+            const userToday = getTodayForTimezone(userTz);
+            const userYesterday = new Date(new Date(userToday + "T12:00:00").getTime() - 86400000).toISOString().slice(0, 10);
+            
+            // Mark any pending sessions from user's yesterday as missed
+            const { data: missed } = await supabase
+                .from("objective_sessions")
+                .update({ status: "missed" })
+                .eq("user_id", user.id)
+                .eq("session_date", userYesterday)
+                .in("status", ["pending"])
+                .select();
+            missedCount += (missed?.length || 0);
+            
+            // Create new session for user's today if it doesn't exist
             const { data: existing } = await supabase
                 .from("objective_sessions")
                 .select("id")
                 .eq("user_id", user.id)
-                .eq("session_date", today)
+                .eq("session_date", userToday)
                 .limit(1);
             
             if (!existing || existing.length === 0) {
@@ -3831,7 +3856,7 @@ app.post("/objectives/midnight-reset", async (req, res) => {
                     .from("objective_sessions")
                     .insert({
                         user_id: user.id,
-                        session_date: today,
+                        session_date: userToday,
                         objective_type: user.objective_type || "pushups",
                         target_count: user.objective_count || 50,
                         completed_count: 0,
@@ -3847,9 +3872,9 @@ app.post("/objectives/midnight-reset", async (req, res) => {
         }
         
         res.json({
-            missedYesterday: missedSessions?.length || 0,
+            missedYesterday: missedCount,
             newSessionsCreated: newSessions.length,
-            date: today
+            date: new Date().toISOString()
         });
         
     } catch (error) {
@@ -4245,7 +4270,7 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         }
         
         // 2. Update/create today's sessions for ENABLED objectives only
-        const today = new Date().toISOString().slice(0, 10);
+        const today = getTodayForTimezone(userData.timezone);
         const newDeadline = ('objective_deadline' in req.body) ? objective_deadline : (userData.objective_deadline || "09:00:00");
         const newPayoutAmount = (typeof missed_goal_payout === "number") ? missed_goal_payout : (userData.missed_goal_payout || 0);
         
@@ -4339,18 +4364,19 @@ app.post("/objectives/settings/:userId", async (req, res) => {
 app.post("/objectives/ensure-session/:userId", async (req, res) => {
     try {
         const { userId } = req.params;
-        const today = new Date().toISOString().slice(0, 10);
         
         // Get user settings
         const { data: user, error: userError } = await supabase
             .from("users")
-            .select("objective_deadline, missed_goal_payout")
+            .select("timezone, objective_deadline, missed_goal_payout")
             .eq("id", userId)
             .single();
         
         if (userError || !user) {
             return res.status(404).json({ error: "User not found" });
         }
+        
+        const today = getTodayForTimezone(user.timezone);
         
         // Get enabled objectives from user_objectives table
         const { data: enabledObjectives } = await supabase

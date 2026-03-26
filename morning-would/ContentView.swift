@@ -1039,8 +1039,13 @@ struct PushUpSessionView: View {
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.6)))
                 }
 
-                            Text("Position yourself in frame")
-                                .font(.system(.title2, design: .rounded, weight: .medium))
+                            VStack(spacing: 8) {
+                                Text("Position yourself in frame")
+                                    .font(.system(.title2, design: .rounded, weight: .medium))
+                                Text("Tuck your shirt in • 2-3 ft from camera")
+                                    .font(.system(.subheadline, design: .rounded))
+                                    .foregroundStyle(Color.white.opacity(0.7))
+                            }
                                 .foregroundStyle(Color.white)
                                 .padding()
                     .background(RoundedRectangle(cornerRadius: 15).fill(Color.black.opacity(0.7)))
@@ -3582,7 +3587,23 @@ struct ProfileView: View {
                         
                         VStack(spacing: 12) {
                             HStack(spacing: 10) {
-                                ForEach([10.0, 50.0, 100.0], id: \.self) { amount in
+                                Button(action: {
+                                    missedGoalPayout = 0
+                                    isPayoutAmountFocused = false
+                                }) {
+                                    Text("No Stakes")
+                                        .font(.system(.body, design: .rounded, weight: .semibold))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(missedGoalPayout == 0 ? goldColor : Color.gray.opacity(0.25))
+                                        )
+                                        .foregroundStyle(Color.black)
+                                }
+                                .buttonStyle(.plain)
+                                
+                                ForEach([50.0, 100.0], id: \.self) { amount in
                                     Button(action: { 
                                         missedGoalPayout = amount
                                             isPayoutAmountFocused = false
@@ -3602,7 +3623,7 @@ struct ProfileView: View {
                             }
                             
                             Button(action: { 
-                                if missedGoalPayout == 10 || missedGoalPayout == 50 || missedGoalPayout == 100 {
+                                if missedGoalPayout == 0 || missedGoalPayout == 50 || missedGoalPayout == 100 {
                                         missedGoalPayout = 0
                                 }
                                     isPayoutAmountFocused = true
