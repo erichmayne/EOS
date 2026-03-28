@@ -978,10 +978,14 @@ app.post('/withdraw', async (req, res) => {
     }
     
     const amountCents = Math.round(amount * 100);
+    const platformFeeCents = Math.round(amountCents * 0.03);
+    const transferAmountCents = amountCents - platformFeeCents;
     
     if ((user.balance_cents || 0) < amountCents) {
       return res.status(400).json({ error: 'Insufficient balance', available: (user.balance_cents || 0) / 100 });
     }
+    
+    console.log(`💰 Withdrawal breakdown: total=${amountCents/100}, fee=${platformFeeCents/100} (3%), transfer=${transferAmountCents/100}`);
     
     // Check if settings are locked - block withdrawal if locked
     if (user.settings_locked_until) {
@@ -1094,12 +1098,12 @@ app.post('/withdraw', async (req, res) => {
     if (eosBalance < amountCents) {
       console.log('⏳ Insufficient EOS balance, queuing withdrawal');
       
-      // Save to withdrawal_requests queue
+      // Save to withdrawal_requests queue (net of platform fee)
       const { data: queuedRequest, error: queueError } = await supabase
         .from('withdrawal_requests')
         .insert({
           user_id: userId,
-          amount_cents: amountCents,
+          amount_cents: transferAmountCents,
           status: 'pending',
           stripe_connect_account_id: stripeConnectAccountId,
           payout_method: payoutMethod,
@@ -1153,23 +1157,23 @@ app.post('/withdraw', async (req, res) => {
     let transferId = null;
     try {
       const transfer = await stripe.transfers.create({
-        amount: amountCents,
+        amount: transferAmountCents,
         currency: 'usd',
         destination: stripeConnectAccountId,
-        description: 'EOS withdrawal',
-        metadata: { user_id: userId }
+        description: `EOS withdrawal ($${(amountCents/100).toFixed(2)} - $${(platformFeeCents/100).toFixed(2)} fee)`,
+        metadata: { user_id: userId, gross_amount: amountCents, platform_fee: platformFeeCents }
       });
       transferId = transfer.id;
       console.log('✅ Transfer created:', transferId);
     } catch (transferErr) {
       console.error('Transfer failed, queuing instead:', transferErr.message);
       
-      // Queue it instead of failing
+      // Queue it instead of failing (net of platform fee)
       const { data: queuedRequest } = await supabase
         .from('withdrawal_requests')
         .insert({
           user_id: userId,
-          amount_cents: amountCents,
+          amount_cents: transferAmountCents,
           status: 'pending',
           stripe_connect_account_id: stripeConnectAccountId,
           payout_method: payoutMethod,
@@ -1244,6 +1248,8 @@ app.post('/withdraw', async (req, res) => {
       payoutId,
       message: 'Withdrawal complete! Funds will be deposited to your account within 5-7 business days.',
       amountWithdrawn: amount,
+      amountTransferred: transferAmountCents / 100,
+      platformFee: platformFeeCents / 100,
       newBalanceCents: newBalance
     });
     
@@ -2856,6 +2862,101 @@ app.post('/strava/webhook', async (req, res) => {
             console.log(`✅ Run objective met for user ${user.id}: ${distanceMiles.toFixed(2)} >= ${goalMiles} miles`);
         } else {
             console.log(`🏃 Run progress saved: ${distanceMiles.toFixed(2)}/${goalMiles} miles (not yet met)`);
+        }
+        
+        // --- RACE MODE: Check if this user just won any active race ---
+        try {
+            const { data: raceParticipations } = await supabase
+                .from('competition_participants')
+                .select('competition_id, baseline_run, competitions!inner(id, name, status, scoring_type, run_target, buy_in_amount, start_date)')
+                .eq('user_id', user.id)
+                .eq('status', 'active');
+            
+            for (const rp of (raceParticipations || [])) {
+                const comp = rp.competitions;
+                if (!comp || comp.status !== 'active' || comp.scoring_type !== 'race') continue;
+                
+                const raceTarget = parseFloat(comp.run_target) || 0;
+                if (raceTarget <= 0) continue;
+                
+                // Get this user's total run miles in the competition date range
+                const { data: raceSessions } = await supabase
+                    .from('objective_sessions')
+                    .select('completed_count, session_date')
+                    .eq('user_id', user.id)
+                    .eq('objective_type', 'run')
+                    .gte('session_date', comp.start_date);
+                
+                let totalMiles = 0;
+                for (const rs of (raceSessions || [])) {
+                    let miles = parseFloat(rs.completed_count) || 0;
+                    if (rs.session_date === comp.start_date) {
+                        miles = Math.max(0, miles - (rp.baseline_run || 0));
+                    }
+                    totalMiles += miles;
+                }
+                
+                if (totalMiles >= raceTarget) {
+                    console.log(`🏁 RACE WON! User ${user.id} hit ${totalMiles.toFixed(2)}/${raceTarget} miles in "${comp.name}"`);
+                    
+                    // Get all participants for payout
+                    const { data: allParticipants } = await supabase
+                        .from('competition_participants')
+                        .select('user_id, buy_in_amount')
+                        .eq('competition_id', comp.id)
+                        .eq('status', 'active');
+                    
+                    const buyIn = parseFloat(comp.buy_in_amount) || 0;
+                    const poolCents = Math.round(buyIn * 100) * (allParticipants?.length || 0);
+                    
+                    // Award pool to winner
+                    if (poolCents > 0) {
+                        const { data: winnerUser } = await supabase.from('users').select('balance_cents').eq('id', user.id).single();
+                        const newBal = (winnerUser?.balance_cents || 0) + poolCents;
+                        await supabase.from('users').update({ balance_cents: newBal }).eq('id', user.id);
+                        console.log(`💰 Race payout: $${(poolCents/100).toFixed(2)} to ${user.id}`);
+                    }
+                    
+                    // Mark competition completed
+                    await supabase.from('competitions').update({
+                        status: 'completed',
+                        winner_user_id: user.id,
+                        completed_at: new Date().toISOString(),
+                        payout_completed: poolCents > 0
+                    }).eq('id', comp.id);
+                    
+                    // Send race emails
+                    const { data: winnerData } = await supabase.from('users').select('full_name').eq('id', user.id).single();
+                    const winnerName = winnerData?.full_name || 'Unknown';
+                    
+                    for (const p of (allParticipants || [])) {
+                        const { data: pUser } = await supabase.from('users').select('email, full_name').eq('id', p.user_id).single();
+                        if (!pUser?.email) continue;
+                        
+                        const isWinner = p.user_id === user.id;
+                        const subject = isWinner 
+                            ? `🏁 You won the "${comp.name}" race!`
+                            : `🏁 "${comp.name}" race is over`;
+                        const body = isWinner
+                            ? `Congratulations ${pUser.full_name || 'Champion'}! You finished first in "${comp.name}" with ${totalMiles.toFixed(1)} miles!${poolCents > 0 ? ` $${(poolCents/100).toFixed(2)} has been added to your EOS balance.` : ''}`
+                            : `${winnerName} finished the "${comp.name}" race first with ${totalMiles.toFixed(1)}/${raceTarget} miles.${poolCents > 0 ? ` The $${(poolCents/100).toFixed(2)} pool has been awarded to the winner.` : ''}`;
+                        
+                        try {
+                            await emailTransporter.sendMail({
+                                from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+                                to: pUser.email,
+                                subject,
+                                text: body,
+                                html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">${subject}</h2><p>${body}</p><p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p></div>`
+                            });
+                        } catch (emailErr) {
+                            console.error('Race email error:', emailErr.message);
+                        }
+                    }
+                }
+            }
+        } catch (raceErr) {
+            console.error('Race check error (non-fatal):', raceErr.message);
         }
         
     } catch (error) {
@@ -4514,12 +4615,13 @@ app.post('/compete/create', async (req, res) => {
     try {
         const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue, pushupTarget, runTarget } = req.body;
         
-        if (!userId || !name || !objectiveType || !durationDays) {
-            return res.status(400).json({ error: 'Missing required fields: userId, name, objectiveType, durationDays' });
+        if (!userId || !name || !objectiveType) {
+            return res.status(400).json({ error: 'Missing required fields: userId, name, objectiveType' });
         }
         
+        const isRace = scoringType === 'race';
         const buyIn = parseFloat(buyInAmount) || 0;
-        const days = parseInt(durationDays) || 7;
+        const days = isRace ? null : (parseInt(durationDays) || 7);
         
         if (buyIn > 0) {
             const { data: creator } = await supabase
@@ -4547,7 +4649,7 @@ app.post('/compete/create', async (req, res) => {
             .insert({
                 creator_user_id: userId,
                 name: name.trim(),
-                objective_type: objectiveType,
+                objective_type: isRace ? 'run' : objectiveType,
                 scoring_type: scoringType || 'consistency',
                 start_date: startDate,
                 end_date: endDate,
@@ -4792,9 +4894,10 @@ app.post('/compete/start', async (req, res) => {
         
         // Set start_date = today, end_date = today + duration_days, status = active
         const today = new Date();
-        const durationDays = comp.duration_days || 7;
+        const isRaceComp = comp.scoring_type === 'race';
+        const durationDays = comp.duration_days || (isRaceComp ? null : 7);
         const startDate = today.toISOString().split('T')[0];
-        const endDate = new Date(today.getTime() + durationDays * 86400000).toISOString().split('T')[0];
+        const endDate = durationDays ? new Date(today.getTime() + durationDays * 86400000).toISOString().split('T')[0] : null;
         
         const startedAt = new Date().toISOString();
         await supabase.from('competitions')
@@ -5000,7 +5103,8 @@ app.get('/compete/user/:userId', async (req, res) => {
                 pushupTarget: comp.pushup_target || 0,
                 runTarget: comp.run_target || 0,
                 buyInAmount: comp.buy_in_amount,
-                durationDays: comp.duration_days || 7,
+                durationDays: comp.duration_days,
+                isRace: comp.scoring_type === 'race',
                 creatorUserId: comp.creator_user_id,
                 creatorName: comp.creator?.full_name || 'Unknown',
                 participantCount: count || 0
@@ -5018,6 +5122,7 @@ app.get('/compete/user/:userId', async (req, res) => {
 app.get('/compete/:competitionId/leaderboard', async (req, res) => {
     try {
         const { competitionId } = req.params;
+        const limit = parseInt(req.query.limit) || 0;
         
         // Get competition details
         const { data: competition, error: compError } = await supabase
@@ -5043,28 +5148,35 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
         
         const leaderboard = [];
         
+        // Batch-fetch all sessions for all participants in one query
+        const userIds = (participants || []).map(p => p.user_id);
+        let allSessionsQuery = supabase
+            .from('objective_sessions')
+            .select('user_id, status, completed_count, target_count, session_date, objective_type')
+            .in('user_id', userIds)
+            .gte('session_date', competition.start_date)
+            .lte('session_date', competition.end_date);
+        
+        if (competition.objective_type !== 'both') {
+            allSessionsQuery = allSessionsQuery.eq('objective_type', competition.objective_type);
+        }
+        
+        const { data: allSessionsData } = await allSessionsQuery;
+        
+        // Group sessions by user_id
+        const sessionsByUser = {};
+        for (const s of (allSessionsData || [])) {
+            if (!sessionsByUser[s.user_id]) sessionsByUser[s.user_id] = [];
+            sessionsByUser[s.user_id].push(s);
+        }
+        
         for (const p of (participants || [])) {
-            // Query their sessions within the competition date range
-            let sessionsQuery = supabase
-                .from('objective_sessions')
-                .select('status, completed_count, target_count, session_date, objective_type')
-                .eq('user_id', p.user_id)
-                .gte('session_date', competition.start_date)
-                .lte('session_date', competition.end_date);
-            
-            // Filter by objective type (unless "both")
-            if (competition.objective_type !== 'both') {
-                sessionsQuery = sessionsQuery.eq('objective_type', competition.objective_type);
-            }
-            
-            const { data: sessions } = await sessionsQuery;
-            
             let score = 0;
             let daysCompleted = 0;
             let totalCount = 0;
             let currentStreak = 0;
             
-            const allSessions = sessions || [];
+            const allSessions = sessionsByUser[p.user_id] || [];
             const startDate = competition.start_date;
             const bPushups = p.baseline_pushups || 0;
             const bRun = p.baseline_run || 0;
@@ -5122,7 +5234,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 }
             }
             
-            score = competition.scoring_type === 'cumulative' ? totalCount : daysCompleted;
+            score = (competition.scoring_type === 'cumulative' || competition.scoring_type === 'race') ? totalCount : daysCompleted;
             
             // Extract today's progress, adjusted for baseline on start day
             const todayStr = new Date().toISOString().split('T')[0];
@@ -5146,7 +5258,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 };
             }
             
-            leaderboard.push({
+            const entry = {
                 userId: p.user_id,
                 name: p.users?.full_name || p.users?.email || 'Unknown',
                 score: Math.round(score * 100) / 100,
@@ -5154,7 +5266,12 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 totalCount: Math.round(totalCount * 100) / 100,
                 streak: currentStreak,
                 todayProgress
-            });
+            };
+            if (competition.scoring_type === 'race') {
+                entry.raceTarget = compRunTarget;
+                entry.raceProgress = compRunTarget > 0 ? Math.min(1, totalCount / compRunTarget) : 0;
+            }
+            leaderboard.push(entry);
         }
         
         // Sort by score descending, then by streak as tiebreaker
@@ -5164,16 +5281,27 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
         leaderboard.forEach((entry, i) => { entry.rank = i + 1; });
         
         // Calculate total days and precise time remaining
+        const isRaceComp = competition.scoring_type === 'race';
         const startedAt = competition.started_at ? new Date(competition.started_at) : new Date(competition.start_date);
-        const endAt = new Date(startedAt.getTime() + (competition.duration_days || 7) * 86400000);
         const now = new Date();
-        const totalDays = competition.duration_days || Math.ceil((new Date(competition.end_date) - new Date(competition.start_date)) / 86400000);
         const msElapsed = Math.max(0, now - startedAt);
-        const msRemaining = Math.max(0, endAt - now);
-        const daysElapsed = Math.min(Math.ceil(msElapsed / 86400000), totalDays);
-        const daysRemaining = Math.max(0, Math.ceil(msRemaining / 86400000));
-        const hoursRemaining = Math.max(0, Math.floor(msRemaining / 3600000));
-        const endsAt = endAt.toISOString();
+        
+        let totalDays, daysElapsed, daysRemaining, hoursRemaining, endsAt;
+        if (isRaceComp || !competition.duration_days) {
+            totalDays = null;
+            daysElapsed = Math.ceil(msElapsed / 86400000);
+            daysRemaining = null;
+            hoursRemaining = null;
+            endsAt = null;
+        } else {
+            const endAt = new Date(startedAt.getTime() + competition.duration_days * 86400000);
+            const msRemaining = Math.max(0, endAt - now);
+            totalDays = competition.duration_days;
+            daysElapsed = Math.min(Math.ceil(msElapsed / 86400000), totalDays);
+            daysRemaining = Math.max(0, Math.ceil(msRemaining / 86400000));
+            hoursRemaining = Math.max(0, Math.floor(msRemaining / 3600000));
+            endsAt = endAt.toISOString();
+        }
         
         let compPushupTarget = competition.pushup_target ?? 0;
         let compRunTarget = competition.run_target ?? 0;
@@ -5199,9 +5327,11 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 daysRemaining,
                 hoursRemaining,
                 startedAt: competition.started_at || competition.start_date,
-                endsAt
+                endsAt,
+                isRace: isRaceComp,
+                totalParticipants: leaderboard.length
             },
-            leaderboard
+            leaderboard: limit > 0 ? leaderboard.slice(0, limit) : leaderboard
         });
         
     } catch (error) {
@@ -5222,6 +5352,14 @@ app.post('/compete/check-completed', async (req, res) => {
             .eq('status', 'active');
         
         const ended = (activeComps || []).filter(comp => {
+            // Race comps end via Strava webhook, not time — but add 30-day safety timeout
+            if (comp.scoring_type === 'race') {
+                if (comp.started_at) {
+                    const safetyEnd = new Date(new Date(comp.started_at).getTime() + 30 * 86400000);
+                    return now >= safetyEnd;
+                }
+                return false;
+            }
             if (comp.started_at) {
                 const endAt = new Date(new Date(comp.started_at).getTime() + (comp.duration_days || 7) * 86400000);
                 return now >= endAt;
@@ -5319,7 +5457,7 @@ app.post('/compete/check-completed', async (req, res) => {
                     }
                 }
                 
-                const score = comp.scoring_type === 'cumulative' ? totalCount : daysCompleted;
+                const score = (comp.scoring_type === 'cumulative' || comp.scoring_type === 'race') ? totalCount : daysCompleted;
                 const { data: scoreUser } = await supabase.from('users').select('full_name').eq('id', p.user_id).single();
                 scores.push({ userId: p.user_id, score, buyInAmount: parseFloat(p.buy_in_amount) || 0, name: scoreUser?.full_name || 'Unknown' });
             }

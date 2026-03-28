@@ -288,10 +288,14 @@
             <div class="amount-display">
                 <div class="label">Available to withdraw</div>
                 <div class="amount" id="withdraw-amount">$0.00</div>
+                <div id="fee-breakdown" style="margin-top: 12px; font-size: 13px; color: #888; line-height: 1.6;">
+                    <span id="fee-line"></span>
+                </div>
             </div>
             
             <div class="info-box">
-                🔒 Your information is securely processed by Stripe. We never store your bank details.
+                🔒 Your information is securely processed by Stripe. We never store your bank details.<br>
+                <span style="font-size: 12px; color: #999; margin-top: 4px; display: inline-block;">A 3% platform fee is applied to all withdrawals.</span>
             </div>
             
             <button class="button" onclick="showStep('step-setup')" id="continue-btn">Continue to Setup</button>
@@ -484,9 +488,12 @@
                 }
                 
                 withdrawAmount = (currentUser.balance_cents || 0) / 100;
-                
+                const fee = Math.round(withdrawAmount * 3) / 100;
+                const youReceive = Math.round((withdrawAmount - fee) * 100) / 100;
+
                 document.getElementById('withdraw-amount').textContent = `$${withdrawAmount.toFixed(2)}`;
-                document.getElementById('success-amount').textContent = `$${withdrawAmount.toFixed(2)}`;
+                document.getElementById('fee-line').innerHTML = `Platform fee (3%): <strong>-$${fee.toFixed(2)}</strong> &nbsp;•&nbsp; You receive: <strong>$${youReceive.toFixed(2)}</strong>`;
+                document.getElementById('success-amount').textContent = `$${youReceive.toFixed(2)}`;
                 
                 // Pre-fill name if available
                 if (currentUser.full_name) {

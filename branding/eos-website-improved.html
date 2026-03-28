@@ -353,7 +353,7 @@
                 <li><a href="#how">How It Works</a></li>
                 <li><a href="#compete">Compete</a></li>
                 <li><a href="/blog">Blog</a></li>
-                <li><a href="/portal" class="nav-signin">Sign In</a></li>
+                <li><a href="/portal" class="nav-signin" id="nav-auth-link">Sign In</a></li>
                 <li><a href="#download" class="nav-cta">Download</a></li>
             </ul>
             <div class="mobile-toggle" onclick="document.querySelector('.nav-links').classList.toggle('active')">
@@ -614,6 +614,22 @@
             });
         }, { threshold: 0.5 });
         document.querySelectorAll('[data-count]').forEach(el => counterObserver.observe(el));
+        
+        // Check if user is signed in and update nav
+        try {
+            const session = localStorage.getItem('eos_session');
+            if (session) {
+                const user = JSON.parse(session);
+                const authLink = document.getElementById('nav-auth-link');
+                if (authLink && user.full_name) {
+                    authLink.textContent = user.full_name;
+                    authLink.href = '/portal';
+                } else if (authLink) {
+                    authLink.textContent = 'Profile';
+                    authLink.href = '/portal';
+                }
+            }
+        } catch (e) {}
     </script>
 </body>
 </html>

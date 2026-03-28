@@ -618,6 +618,7 @@ struct ContentView: View {
         let compName = comp["name"] as? String ?? "Competition"
         let objType = comp["objectiveType"] as? String ?? "pushups"
         let daysRemaining = comp["daysRemaining"] as? Int ?? 0
+        let widgetIsRace = comp["isRace"] as? Bool ?? (comp["scoringType"] as? String == "race")
         let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
         
         // Find my rank and score
@@ -678,7 +679,7 @@ struct ContentView: View {
                 
                 // Days left + chevron
                 HStack(spacing: 2) {
-                    Text("\(daysRemaining)d")
+                    Text(widgetIsRace ? "Race" : "\(daysRemaining)d")
                         .font(.system(.caption2, design: .rounded, weight: .medium))
                         .foregroundStyle(Color.gray)
                     Image(systemName: "chevron.right")
@@ -2684,11 +2685,9 @@ final class DepositPaymentService: ObservableObject {
             return
         }
 
-        let presentingVC = rootVC.presentedViewController ?? rootVC
-
-        guard presentingVC.presentedViewController == nil else {
-            completion(.failed(error: PaymentSheetError.alreadyPresented))
-            return
+        var presentingVC = rootVC
+        while let next = presentingVC.presentedViewController {
+            presentingVC = next
         }
 
         sheet.present(from: presentingVC, completion: completion)
@@ -5326,11 +5325,11 @@ struct CompeteView: View {
                         
                         ruleSection(title: "2. How Competitions Work", body: "Users create or join fitness competitions with a set duration and objective type (push-ups, running, or both). Participants track their daily fitness activity through the app. At the end of the competition period, the participant with the highest score wins.")
                         
-                        ruleSection(title: "3. Scoring", body: "Scores are determined by physical fitness performance only. For 'Days Completed' scoring, each day you meet your target counts as one point. For 'Total Count' scoring, your cumulative reps or miles are tallied. For combined competitions: 1 push-up = 1 point, 1 mile = 100 points.")
+                        ruleSection(title: "3. Scoring", body: "Scores are determined by physical fitness performance only. For 'Days Completed' scoring, each day you meet your target counts as one point. For 'Total Count' scoring, your cumulative reps or miles are tallied. For 'Race' mode, the first participant to reach the target miles wins — runs are GPS-tracked via Strava. For combined competitions: 1 push-up = 1 point, 1 mile = 100 points.")
                         
                         ruleSection(title: "4. Voluntary Entry Contributions", body: "Competitions may include an optional voluntary entry contribution. All contributions are clearly disclosed before joining. When the competition starts, contributions are committed from each participant's existing EOS balance. The total contributions go to the top performer. In the event of a tie, the total is split equally among tied participants. If no participant scores, all contributions are refunded.")
                         
-                        ruleSection(title: "5. Competition Duration", body: "Each competition has a fixed duration set by the creator (1-90 days). The competition begins when the creator starts it and ends automatically when the duration expires. Results are calculated and payouts are processed automatically.")
+                        ruleSection(title: "5. Competition Duration", body: "Each competition has a fixed duration set by the creator (1-90 days). The competition begins when the creator starts it and ends automatically when the duration expires. Race mode competitions have no time limit — they end instantly when the first participant reaches the target distance. Results are calculated and payouts are processed automatically.")
                         
                         ruleSection(title: "6. Fair Play", body: "All activity must be performed by the registered participant. Running activities are verified through Strava integration and are subject to pace validation. Activities that appear fraudulent may be rejected.")
                         
@@ -5578,8 +5577,13 @@ struct CompeteView: View {
         let target = comp["targetValue"] as? Double ?? 0
         let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
         let poolTotal = buyIn * Double(participants)
+        let compIsRace = comp["isRace"] as? Bool ?? (comp["scoringType"] as? String == "race")
+        let runTarget = comp["runTarget"] as? Double ?? 0
         
         let targetLabel: String = {
+            if compIsRace && runTarget > 0 {
+                return "Race to \(String(format: "%.1f", runTarget)) mi"
+            }
             if objType == "run" && target > 0 {
                 return String(format: "%.1f mi/day", target)
             } else if target > 0 {
@@ -5589,6 +5593,7 @@ struct CompeteView: View {
         }()
         
         let daysLeft: Int = {
+            if compIsRace { return 0 }
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
             if let end = formatter.date(from: endDate) {
@@ -5633,7 +5638,7 @@ struct CompeteView: View {
                             }
                             if isActive {
                                 Text("·")
-                                Text("\(daysLeft)d left")
+                                Text(compIsRace ? "Race" : "\(daysLeft)d left")
                                     .foregroundStyle(goldColor)
                             }
                         }
@@ -5749,12 +5754,15 @@ struct CreateCompetitionView: View {
     @State private var runDistanceText: String = "2.0"
     @State private var buyInAmount: Double = 0
     @State private var buyInText: String = ""
+    @State private var showCustomBuyIn: Bool = false
     @State private var isCreating: Bool = false
     @State private var createdCode: String? = nil
     @AppStorage("profileEmail") private var profileEmail: String = ""
     @StateObject private var depositService = DepositPaymentService()
     @State private var isDepositing: Bool = false
     @State private var depositError: String?
+    @State private var showCustomDeposit: Bool = false
+    @State private var customDepositText: String = ""
     @State private var createError: String? = nil
     @State private var showBuyInAgreement: Bool = false
     
@@ -5935,12 +5943,18 @@ struct CreateCompetitionView: View {
             Picker("Scoring", selection: $scoringType) {
                 Text("Days Completed").tag("consistency")
                 Text("Total Count").tag("cumulative")
+                Text("Race").tag("race")
             }
             .pickerStyle(.segmented)
+            .onChange(of: scoringType) { _, newValue in
+                if newValue == "race" {
+                    objectiveType = "run"
+                }
+            }
         } header: {
             Text("Competition Type")
         } footer: {
-            Text(scoringType == "consistency" ? "Winner completes the most days hitting their target." : "Winner has the highest total (miles or reps). No daily target needed.")
+            Text(scoringType == "consistency" ? "Winner completes the most days hitting their target." : (scoringType == "race" ? "First to hit the target miles wins. Runs only." : "Winner has the highest total (miles or reps). No daily target needed."))
                 .font(.system(.caption2, design: .rounded))
         }
         .listRowBackground(Color.white)
@@ -5960,34 +5974,44 @@ struct CreateCompetitionView: View {
                 
                 Spacer()
                 
-                Menu {
-                    Button(action: { objectiveType = "run" }) {
-                        Label("Run", systemImage: "figure.run")
+                if scoringType == "race" {
+                    Text("Run Only")
+                        .font(.system(.caption, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.gray)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                } else {
+                    Menu {
+                        Button(action: { objectiveType = "run" }) {
+                            Label("Run", systemImage: "figure.run")
+                        }
+                        Button(action: { objectiveType = "pushups" }) {
+                            Label("Pushups", systemImage: "figure.strengthtraining.traditional")
+                        }
+                        Button(action: { objectiveType = "both" }) {
+                            Label("Both", systemImage: "flame.fill")
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Change")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(goldColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(goldColor.opacity(0.1))
+                        .cornerRadius(8)
                     }
-                    Button(action: { objectiveType = "pushups" }) {
-                        Label("Pushups", systemImage: "figure.strengthtraining.traditional")
-                    }
-                    Button(action: { objectiveType = "both" }) {
-                        Label("Both", systemImage: "flame.fill")
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Change")
-                            .font(.system(.caption, design: .rounded, weight: .medium))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2)
-                    }
-                    .foregroundStyle(goldColor)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(goldColor.opacity(0.1))
-                    .cornerRadius(8)
                 }
             }
             .padding(.vertical, 4)
             
-            // Target pickers — only shown for "Days Completed" (consistency)
-            if scoringType == "consistency" {
+            // Target pickers — shown for consistency and race
+            if scoringType == "consistency" || scoringType == "race" {
                 createTargetPickers
             }
         } header: {
@@ -5997,15 +6021,31 @@ struct CreateCompetitionView: View {
         
         // 4. Duration
         Section {
-            Picker("Duration", selection: $durationDays) {
-                ForEach(1...90, id: \.self) { day in
-                    Text("\(day) \(day == 1 ? "day" : "days")")
+            if scoringType == "race" {
+                HStack {
+                    Image(systemName: "flag.checkered")
+                        .foregroundStyle(goldColor)
+                    Text("Until 1st Finished")
+                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
                         .foregroundStyle(Color.black)
-                        .tag(day)
+                    Spacer()
+                    Text("Auto-ends when someone hits the target")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                        .multilineTextAlignment(.trailing)
                 }
+                .padding(.vertical, 8)
+            } else {
+                Picker("Duration", selection: $durationDays) {
+                    ForEach(1...90, id: \.self) { day in
+                        Text("\(day) \(day == 1 ? "day" : "days")")
+                            .foregroundStyle(Color.black)
+                            .tag(day)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 120)
             }
-            .pickerStyle(.wheel)
-            .frame(height: 120)
         } header: {
             Text("Duration")
         }
@@ -6013,37 +6053,111 @@ struct CreateCompetitionView: View {
         
         // 5. Buy-in
         Section {
-            HStack {
-                Image(systemName: "dollarsign.circle.fill")
-                    .foregroundStyle(goldColor)
-                Text("Buy-In")
-                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                
-                Spacer()
-                
-                HStack(spacing: 4) {
-                    Text("$")
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.5))
-                    TextField("0", text: $buyInText)
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(Color.black)
-                        .keyboardType(.decimalPad)
-                        .frame(width: 60)
-                        .onChange(of: buyInText) { _, newValue in
-                            buyInAmount = Double(newValue) ?? 0
+            VStack(spacing: 14) {
+                // Preset amount buttons with Free option
+                HStack(spacing: 8) {
+                    Button(action: {
+                        buyInAmount = 0
+                        buyInText = ""
+                        showCustomBuyIn = false
+                    }) {
+                        VStack(spacing: 2) {
+                            Text("Free")
+                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                            Text("No stake")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(buyInAmount == 0 && !showCustomBuyIn ? Color.white.opacity(0.7) : Color.gray)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(buyInAmount == 0 && !showCustomBuyIn ? Color.black : Color.gray.opacity(0.08))
+                        )
+                        .foregroundStyle(buyInAmount == 0 && !showCustomBuyIn ? Color.white : Color.black)
+                    }
+                    .buttonStyle(.plain)
+
+                    ForEach([20.0, 50.0, 100.0], id: \.self) { amt in
+                        Button(action: {
+                            buyInAmount = amt
+                            buyInText = "\(Int(amt))"
+                            showCustomBuyIn = false
+                        }) {
+                            Text("$\(Int(amt))")
+                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(buyInAmount == amt ? goldColor : Color.gray.opacity(0.08))
+                                )
+                                .foregroundStyle(buyInAmount == amt ? Color.white : Color.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(8)
+
+                // Custom amount row
+                Button(action: {
+                    if !showCustomBuyIn {
+                        buyInAmount = 0
+                        buyInText = ""
+                    }
+                    showCustomBuyIn = true
+                }) {
+                    HStack(spacing: 8) {
+                        if showCustomBuyIn {
+                            Text("$")
+                                .font(.system(.body, design: .rounded, weight: .bold))
+                                .foregroundStyle(goldColor)
+                            TextField("Enter amount", text: $buyInText, prompt: Text("Enter amount").foregroundColor(.gray))
+                                .font(.system(.body, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color.black)
+                                .keyboardType(.decimalPad)
+                                .onChange(of: buyInText) { _, newValue in
+                                    buyInAmount = Double(newValue) ?? 0
+                                }
+                            Spacer()
+                            Button(action: {
+                                showCustomBuyIn = false
+                                buyInAmount = 0
+                                buyInText = ""
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(Color.gray.opacity(0.5))
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Image(systemName: "pencil")
+                                .font(.caption)
+                                .foregroundStyle(goldColor)
+                            Text("Custom Amount")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(goldColor)
+                            Spacer()
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(showCustomBuyIn ? goldColor.opacity(0.06) : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(showCustomBuyIn ? goldColor.opacity(0.4) : goldColor.opacity(0.2), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
         } header: {
-            Text("Stakes")
+            Text("Entry Stake")
         } footer: {
-            Text(buyInAmount > 0 ? "Each participant voluntarily contributes $\(Int(buyInAmount)) when the competition starts. Top performer receives the total contributions." : "No money on the line — just bragging rights.")
+            Text(buyInAmount > 0 ? "Each participant contributes $\(Int(buyInAmount)). Winner takes the pot." : "No stake — bragging rights only.")
                 .font(.system(.caption2, design: .rounded))
         }
         .listRowBackground(Color.white)
@@ -6051,54 +6165,77 @@ struct CreateCompetitionView: View {
         // 6. Balance check for buy-in competitions
         if buyInAmount > 0 {
             Section {
-                HStack {
-                    Text("Your Balance")
-                        .font(.system(.subheadline, design: .rounded))
-                    Spacer()
-                    Text(String(format: "$%.2f", profileCashHoldings))
-                        .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        .foregroundStyle(profileCashHoldings >= buyInAmount ? Color.green : Color.red)
-                }
-
-                if profileCashHoldings < buyInAmount {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("You need $\(Int(buyInAmount)) to enter. Add balance to continue.")
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundStyle(Color.red)
-
-                        if isDepositing {
-                            HStack(spacing: 8) {
-                                ProgressView().scaleEffect(0.7)
-                                Text("Processing deposit…")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.gray)
-                            }
+                VStack(spacing: 16) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Your Balance")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.gray)
+                            Text(String(format: "$%.2f", profileCashHoldings))
+                                .font(.system(.title2, design: .rounded, weight: .bold))
+                                .foregroundStyle(profileCashHoldings >= buyInAmount ? Color.black : Color.red)
+                        }
+                        Spacer()
+                        if profileCashHoldings >= buyInAmount {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(Color.green)
                         } else {
-                            HStack(spacing: 8) {
-                                ForEach([5, 10, 20, 50], id: \.self) { amt in
-                                    Button(action: { quickDeposit(Double(amt)) }) {
-                                        Text("$\(amt)")
-                                            .font(.system(.caption, design: .rounded, weight: .semibold))
-                                            .foregroundStyle(goldColor)
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 8)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .fill(goldColor.opacity(0.1))
-                                            )
-                                    }
-                                    .buttonStyle(.plain)
-                                }
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("Need")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.gray)
+                                Text(String(format: "$%.0f", buyInAmount - profileCashHoldings))
+                                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                    .foregroundStyle(Color.red)
                             }
                         }
+                    }
 
-                        if let depositError {
-                            Text(depositError)
-                                .font(.system(.caption2, design: .rounded))
-                                .foregroundStyle(Color.red)
+                    if profileCashHoldings < buyInAmount {
+                        VStack(spacing: 12) {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.12))
+                                .frame(height: 1)
+
+                            if isDepositing {
+                                HStack(spacing: 10) {
+                                    ProgressView().scaleEffect(0.8)
+                                    Text("Processing deposit…")
+                                        .font(.system(.caption, design: .rounded))
+                                        .foregroundStyle(Color.gray)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                            } else {
+                                let needed = ceil(buyInAmount - profileCashHoldings)
+                                Button(action: { quickDeposit(needed) }) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus.circle.fill")
+                                            .font(.body)
+                                        Text("Add $\(Int(needed)) to Enter")
+                                            .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                    }
+                                    .foregroundStyle(Color.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 13)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(goldColor)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            if let depositError {
+                                Text(depositError)
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.red)
+                            }
                         }
                     }
                 }
+                .padding(.vertical, 6)
             } header: {
                 Text("Balance")
             }
@@ -6636,6 +6773,7 @@ struct CompetitionDetailView: View {
     @State private var showCancelConfirm: Bool = false
     @State private var isCancelling: Bool = false
     @State private var messageCopied: Bool = false
+    @State private var showAllParticipants: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     
@@ -6710,8 +6848,11 @@ struct CompetitionDetailView: View {
         let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
         
         let objWord = objType == "run" ? "running" : (objType == "both" ? "workouts" : "pushups")
+        let runTarget = comp["runTarget"] as? Double ?? 0
         let hookLine: String
-        if scoring == "cumulative" {
+        if scoring == "race" {
+            hookLine = "First to \(String(format: "%.1f", runTarget)) miles wins everything."
+        } else if scoring == "cumulative" {
             let mostWord = objType == "run" ? "miles" : objWord
             hookLine = "Whoever does the most \(mostWord) in \(durationDays) days wins the pot."
         } else {
@@ -6719,6 +6860,9 @@ struct CompetitionDetailView: View {
         }
         let buyInLine = buyIn > 0 ? " $\(Int(buyIn)) entry." : ""
         
+        if scoring == "race" {
+            return "Join my running race on EOS!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
+        }
         return "Join my \(durationDays)-day \(objWord) competition on EOS!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
     }
     
@@ -6743,8 +6887,9 @@ struct CompetitionDetailView: View {
         let targetValue = comp["targetValue"] as? Double ?? 0
         let lobbyPushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
         let lobbyRunTarget = comp["runTarget"] as? Double ?? 0
-        let poolTotal = buyIn * Double(leaderboard.count)
-        let durationLabel = durationDays == 7 ? "1 Week" : (durationDays == 14 ? "2 Weeks" : (durationDays == 30 ? "1 Month" : "\(durationDays) days"))
+        let totalParticipants = comp["totalParticipants"] as? Int ?? leaderboard.count
+        let poolTotal = buyIn * Double(totalParticipants)
+        let durationLabel = scoring == "race" ? "Until 1st Finished" : (durationDays == 7 ? "1 Week" : (durationDays == 14 ? "2 Weeks" : (durationDays == 30 ? "1 Month" : "\(durationDays) \(durationDays == 1 ? "day" : "days")")))
         
         return ScrollView {
             VStack(spacing: 0) {
@@ -6896,7 +7041,7 @@ struct CompetitionDetailView: View {
                     )
                     completedStatCard(
                         icon: "person.2.fill",
-                        value: "\(leaderboard.count)",
+                        value: "\(totalParticipants)",
                         label: "Players",
                         accent: false
                     )
@@ -7129,9 +7274,11 @@ struct CompetitionDetailView: View {
         let targetValue = comp["targetValue"] as? Double ?? 0
         let pushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
         let runTarget = comp["runTarget"] as? Double ?? 0
-        let poolTotal = buyIn * Double(leaderboard.count)
+        let totalParticipants = comp["totalParticipants"] as? Int ?? leaderboard.count
+        let poolTotal = buyIn * Double(totalParticipants)
         
         let scoreUnit: String = {
+            if scoring == "race" { return "mi" }
             if scoring == "consistency" { return "days" }
             switch objType {
             case "run": return "mi"
@@ -7170,7 +7317,7 @@ struct CompetitionDetailView: View {
                         .font(.system(.title, design: .rounded, weight: .bold))
                         .foregroundStyle(goldColor)
                     
-                    Text("\(winnerScoreText) \(scoreUnit) over \(totalDays) days")
+                    Text(scoring == "race" ? "\(winnerScoreText) mi — first to the finish" : "\(winnerScoreText) \(scoreUnit) over \(totalDays) days")
                         .font(.system(.subheadline, design: .rounded))
                         .foregroundStyle(Color.gray)
                     
@@ -7195,16 +7342,26 @@ struct CompetitionDetailView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     completedStatCard(
                         icon: "person.2.fill",
-                        value: "\(leaderboard.count)",
+                        value: "\(totalParticipants)",
                         label: "Players",
                         accent: false
                     )
-                    completedStatCard(
-                        icon: "calendar",
-                        value: "\(totalDays)",
-                        label: "Days",
-                        accent: false
-                    )
+                    if scoring == "race" {
+                        let dist = runTarget > 0 ? runTarget : targetValue
+                        completedStatCard(
+                            icon: "flag.checkered",
+                            value: dist == floor(dist) ? "\(Int(dist)) mi" : String(format: "%.1f mi", dist),
+                            label: "Target",
+                            accent: false
+                        )
+                    } else {
+                        completedStatCard(
+                            icon: "calendar",
+                            value: "\(totalDays)",
+                            label: "Days",
+                            accent: false
+                        )
+                    }
                     if buyIn > 0 {
                         completedStatCard(
                             icon: "dollarsign.circle.fill",
@@ -7340,7 +7497,23 @@ struct CompetitionDetailView: View {
     
     private func goalCard(objType: String, scoring: String, targetValue: Double, pushupTarget: Int = 0, runTarget: Double = 0) -> some View {
         VStack(spacing: 10) {
-            if scoring == "consistency" {
+            if scoring == "race" {
+                Image(systemName: "flag.checkered")
+                    .font(.title2)
+                    .foregroundStyle(goldColor)
+                Text("Race")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                let dist = runTarget > 0 ? runTarget : targetValue
+                if dist > 0 {
+                    Text("First to \(String(format: "%.1f", dist)) miles wins")
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(Color.black.opacity(0.7))
+                }
+                Text("GPS-tracked via Strava")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(goldColor)
+            } else if scoring == "consistency" {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2)
                     .foregroundStyle(goldColor)
@@ -7547,6 +7720,84 @@ struct CompetitionDetailView: View {
         }
     }
     
+    private func raceProgressCard(leaderboard: [[String: Any]], userId: String, targetValue: Double) -> some View {
+        let myEntry = leaderboard.first { ($0["userId"] as? String) == userId }
+        let myMiles = myEntry?["score"] as? Double ?? 0
+        let fraction = targetValue > 0 ? min(1.0, myMiles / targetValue) : 0
+        let pct = Int(fraction * 100)
+        let done = fraction >= 1.0
+        let milesText = String(format: "%.1f", myMiles)
+        let targetText = targetValue == floor(targetValue) ? "\(Int(targetValue))" : String(format: "%.1f", targetValue)
+        
+        return VStack(spacing: 16) {
+            HStack {
+                Text(done ? "You've Finished!" : "Your Progress")
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Spacer()
+                if done {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.title3)
+                        .foregroundStyle(goldColor)
+                }
+            }
+            
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(done ? goldColor.opacity(0.15) : Color.gray.opacity(0.08))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: done ? "flag.checkered" : "figure.run")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(done ? goldColor : Color.black.opacity(0.5))
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Race to \(targetText) mi")
+                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            .foregroundStyle(Color.black)
+                        Text("\(milesText) / \(targetText) mi")
+                            .font(.system(.caption, design: .rounded, weight: .medium))
+                            .foregroundStyle(done ? goldColor : Color.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(done ? "Done" : "\(pct)%")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(done ? goldColor : Color.black.opacity(0.6))
+                }
+                
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.gray.opacity(0.1))
+                            .frame(height: 8)
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(
+                                done
+                                ? LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
+                                : LinearGradient(colors: [goldColor.opacity(0.4), goldColor.opacity(0.6)], startPoint: .leading, endPoint: .trailing)
+                            )
+                            .frame(width: max(fraction > 0 ? 8 : 0, geo.size.width * CGFloat(fraction)), height: 8)
+                    }
+                }
+                .frame(height: 8)
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(done ? goldColor.opacity(0.06) : Color.white)
+                .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(done ? goldColor.opacity(0.3) : goldColor.opacity(0.12), lineWidth: done ? 1.5 : 1)
+        )
+    }
+    
     private func completedLeaderboardRow(_ entry: [String: Any], index: Int, scoreUnit: String) -> some View {
         let name = entry["name"] as? String ?? "Unknown"
         let score = entry["score"] as? Double ?? 0
@@ -7629,6 +7880,7 @@ struct CompetitionDetailView: View {
         let comp = competition ?? [:]
         let objType = comp["objectiveType"] as? String ?? "pushups"
         let scoring = comp["scoringType"] as? String ?? "consistency"
+        let isRace = scoring == "race"
         let daysRemaining = comp["daysRemaining"] as? Int ?? 0
         let daysElapsed = comp["daysElapsed"] as? Int ?? 0
         let totalDays = comp["totalDays"] as? Int ?? 1
@@ -7687,10 +7939,12 @@ struct CompetitionDetailView: View {
             }
             return min(1.0, Double(daysElapsed) / Double(max(1, totalDays)))
         }()
-        let poolTotal = buyIn * Double(leaderboard.count)
+        let totalParticipantsCount = comp["totalParticipants"] as? Int ?? leaderboard.count
+        let poolTotal = buyIn * Double(totalParticipantsCount)
         let maxScore = leaderboard.compactMap { $0["score"] as? Double }.max() ?? 1
         
         let scoreUnit: String = {
+            if isRace { return "mi" }
             if scoring == "consistency" { return "days" }
             switch objType {
             case "run": return "mi"
@@ -7722,7 +7976,7 @@ struct CompetitionDetailView: View {
                             .foregroundStyle(Color.green)
                         Text("·")
                             .foregroundStyle(Color.gray)
-                        Text(remainingLabel.hasSuffix("h") ? "\(remainingLabel) remaining" : "\(daysRemaining) day\(daysRemaining == 1 ? "" : "s") remaining")
+                        Text(isRace ? "Until 1st Finished" : (remainingLabel.hasSuffix("h") ? "\(remainingLabel) remaining" : "\(daysRemaining) day\(daysRemaining == 1 ? "" : "s") remaining"))
                             .font(.system(.caption, design: .rounded, weight: .medium))
                             .foregroundStyle(Color.gray)
                     }
@@ -7747,48 +8001,81 @@ struct CompetitionDetailView: View {
                     
                     
                     // Progress bar
-                    VStack(spacing: 6) {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 5)
-                                    .fill(Color.gray.opacity(0.1))
-                                    .frame(height: 8)
-                                RoundedRectangle(cornerRadius: 5)
-                                    .fill(
-                                        LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
-                                    )
-                                    .frame(width: max(8, geo.size.width * progress), height: 8)
+                    if isRace {
+                        // Race: show leader's progress toward target
+                        let leaderProgress = leaderboard.first?["raceProgress"] as? Double ?? 0
+                        let leaderMiles = leaderboard.first?["score"] as? Double ?? 0
+                        VStack(spacing: 6) {
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.gray.opacity(0.1))
+                                        .frame(height: 8)
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(
+                                            LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
+                                        )
+                                        .frame(width: max(leaderProgress > 0 ? 8 : 0, geo.size.width * CGFloat(leaderProgress)), height: 8)
+                                }
                             }
-                        }
-                        .frame(height: 8)
-                        .padding(.horizontal, 20)
-                        
-                        HStack {
-                            if totalDays == 1, let start = startedAt {
-                                let secsElapsed = Date().timeIntervalSince(start)
-                                let hrsElapsed = Int(secsElapsed / 3600)
-                                let minsElapsed = Int(secsElapsed / 60) % 60
-                                let elapsedText = hrsElapsed < 1 ? "\(max(1, Int(secsElapsed / 60)))m elapsed" : "\(hrsElapsed)h \(minsElapsed)m elapsed"
-                                Text(elapsedText)
+                            .frame(height: 8)
+                            .padding(.horizontal, 20)
+                            
+                            HStack {
+                                Text(String(format: "%.1f mi logged", leaderMiles))
                                     .font(.system(.caption2, design: .rounded))
                                     .foregroundStyle(Color.gray)
                                 Spacer()
-                                Text(remainingLabel.hasSuffix("h") ? "\(remainingLabel) left" : "\(remainingLabel) remaining")
+                                Text(String(format: "%.1f mi to win", targetValue))
                                     .font(.system(.caption2, design: .rounded))
                                     .foregroundStyle(Color.gray)
-                            } else {
-                                Text("Day \(daysElapsed) of \(totalDays)")
-                                    .font(.system(.caption2, design: .rounded))
-                                    .foregroundStyle(Color.gray)
-                                Spacer()
-                                Text(scoring == "cumulative" ? "Total \(objType == "run" ? "Miles" : (objType == "pushups" ? "Reps" : "Count"))" : "Days Completed")
-                                    .font(.system(.caption2, design: .rounded))
-                                    .foregroundStyle(Color.gray)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
                             }
+                            .padding(.horizontal, 20)
                         }
-                        .padding(.horizontal, 20)
+                    } else {
+                        VStack(spacing: 6) {
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.gray.opacity(0.1))
+                                        .frame(height: 8)
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(
+                                            LinearGradient(colors: [goldColor.opacity(0.7), goldColor], startPoint: .leading, endPoint: .trailing)
+                                        )
+                                        .frame(width: max(8, geo.size.width * progress), height: 8)
+                                }
+                            }
+                            .frame(height: 8)
+                            .padding(.horizontal, 20)
+                            
+                            HStack {
+                                if totalDays == 1, let start = startedAt {
+                                    let secsElapsed = Date().timeIntervalSince(start)
+                                    let hrsElapsed = Int(secsElapsed / 3600)
+                                    let minsElapsed = Int(secsElapsed / 60) % 60
+                                    let elapsedText = hrsElapsed < 1 ? "\(max(1, Int(secsElapsed / 60)))m elapsed" : "\(hrsElapsed)h \(minsElapsed)m elapsed"
+                                    Text(elapsedText)
+                                        .font(.system(.caption2, design: .rounded))
+                                        .foregroundStyle(Color.gray)
+                                    Spacer()
+                                    Text(remainingLabel.hasSuffix("h") ? "\(remainingLabel) left" : "\(remainingLabel) remaining")
+                                        .font(.system(.caption2, design: .rounded))
+                                        .foregroundStyle(Color.gray)
+                                } else {
+                                    Text("Day \(daysElapsed) of \(totalDays)")
+                                        .font(.system(.caption2, design: .rounded))
+                                        .foregroundStyle(Color.gray)
+                                    Spacer()
+                                    Text(scoring == "cumulative" ? "Total \(objType == "run" ? "Miles" : (objType == "pushups" ? "Reps" : "Count"))" : "Days Completed")
+                                        .font(.system(.caption2, design: .rounded))
+                                        .foregroundStyle(Color.gray)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
                     }
                     
                     // Pool total badge (always show for paid comps)
@@ -7845,11 +8132,31 @@ struct CompetitionDetailView: View {
                     .padding(.bottom, 16)
                 }
                 
+                // Race progress tracker
+                if isRace {
+                    raceProgressCard(
+                        leaderboard: leaderboard,
+                        userId: userId,
+                        targetValue: targetValue
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                }
+                
                 // Standings with ranks
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Standings")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(Color.black)
+                    HStack {
+                        Text("Standings")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .foregroundStyle(Color.black)
+                        Spacer()
+                        let totalP = competition?["totalParticipants"] as? Int ?? leaderboard.count
+                        if totalP > 0 {
+                            Text("\(totalP) participants")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                        }
+                    }
                     
                     VStack(spacing: 14) {
                         ForEach(leaderboard.indices, id: \.self) { i in
@@ -7905,6 +8212,26 @@ struct CompetitionDetailView: View {
                                 .frame(height: 10)
                             }
                         }
+                        
+                        // Show expand/collapse button
+                        let totalP = competition?["totalParticipants"] as? Int ?? leaderboard.count
+                        if totalP > 5 {
+                            Button(action: {
+                                showAllParticipants.toggle()
+                                loadLeaderboard(all: showAllParticipants)
+                            }) {
+                                HStack {
+                                    Text(showAllParticipants ? "Show Top 5" : "View All \(totalP) Participants")
+                                        .font(.system(.caption, design: .rounded, weight: .medium))
+                                    Image(systemName: showAllParticipants ? "chevron.up" : "chevron.down")
+                                        .font(.caption2)
+                                }
+                                .foregroundStyle(goldColor)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .padding(20)
@@ -7929,16 +8256,26 @@ struct CompetitionDetailView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     completedStatCard(
                         icon: "person.2.fill",
-                        value: "\(leaderboard.count)",
+                        value: "\(totalParticipantsCount)",
                         label: "Players",
                         accent: false
                     )
-                    completedStatCard(
-                        icon: "clock.fill",
-                        value: remainingLabel,
-                        label: "Remaining",
-                        accent: false
-                    )
+                    if isRace {
+                        let dist = runTarget > 0 ? runTarget : targetValue
+                        completedStatCard(
+                            icon: "flag.checkered",
+                            value: dist == floor(dist) ? "\(Int(dist)) mi" : String(format: "%.1f mi", dist),
+                            label: "Target",
+                            accent: false
+                        )
+                    } else {
+                        completedStatCard(
+                            icon: "clock.fill",
+                            value: remainingLabel,
+                            label: "Remaining",
+                            accent: false
+                        )
+                    }
                     if buyIn > 0 {
                         completedStatCard(
                             icon: "dollarsign.circle.fill",
@@ -8102,8 +8439,9 @@ struct CompetitionDetailView: View {
         }.resume()
     }
     
-    private func loadLeaderboard() {
-        guard let url = URL(string: "https://api.live-eos.com/compete/\(competitionId)/leaderboard") else { return }
+    private func loadLeaderboard(all: Bool = false) {
+        let limitParam = all ? "" : "?limit=5"
+        guard let url = URL(string: "https://api.live-eos.com/compete/\(competitionId)/leaderboard\(limitParam)") else { return }
         
         URLSession.shared.dataTask(with: url) { data, _, _ in
             DispatchQueue.main.async {
