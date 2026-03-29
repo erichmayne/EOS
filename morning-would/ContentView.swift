@@ -8118,6 +8118,49 @@ struct CompetitionDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 28)
                 
+                // Strava reminder for run-based comps
+                if objType == "run" || objType == "both" {
+                    Button(action: {
+                        if let url = URL(string: "strava://") {
+                            if UIApplication.shared.canOpenURL(url) {
+                                UIApplication.shared.open(url)
+                            } else if let appStore = URL(string: "https://apps.apple.com/app/strava-run-ride-hike/id426826309") {
+                                UIApplication.shared.open(appStore)
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 10) {
+                            Image("powered_by_strava")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 12)
+                            Rectangle()
+                                .fill(Color.orange.opacity(0.3))
+                                .frame(width: 1, height: 16)
+                            Text("Start & end all runs in Strava to be logged")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.6))
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption)
+                                .foregroundStyle(Color.orange)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.orange.opacity(0.06))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.orange.opacity(0.15), lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                }
+                
                 // Today's progress card (consistency comps only)
                 if scoring == "consistency" {
                     dailyProgressCard(

@@ -57,6 +57,23 @@ function getCurrentTimeForTimezone(tz) {
 }
 
 // -----------------------------------------------------------------------------
+// Helper: Send Slack notification (non-blocking, never throws)
+// -----------------------------------------------------------------------------
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
+
+async function notifySlack(text) {
+    try {
+        await fetch(SLACK_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+    } catch (e) {
+        console.error('Slack notification failed (non-fatal):', e.message);
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Helper: Extract HH:MM from various time formats (TIME, TIMESTAMPTZ, string)
 // -----------------------------------------------------------------------------
 function parseDeadlineTime(deadline) {
@@ -173,6 +190,9 @@ app.post('/create-payment-intent', async (req, res) => {
       automatic_payment_methods: { enabled: true },
     });
 
+    const depositDollars = (amount / 100).toFixed(2);
+    notifySlack(`💰 *New Deposit*\n• Amount: $${depositDollars}\n• User: ${userId || 'Unknown'}`);
+    
     res.json({
       paymentIntentClientSecret: paymentIntent.client_secret,
       customer: customerId,
@@ -319,6 +339,7 @@ app.post("/users/profile", async (req, res) => {
         return res.status(500).json({ error: "Failed to create user.", detail: String(insertError.message ?? insertError) });
       }
       userRow = data;
+      notifySlack(`🆕 *New User Signed Up*\n• Name: ${data.full_name || 'Unknown'}\n• Email: ${normalizedEmail}`);
     } else {
       // Only update password if provided
       if (password && password.trim()) {
@@ -652,6 +673,8 @@ app.post('/recipient-signup', async (req, res) => {
         console.log('✅ Linked recipient_user_id:', newUser.id, 'to invite:', invite.id);
       }
     }
+    
+    notifySlack(`🆕 *New User Signed Up* (via invite)\n• Name: ${newUser.full_name || 'Unknown'}\n• Email: ${normalizedEmail}\n• Invited by: ${invite.payer?.full_name || 'Unknown'}`);
     
     console.log('✅ Recipient user created:', { 
       recipientId: newUser.id, 
@@ -4681,6 +4704,11 @@ app.post('/compete/create', async (req, res) => {
             });
         
         console.log(`🏆 Competition created (PENDING): "${name}" (${inviteCode}) by ${userId}`);
+        
+        const compType = isRace ? 'Race' : (scoringType === 'cumulative' ? 'Total Count' : 'Days Completed');
+        const buyInLabel = buyIn > 0 ? `$${buyIn} buy-in` : 'Free';
+        notifySlack(`🏆 *New Competition Created*\n• Name: ${name.trim()}\n• Type: ${compType} (${isRace ? 'run' : objectiveType})\n• Stakes: ${buyInLabel}\n• Code: ${inviteCode}`);
+        
         res.json({ success: true, competition, inviteCode });
         
     } catch (error) {

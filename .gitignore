@@ -26,6 +26,7 @@ Package.resolved
 
 # Local secrets (never commit)
 docs/SECRETS-LOCAL.md
+docs/EOS-MASTER-DOCUMENTATION.md
 docs/AuthKey_*.p8
 
 # Backup files
