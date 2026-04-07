@@ -206,7 +206,7 @@ struct ContentView: View {
                 Color.white.ignoresSafeArea()
 
                 VStack(spacing: 20) {
-                    Text("EOS")
+                    Text("RunMatch")
                         .font(.system(size: 42, weight: .bold, design: .rounded))
                         .foregroundStyle(
                             LinearGradient(
@@ -369,36 +369,6 @@ struct ContentView: View {
                         .frame(maxWidth: 350)
                         .padding(.horizontal)
 
-                        // Action button - always available for pushup tracking
-                        Button(action: {
-                            showPushUpSession = true
-                        }) {
-                            HStack {
-                                Image(systemName: "figure.strengthtraining.traditional")
-                                    .font(.title2)
-                                Text("Start Pushup Session")
-                                    .font(.system(.headline, design: .rounded))
-                            }
-                            .foregroundStyle(Color.white)
-                            .frame(maxWidth: 300)
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)),
-                                                Color(UIColor(red: 0.95, green: 0.75, blue: 0.1, alpha: 1))
-                                            ],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                            )
-                            .shadow(color: Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 0.3)), radius: 10, x: 0, y: 5)
-                        }
-                        .tutorialTarget("pushup-button")
-
                         // Navigation buttons - triangle layout
                         VStack(spacing: 10) {
                         HStack(spacing: 15) {
@@ -407,7 +377,7 @@ struct ContentView: View {
                             }) {
                                 HStack {
                                     Image(systemName: "target")
-                                    Text("My Objective")
+                                    Text("My Goals")
                                 }
                                 .font(.system(.subheadline, design: .rounded, weight: .medium))
                                 .foregroundStyle(Color.black)
@@ -1832,7 +1802,7 @@ struct ObjectiveSettingsView: View {
                                     .font(.system(size: 16))
                                     .foregroundStyle(goldColor)
                                 
-                                Text("Objectives")
+                                Text("My Goals")
                                     .font(.system(.body, design: .rounded, weight: .medium))
                                     .foregroundStyle(Color.black)
                                 
@@ -1857,8 +1827,6 @@ struct ObjectiveSettingsView: View {
                         // Expanded content - BOTH objective types
                         if isObjectiveExpanded && !isLocked {
                             VStack(spacing: 20) {
-                                pushupsRowView
-                                Divider()
                                 runRowView
                                 
                                 if settings.pushupsIsSet && settings.runIsSet {
@@ -1944,7 +1912,7 @@ struct ObjectiveSettingsView: View {
                 .scrollContentBackground(.hidden)
                 .tint(goldColor)
             }
-            .navigationTitle("My Objective")
+            .navigationTitle("My Goals")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -2605,7 +2573,7 @@ final class DepositPaymentService: ObservableObject {
         print("💳 preparePaymentSheet - amount: \(cents) cents, userId: '\(userId)'")
         
         guard !userId.isEmpty else {
-            completion(NSError(domain: "EOS", code: 0, userInfo: [NSLocalizedDescriptionKey: "Not signed in - please sign in first"]))
+            completion(NSError(domain: "RunMatch", code: 0, userInfo: [NSLocalizedDescriptionKey: "Not signed in - please sign in first"]))
             return
         }
 
@@ -2652,7 +2620,7 @@ final class DepositPaymentService: ObservableObject {
             print("✅ Got payment intent, customer: \(customerId)")
 
             var configuration = PaymentSheet.Configuration()
-            configuration.merchantDisplayName = "EOS"
+            configuration.merchantDisplayName = "RunMatch"
             configuration.customer = .init(id: customerId, ephemeralKeySecret: ephemeralKeySecret)
             
             // Apple Pay ENABLED
@@ -2951,7 +2919,7 @@ struct ProfileView: View {
                         // Not signed in - show sign-in/create options
                         Section {
                             VStack(spacing: 12) {
-                                Text("Welcome to EOS")
+                                Text("Welcome to RunMatch")
                                     .font(.system(.title3, design: .rounded, weight: .bold))
                                     .foregroundStyle(Color.black)
                                     .padding(.top, 10)
@@ -3059,7 +3027,7 @@ struct ProfileView: View {
                         Spacer()
                     }
                 } footer: {
-                    Text("By using EOS, you agree to our Terms of Service and Commitment Contract.")
+                    Text("By using RunMatch, you agree to our Terms of Service and Commitment Contract.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.white.opacity(0.6))
                         .multilineTextAlignment(.center)
@@ -4812,7 +4780,7 @@ struct AddRecipientSheet: View {
                                 .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
                         }
                         
-                        TextField("Their EOS email address", text: $inviteEmail, prompt: Text("Their EOS email address").foregroundColor(.black.opacity(0.4)))
+                        TextField("Their RunMatch email address", text: $inviteEmail, prompt: Text("Their RunMatch email address").foregroundColor(.black.opacity(0.4)))
                             .font(.system(.body, design: .rounded))
                             .foregroundStyle(Color.black)
                             .keyboardType(.emailAddress)
@@ -4965,7 +4933,7 @@ struct AddRecipientSheet: View {
         
         let body: [String: Any] = [
             "payerEmail": payerEmail,
-            "payerName": payerName.isEmpty ? "EOS user" : payerName
+            "payerName": payerName.isEmpty ? "RunMatch user" : payerName
         ]
         
         var request = URLRequest(url: url)
@@ -5321,13 +5289,13 @@ struct CompeteView: View {
                         .foregroundStyle(Color.primary)
                     
                     Group {
-                        ruleSection(title: "1. Eligibility", body: "Competitions are open to all registered EOS users aged 18 or older. By joining a competition, you confirm you meet the age requirement.")
+                        ruleSection(title: "1. Eligibility", body: "Competitions are open to all registered RunMatch users aged 18 or older. By joining a competition, you confirm you meet the age requirement.")
                         
                         ruleSection(title: "2. How Competitions Work", body: "Users create or join fitness competitions with a set duration and objective type (push-ups, running, or both). Participants track their daily fitness activity through the app. At the end of the competition period, the participant with the highest score wins.")
                         
                         ruleSection(title: "3. Scoring", body: "Scores are determined by physical fitness performance only. For 'Days Completed' scoring, each day you meet your target counts as one point. For 'Total Count' scoring, your cumulative reps or miles are tallied. For 'Race' mode, the first participant to reach the target miles wins — runs are GPS-tracked via Strava. For combined competitions: 1 push-up = 1 point, 1 mile = 100 points.")
                         
-                        ruleSection(title: "4. Voluntary Entry Contributions", body: "Competitions may include an optional voluntary entry contribution. All contributions are clearly disclosed before joining. When the competition starts, contributions are committed from each participant's existing EOS balance. The total contributions go to the top performer. In the event of a tie, the total is split equally among tied participants. If no participant scores, all contributions are refunded.")
+                        ruleSection(title: "4. Voluntary Entry Contributions", body: "Competitions may include an optional voluntary entry contribution. All contributions are clearly disclosed before joining. When the competition starts, contributions are committed from each participant's existing RunMatch balance. The total contributions go to the top performer. In the event of a tie, the total is split equally among tied participants. If no participant scores, all contributions are refunded.")
                         
                         ruleSection(title: "5. Competition Duration", body: "Each competition has a fixed duration set by the creator (1-90 days). The competition begins when the creator starts it and ends automatically when the duration expires. Race mode competitions have no time limit — they end instantly when the first participant reaches the target distance. Results are calculated and payouts are processed automatically.")
                         
@@ -5335,12 +5303,12 @@ struct CompeteView: View {
                         
                         ruleSection(title: "7. No Refunds", body: "Once a competition is started, voluntary entry contributions are non-refundable except in the case where no participant records any activity, in which case all contributions are returned.")
                         
-                        ruleSection(title: "8. Disputes", body: "Competition results are determined automatically based on recorded activity data. EOS reserves the right to make final decisions on any disputes.")
+                        ruleSection(title: "8. Disputes", body: "Competition results are determined automatically based on recorded activity data. RunMatch reserves the right to make final decisions on any disputes.")
                     }
                     
                     Divider().padding(.vertical, 8)
                     
-                    Text("Apple does not sponsor, endorse, or administer EOS competitions in any way. No prizes or payments are provided by Apple. All financial transactions are voluntary user-initiated commitments processed through Stripe.")
+                    Text("Apple does not sponsor, endorse, or administer RunMatch competitions in any way. No prizes or payments are provided by Apple. All financial transactions are voluntary user-initiated commitments processed through Stripe.")
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(Color.secondary)
                     
@@ -5348,7 +5316,7 @@ struct CompeteView: View {
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.secondary)
                     
-                    Text("© 2026 The EOS. All rights reserved.")
+                    Text("© 2026 The RunMatch. All rights reserved.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.secondary)
                 }
@@ -5815,7 +5783,7 @@ struct CreateCompetitionView: View {
         let durationLabel = durationDays == 7 ? "1 week" : (durationDays == 14 ? "2 weeks" : (durationDays == 30 ? "1 month" : "\(durationDays) days"))
         let objLabel = objectiveType == "run" ? "running" : (objectiveType == "both" ? "running + pushups" : "pushups")
         let buyInLabel = buyInAmount > 0 ? " with a $\(Int(buyInAmount)) buy-in" : ""
-        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on EOS!\n\nCode: \(createdCode ?? "")\n\nDownload EOS: live-eos.com"
+        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload EOS: live-eos.com"
     }
     
     @State private var codeCopied: Bool = false
@@ -5974,39 +5942,13 @@ struct CreateCompetitionView: View {
                 
                 Spacer()
                 
-                if scoringType == "race" {
-                    Text("Run Only")
-                        .font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(Color.gray)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                } else {
-                    Menu {
-                        Button(action: { objectiveType = "run" }) {
-                            Label("Run", systemImage: "figure.run")
-                        }
-                        Button(action: { objectiveType = "pushups" }) {
-                            Label("Pushups", systemImage: "figure.strengthtraining.traditional")
-                        }
-                        Button(action: { objectiveType = "both" }) {
-                            Label("Both", systemImage: "flame.fill")
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Change")
-                                .font(.system(.caption, design: .rounded, weight: .medium))
-                            Image(systemName: "chevron.down")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(goldColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(goldColor.opacity(0.1))
-                        .cornerRadius(8)
-                    }
-                }
+                Text("Run")
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(goldColor)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(goldColor.opacity(0.1))
+                    .cornerRadius(8)
             }
             .padding(.vertical, 4)
             
@@ -6861,9 +6803,9 @@ struct CompetitionDetailView: View {
         let buyInLine = buyIn > 0 ? " $\(Int(buyIn)) entry." : ""
         
         if scoring == "race" {
-            return "Join my running race on EOS!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
+            return "Join my running race on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
         }
-        return "Join my \(durationDays)-day \(objWord) competition on EOS!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
+        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
     }
     
     private func objectiveTypeDisplay(_ objType: String, targetValue: Double) -> String {
@@ -7251,7 +7193,7 @@ struct CompetitionDetailView: View {
                         .frame(height: 14)
                         .opacity(0.5)
                     
-                    Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
+                    Text("Apple does not sponsor, endorse, or administer RunMatch competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.gray.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -7460,7 +7402,7 @@ struct CompetitionDetailView: View {
                         .frame(height: 14)
                         .opacity(0.5)
                     
-                    Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
+                    Text("Apple does not sponsor, endorse, or administer RunMatch competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.gray.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -8386,7 +8328,7 @@ struct CompetitionDetailView: View {
                         .frame(height: 14)
                         .opacity(0.5)
                     
-                    Text("Apple does not sponsor, endorse, or administer EOS competitions. No prizes are provided by Apple.")
+                    Text("Apple does not sponsor, endorse, or administer RunMatch competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.gray.opacity(0.5))
                         .multilineTextAlignment(.center)
@@ -8580,7 +8522,7 @@ struct SignInView: View {
                 
                 VStack(spacing: 25) {
                     // Logo
-                    Image("EOSLogo")
+                    Image("RunMatchLogo")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 100, height: 100)
@@ -8945,7 +8887,7 @@ struct CreateAccountView: View {
                 ScrollView {
                     VStack(spacing: 25) {
                         // Logo
-                        Image("EOSLogo")
+                        Image("RunMatchLogo")
                             .resizable()
                             .scaledToFit()
                             .frame(width: 100, height: 100)

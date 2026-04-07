@@ -26,13 +26,13 @@ struct SplashView: View {
                 Image("eos logo final_original")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 120, height: 120)
+                    .frame(width: 160, height: 160)
                     .opacity(logoOpacity)
                     .scaleEffect(logoScale)
                     .offset(y: logoOffset)
                 
                 // EOS Text with gradient
-                Text("EOS")
+                Text("RunMatch")
                     .font(.system(size: 72, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -46,7 +46,7 @@ struct SplashView: View {
                     .offset(y: logoOffset)
                 
                 // Dawn of Better Habits tagline
-                Text("Dawn of Better Habits")
+                Text("Bet on a Better You")
                     .font(.system(size: 32, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -129,13 +129,13 @@ struct SplashViewWithLogo: View {
                 Image("EOSLogo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 180, height: 180)
+                    .frame(width: 220, height: 220)
                     .opacity(logoOpacity)
                     .scaleEffect(logoScale)
                     .offset(y: logoOffset)
                 
                 // EOS Text with gradient matching home screen
-                Text("EOS")
+                Text("RunMatch")
                     .font(.system(size: 72, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -149,7 +149,7 @@ struct SplashViewWithLogo: View {
                     .offset(y: textOffset)
                 
                 // Dawn of Better Habits tagline - Bigger
-                Text("Dawn of Better Habits")
+                Text("Bet on a Better You")
                     .font(.system(size: 32, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -235,7 +235,7 @@ struct SplashViewTextOnly: View {
                 Spacer()
                 
                 // EOS Text Logo with gradient
-                Text("EOS")
+                Text("RunMatch")
                     .font(.system(size: 80, weight: .bold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
@@ -249,7 +249,7 @@ struct SplashViewTextOnly: View {
                     .offset(y: logoOffset)
                 
                 // Dawn of Better Habits tagline
-                Text("Dawn of Better Habits")
+                Text("Bet on a Better You")
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                     .foregroundStyle(
                         LinearGradient(
