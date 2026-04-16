@@ -8,6 +8,11 @@ const bcrypt = require('bcryptjs');
 const twilio = require('twilio');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+
+const JWT_SECRET = process.env.JWT_SECRET || '';
+const JWT_EXPIRY = '30d';
 
 const app = express();
 
@@ -39,8 +44,78 @@ const emailTransporter = nodemailer.createTransport({
   }
 });
 
-app.use(cors());
+app.use(cors({
+    origin: ['https://runmatch.io', 'https://www.runmatch.io', 'https://api.runmatch.io', 'https://runmatch.io', 'https://www.runmatch.io', 'https://api.runmatch.io'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
+
+// -----------------------------------------------------------------------------
+// Security: Rate limiting
+// -----------------------------------------------------------------------------
+const globalLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.ip === '127.0.0.1' || req.ip === '::1',
+    message: { error: 'Too many requests. Please try again shortly.' }
+});
+
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { error: 'Too many login attempts. Please try again in 15 minutes.' }
+});
+
+const paymentLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: { error: 'Too many payment requests. Please slow down.' }
+});
+
+app.use(globalLimiter);
+
+// -----------------------------------------------------------------------------
+// Security: Cron/Admin endpoint protection
+// -----------------------------------------------------------------------------
+const CRON_SECRET = process.env.CRON_SECRET || '';
+
+function requireCronSecret(req, res, next) {
+    const auth = req.headers.authorization;
+    if (!CRON_SECRET) return next();
+    if (auth === `Bearer ${CRON_SECRET}`) return next();
+    console.log('🚫 Unauthorized cron/admin access attempt:', req.path);
+    return res.status(401).json({ error: 'Unauthorized' });
+}
+
+// -----------------------------------------------------------------------------
+// Security: JWT token generation
+// -----------------------------------------------------------------------------
+function generateToken(userId, email) {
+    if (!JWT_SECRET) return null;
+    return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+}
+
+// -----------------------------------------------------------------------------
+// Security: Optional auth middleware (accepts both authenticated and unauthenticated)
+// During transition: logs auth status but never blocks requests
+// -----------------------------------------------------------------------------
+function optionalAuth(req, res, next) {
+    req.authenticatedUserId = null;
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Bearer ') && JWT_SECRET) {
+        const token = auth.slice(7);
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            req.authenticatedUserId = decoded.userId;
+        } catch (e) {
+            // Invalid token — log but don't block during transition
+        }
+    }
+    next();
+}
 
 // -----------------------------------------------------------------------------
 // Helper: Get today's date (YYYY-MM-DD) in a user's timezone
@@ -95,7 +170,7 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // -----------------------------------------------------------------------------
 // Payments: create PaymentIntent + Customer + Ephemeral Key
 // -----------------------------------------------------------------------------
-app.post('/create-payment-intent', async (req, res) => {
+app.post('/create-payment-intent', paymentLimiter, optionalAuth, async (req, res) => {
   try {
     const { amount, userId } = req.body; // amount in cents, userId optional
 
@@ -261,7 +336,7 @@ app.post("/users/profile", async (req, res) => {
 
     if (fetchError) {
       console.error("Supabase fetch user error:", fetchError);
-      return res.status(500).json({ error: "Failed to load user.", detail: String(fetchError.message ?? fetchError) });
+      return res.status(500).json({ error: "Failed to load user." });
     }
 
     // Block duplicate emails on account creation
@@ -336,7 +411,7 @@ app.post("/users/profile", async (req, res) => {
 
       if (insertError) {
         console.error("Supabase insert user error:", insertError);
-        return res.status(500).json({ error: "Failed to create user.", detail: String(insertError.message ?? insertError) });
+        return res.status(500).json({ error: "Failed to create user." });
       }
       userRow = data;
       notifySlack(`🆕 *New User Signed Up*\n• Name: ${data.full_name || 'Unknown'}\n• Email: ${normalizedEmail}`);
@@ -355,7 +430,7 @@ app.post("/users/profile", async (req, res) => {
 
       if (updateError) {
         console.error("Supabase update user error:", updateError);
-        return res.status(500).json({ error: "Failed to update user.", detail: String(updateError.message ?? updateError) });
+        return res.status(500).json({ error: "Failed to update user." });
       }
       userRow = data;
       console.log("✅ User updated:", { 
@@ -366,9 +441,13 @@ app.post("/users/profile", async (req, res) => {
       });
     }
 
+    // Generate auth token
+    const token = generateToken(userRow.id, userRow.email);
+    
     // Store userId for reference
     return res.json({
       id: userRow.id,
+      token,
       fullName: userRow.full_name,
       email: userRow.email,
       phone: userRow.phone,
@@ -386,7 +465,7 @@ app.post("/users/profile", async (req, res) => {
     });
   } catch (err) {
     console.error("Profile endpoint error:", err);
-    return res.status(500).json({ error: "Internal server error", detail: err.message });
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -398,10 +477,10 @@ async function sendRecipientInviteSMS({ toPhone, payerName, inviteCode }) {
     throw new Error("TWILIO_FROM_NUMBER not configured");
   }
 
-  const url = `https://app.live-eos.com/invite`;
+  const url = `https://app.runmatch.io/invite`;
 
   const body =
-    `🎯 EOS Accountability Invite\n\n` +
+    `🎯 RunMatch Accountability Invite\n\n` +
     `${payerName} selected you to receive payouts when they miss their fitness goals.\n\n` +
     `Your code: ${inviteCode}\n\n` +
     `Setup payouts: ${url}\n\n` +
@@ -462,7 +541,7 @@ app.post('/recipient-invites', async (req, res) => {
 
     if (insertError) {
       console.error('Supabase insert invite error:', insertError);
-      return res.status(500).json({ error: 'Failed to create invite.', detail: String(insertError.message ?? insertError) });
+      return res.status(500).json({ error: 'Failed to create invite.' });
     }
 
     await sendRecipientInviteSMS({
@@ -478,7 +557,7 @@ app.post('/recipient-invites', async (req, res) => {
     });
   } catch (err) {
     console.error('Error in /recipient-invites:', err);
-    res.status(500).json({ error: 'Failed to send invite.', detail: String(err) });
+    res.status(500).json({ error: 'Failed to send invite.' });
   }
 });
 // -----------------------------------------------------------------------------
@@ -528,7 +607,7 @@ app.post('/recipient-invites/code-only', async (req, res) => {
 
     if (insertError) {
       console.error('Supabase insert invite error:', insertError);
-      return res.status(500).json({ error: 'Failed to create invite.', detail: String(insertError.message ?? insertError) });
+      return res.status(500).json({ error: 'Failed to create invite.' });
     }
 
     res.json({
@@ -537,7 +616,7 @@ app.post('/recipient-invites/code-only', async (req, res) => {
     });
   } catch (err) {
     console.error('Error in /recipient-invites/code-only:', err);
-    res.status(500).json({ error: 'Failed to generate invite code.', detail: String(err) });
+    res.status(500).json({ error: 'Failed to generate invite code.' });
   }
 });
 
@@ -586,7 +665,7 @@ app.post('/recipient-signup', async (req, res) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
     
-    // Create new user (recipient becomes a full EOS user)
+    // Create new user (recipient becomes a full RunMatch user)
     const { data: newUser, error: userError } = await supabase
       .from('users')
       .insert({
@@ -684,9 +763,12 @@ app.post('/recipient-signup', async (req, res) => {
       inviteCode: inviteCode
     });
     
+    const token = generateToken(newUser.id, newUser.email);
+    
     res.json({
       success: true,
       userId: newUser.id,
+      token,
       message: 'Account created successfully',
       payerName: invite.payer?.full_name || 'Your accountability partner',
       // Include user data for auto-login on portal
@@ -702,14 +784,14 @@ app.post('/recipient-signup', async (req, res) => {
     
   } catch (err) {
     console.error('Error in /recipient-signup:', err);
-    res.status(500).json({ error: 'Failed to create account', detail: String(err) });
+    res.status(500).json({ error: 'Failed to create account' });
   }
 });
 
 // -----------------------------------------------------------------------------
 // Web Auth - Login endpoint for portal
 // -----------------------------------------------------------------------------
-app.post('/auth/login', async (req, res) => {
+app.post('/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body || {};
     
@@ -742,9 +824,12 @@ app.post('/auth/login', async (req, res) => {
     
     console.log('✅ User logged in:', { id: user.id, email: user.email });
     
+    const token = generateToken(user.id, user.email);
+    
     // Return user data (excluding sensitive fields)
     res.json({
       success: true,
+      token,
       user: {
         id: user.id,
         email: user.email,
@@ -758,7 +843,7 @@ app.post('/auth/login', async (req, res) => {
     
   } catch (err) {
     console.error('Error in /auth/login:', err);
-    res.status(500).json({ error: 'Login failed', detail: String(err) });
+    res.status(500).json({ error: 'Login failed' });
   }
 });
 
@@ -807,13 +892,13 @@ app.post('/auth/forgot-password', async (req, res) => {
     }
     
     // Send email
-    const resetUrl = `https://live-eos.com/reset-password?token=${resetToken}`;
+    const resetUrl = `https://runmatch.io/reset-password?token=${resetToken}`;
     
     try {
       await emailTransporter.sendMail({
-        from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+        from: `"RunMatch" <${process.env.SMTP_USER || 'connect@runmatch.io'}>`,
         to: user.email,
-        subject: 'Reset Your EOS Password',
+        subject: 'Reset Your RunMatch Password',
         html: `
           <!DOCTYPE html>
           <html>
@@ -824,7 +909,7 @@ app.post('/auth/forgot-password', async (req, res) => {
           <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 40px 20px;">
             <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
               <div style="background: linear-gradient(135deg, #000 0%, #333 100%); padding: 32px; text-align: center;">
-                <h1 style="color: #D9A600; margin: 0; font-size: 32px; font-weight: 800;">EOS</h1>
+                <h1 style="color: #D9A600; margin: 0; font-size: 32px; font-weight: 800;">RunMatch</h1>
               </div>
               <div style="padding: 32px;">
                 <h2 style="margin: 0 0 16px; color: #000; font-size: 20px;">Reset Your Password</h2>
@@ -840,7 +925,7 @@ app.post('/auth/forgot-password', async (req, res) => {
                 </p>
               </div>
               <div style="background: #f9f9f9; padding: 20px 32px; text-align: center; border-top: 1px solid #eee;">
-                <p style="color: #999; font-size: 12px; margin: 0;">© 2026 EOS. All rights reserved.</p>
+                <p style="color: #999; font-size: 12px; margin: 0;">© 2026 RunMatch. All rights reserved.</p>
               </div>
             </div>
           </body>
@@ -922,7 +1007,7 @@ app.post('/auth/reset-password', async (req, res) => {
 // -----------------------------------------------------------------------------
 // Get user transactions for portal
 // -----------------------------------------------------------------------------
-app.get('/users/:userId/transactions', async (req, res) => {
+app.get("/users/:userId/transactions", optionalAuth, async (req, res) => {
   try {
     const { userId } = req.params;
     
@@ -969,7 +1054,7 @@ app.get('/users/:userId/transactions', async (req, res) => {
 // -----------------------------------------------------------------------------
 // Withdrawal - Create Stripe Connect & transfer funds (with queue for insufficient balance)
 // -----------------------------------------------------------------------------
-app.post('/withdraw', async (req, res) => {
+app.post('/withdraw', paymentLimiter, optionalAuth, async (req, res) => {
   try {
     const { 
       userId, 
@@ -1057,7 +1142,7 @@ app.post('/withdraw', async (req, res) => {
           },
           business_profile: {
             mcc: '7941',
-            url: 'https://live-eos.com'
+            url: 'https://runmatch.io'
           },
           tos_acceptance: {
             date: Math.floor(Date.now() / 1000),
@@ -1096,12 +1181,12 @@ app.post('/withdraw', async (req, res) => {
       }
     }
     
-    // Check EOS platform balance BEFORE attempting transfer
+    // Check RunMatch platform balance BEFORE attempting transfer
     let eosBalance = 0;
     try {
       const platformBalance = await stripe.balance.retrieve();
       eosBalance = platformBalance.available.reduce((sum, b) => sum + (b.currency === 'usd' ? b.amount : 0), 0);
-      console.log('💰 EOS platform available balance:', eosBalance / 100);
+      console.log('💰 RunMatch platform available balance:', eosBalance / 100);
     } catch (balErr) {
       console.error('Failed to check platform balance:', balErr.message);
     }
@@ -1117,9 +1202,9 @@ app.post('/withdraw', async (req, res) => {
       .eq('id', userId);
     console.log('💳 User DB balance deducted:', { userId, oldBalance: user.balance_cents, newBalance });
     
-    // If insufficient EOS balance, queue the withdrawal
+    // If insufficient RunMatch balance, queue the withdrawal
     if (eosBalance < amountCents) {
-      console.log('⏳ Insufficient EOS balance, queuing withdrawal');
+      console.log('⏳ Insufficient RunMatch balance, queuing withdrawal');
       
       // Save to withdrawal_requests queue (net of platform fee)
       const { data: queuedRequest, error: queueError } = await supabase
@@ -1176,14 +1261,14 @@ app.post('/withdraw', async (req, res) => {
       });
     }
     
-    // Transfer funds from EOS platform to Connect account
+    // Transfer funds from RunMatch platform to Connect account
     let transferId = null;
     try {
       const transfer = await stripe.transfers.create({
         amount: transferAmountCents,
         currency: 'usd',
         destination: stripeConnectAccountId,
-        description: `EOS withdrawal ($${(amountCents/100).toFixed(2)} - $${(platformFeeCents/100).toFixed(2)} fee)`,
+        description: `RunMatch withdrawal ($${(amountCents/100).toFixed(2)} - $${(platformFeeCents/100).toFixed(2)} fee)`,
         metadata: { user_id: userId, gross_amount: amountCents, platform_fee: platformFeeCents }
       });
       transferId = transfer.id;
@@ -1285,16 +1370,16 @@ app.post('/withdraw', async (req, res) => {
 // -----------------------------------------------------------------------------
 // Process queued withdrawals (called by cron)
 // -----------------------------------------------------------------------------
-app.post('/withdrawals/process-queue', async (req, res) => {
+app.post('/withdrawals/process-queue', requireCronSecret, async (req, res) => {
   try {
     console.log('🔄 Processing withdrawal queue...');
     
-    // Check EOS platform balance
+    // Check RunMatch platform balance
     let eosBalance = 0;
     try {
       const platformBalance = await stripe.balance.retrieve();
       eosBalance = platformBalance.available.reduce((sum, b) => sum + (b.currency === 'usd' ? b.amount : 0), 0);
-      console.log('💰 EOS platform available balance:', eosBalance / 100);
+      console.log('💰 RunMatch platform available balance:', eosBalance / 100);
     } catch (balErr) {
       console.error('Failed to check platform balance:', balErr.message);
       return res.status(500).json({ error: 'Failed to check platform balance' });
@@ -1347,7 +1432,7 @@ app.post('/withdrawals/process-queue', async (req, res) => {
           amount: request.amount_cents,
           currency: 'usd',
           destination: request.stripe_connect_account_id,
-          description: 'EOS withdrawal (queued)',
+          description: 'RunMatch withdrawal (queued)',
           metadata: { user_id: request.user_id, request_id: request.id }
         });
         
@@ -1433,7 +1518,7 @@ app.post('/withdrawals/process-queue', async (req, res) => {
 // -----------------------------------------------------------------------------
 // Get user's pending withdrawals
 // -----------------------------------------------------------------------------
-app.get('/withdrawals/pending/:userId', async (req, res) => {
+app.get('/withdrawals/pending/:userId', optionalAuth, async (req, res) => {
   try {
     const { userId } = req.params;
     
@@ -1458,16 +1543,7 @@ app.get('/withdrawals/pending/:userId', async (req, res) => {
 // -----------------------------------------------------------------------------
 // Optional: Supabase debug endpoint
 // -----------------------------------------------------------------------------
-app.get('/debug/supabase', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('users').select('id').limit(1);
-    if (error) throw error;
-    res.json({ ok: true, sample: data });
-  } catch (err) {
-    console.error('Supabase debug error:', err);
-    res.status(500).json({ error: 'Supabase error', detail: String(err) });
-  }
-});
+// Debug endpoints removed for security
 
 // -----------------------------------------------------------------------------
 // Start server
@@ -1477,7 +1553,7 @@ const port = process.env.PORT || 4242;
 // ========== RECIPIENT & PAYOUT ENDPOINTS ==========
 
 // Get user recipient status (for iOS app)
-app.get("/users/:userId/recipient", async (req, res) => {
+app.get("/users/:userId/recipient", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -1522,7 +1598,7 @@ app.get("/users/:userId/recipient", async (req, res) => {
 });
 
 // Commit payout destination
-app.post("/users/:userId/commit-destination", async (req, res) => {
+app.post("/users/:userId/commit-destination", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         const { destination, recipientId } = req.body;
@@ -1561,7 +1637,7 @@ app.post("/users/:userId/commit-destination", async (req, res) => {
 
 // Get user invites with recipient status
 // Returns: ALL accepted recipients (with isSelected flag) + pending invites
-app.get("/users/:userId/invites", async (req, res) => {
+app.get("/users/:userId/invites", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -1699,7 +1775,7 @@ app.get("/users/:userId/invites", async (req, res) => {
 });
 
 // Switch active recipient (select a different one from the list)
-app.post("/users/:userId/select-recipient", async (req, res) => {
+app.post("/users/:userId/select-recipient", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         const { recipientId } = req.body || {};
@@ -1721,9 +1797,28 @@ app.post("/users/:userId/select-recipient", async (req, res) => {
             return res.status(404).json({ error: "Recipient not found" });
         }
         
-        // Note: We trust that the iOS app only shows recipients from our invites endpoint
-        // The endpoint already filters to only show recipients linked to this payer
-        // Additional verification here would be redundant and cause issues with legacy data
+        // Verify this recipient is linked to this user via an invite
+        const { data: linkedInvite } = await supabase
+            .from("recipient_invites")
+            .select("id")
+            .eq("payer_user_id", userId)
+            .eq("recipient_id", recipientId)
+            .limit(1);
+        
+        if (!linkedInvite || linkedInvite.length === 0) {
+            // Also check by recipient email match (legacy invites)
+            const { data: emailInvite } = await supabase
+                .from("recipient_invites")
+                .select("id")
+                .eq("payer_user_id", userId)
+                .eq("recipient_email", recipient.email)
+                .limit(1);
+            
+            if (!emailInvite || emailInvite.length === 0) {
+                console.log(`🚫 Recipient ${recipientId} not linked to user ${userId}`);
+                return res.status(403).json({ error: "This recipient is not linked to your account." });
+            }
+        }
         
         // Update the user's custom_recipient_id
         const { data: updatedUser, error: updateError } = await supabase
@@ -1780,7 +1875,7 @@ app.get("/verify-invite/:code", async (req, res) => {
         
         res.json({ 
             code: invite.invite_code,
-            payerName: invite.payer?.full_name || "EOS User",
+            payerName: invite.payer?.full_name || "RunMatch User",
             payerEmail: invite.payer?.email,
             payoutAmount: invite.payer?.missed_goal_payout || 0,
             phone: invite.phone
@@ -1796,7 +1891,7 @@ app.get("/verify-invite/:code", async (req, res) => {
 
 // Check for missed objectives and trigger payouts
 // Supports multi-objective: ALL enabled objectives must be complete, or day fails
-app.post("/objectives/check-missed", async (req, res) => {
+app.post("/objectives/check-missed", requireCronSecret, async (req, res) => {
     try {
         // Helper: Get current time in user's timezone
         function getCurrentTimeInTimezone(tz) {
@@ -1976,7 +2071,7 @@ app.post("/objectives/check-missed", async (req, res) => {
             }
             
             // Transfer DB balance to recipient if custom
-            // NOTE: Real money stays in EOS account until recipient withdraws
+            // NOTE: Real money stays in RunMatch account until recipient withdraws
             if (destination === "custom" && recipientId) {
                 // Look up the recipient entry to get their email
                 const { data: recipientEntry } = await supabase
@@ -2032,7 +2127,7 @@ app.post("/objectives/check-missed", async (req, res) => {
                             amount: payoutAmountCents,
                             currency: "usd",
                             destination: recipient.stripe_connect_account_id,
-                            description: `EOS auto-payout - missed objective`,
+                            description: `RunMatch auto-payout - missed objective`,
                             metadata: { user_id: user.id, session_id: session.id }
                         });
                         stripeTransferId = transfer.id;
@@ -2121,7 +2216,7 @@ app.post("/objectives/check-missed", async (req, res) => {
 // Nothing called it — the actual withdrawal flow uses POST /withdraw.
 
 // Get user balance
-app.get("/users/:userId/balance", async (req, res) => {
+app.get("/users/:userId/balance", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -2150,7 +2245,7 @@ app.get("/users/:userId/balance", async (req, res) => {
 // -----------------------------------------------------------------------------
 // Delete user account (App Store Guideline 5.1.1(v) - required)
 // -----------------------------------------------------------------------------
-app.post("/users/delete-account", async (req, res) => {
+app.post("/users/delete-account", optionalAuth, async (req, res) => {
     try {
         const { userId, email, password } = req.body;
         
@@ -2182,12 +2277,8 @@ app.post("/users/delete-account", async (req, res) => {
         const bcrypt = require("bcryptjs");
         let passwordValid = false;
         
-        if (user.password_hash) {
-            if (user.password_hash.startsWith("$2")) {
-                passwordValid = await bcrypt.compare(password, user.password_hash);
-            } else {
-                passwordValid = (password === user.password_hash);
-            }
+        if (user.password_hash && user.password_hash.startsWith("$2")) {
+            passwordValid = await bcrypt.compare(password, user.password_hash);
         }
         
         if (!passwordValid) {
@@ -2241,7 +2332,7 @@ app.post("/users/delete-account", async (req, res) => {
 });
 
 // Delete a specific invite relationship
-app.delete('/invites/:inviteId', async (req, res) => {
+app.delete('/invites/:inviteId', optionalAuth, async (req, res) => {
     try {
         const { inviteId } = req.params;
         const { userId } = req.body;
@@ -2289,7 +2380,7 @@ app.delete('/invites/:inviteId', async (req, res) => {
     }
 });
 
-// Send invite to an existing EOS user by email
+// Send invite to an existing RunMatch user by email
 app.post('/invites/send-to-user', async (req, res) => {
     try {
         const { payerId, recipientEmail } = req.body;
@@ -2315,7 +2406,7 @@ app.post('/invites/send-to-user', async (req, res) => {
         const { data: recipientUser } = await supabase
             .from('users').select('id, full_name, email').eq('email', normalizedEmail).maybeSingle();
         if (!recipientUser) {
-            return res.status(404).json({ error: 'No EOS account found with that email. They need to create an account first, or use Generate a Code for new users.' });
+            return res.status(404).json({ error: 'No RunMatch account found with that email. They need to create an account first, or use Generate a Code for new users.' });
         }
         
         // Check for existing pending invite between these two
@@ -2365,20 +2456,20 @@ app.post('/invites/send-to-user', async (req, res) => {
         }
         
         // Send email to recipient
-        const acceptUrl = `https://api.live-eos.com/invites/accept/${invite.id}`;
+        const acceptUrl = `https://api.runmatch.io/invites/accept/${invite.id}`;
         
         await emailTransporter.sendMail({
-            from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+            from: `"RunMatch" <${process.env.SMTP_USER || 'connect@runmatch.io'}>`,
             to: recipientUser.email,
-            subject: `${payer.full_name || 'Someone'} wants you as their accountability recipient on EOS`,
-            text: `${payer.full_name} has invited you to be their designated recipient on EOS. If they miss their fitness goals, their stakes go to you.\n\nAccept here: ${acceptUrl}`,
+            subject: `${payer.full_name || 'Someone'} wants you as their accountability recipient on RunMatch`,
+            text: `${payer.full_name} has invited you to be their designated recipient on RunMatch. If they miss their fitness goals, their stakes go to you.\n\nAccept here: ${acceptUrl}`,
             html: `
                 <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:30px">
                     <h2 style="color:#d9a600">You've been invited!</h2>
-                    <p><strong>${payer.full_name || 'An EOS user'}</strong> wants you to be their designated recipient.</p>
+                    <p><strong>${payer.full_name || 'A RunMatch user'}</strong> wants you to be their designated recipient.</p>
                     <p>If they miss their fitness goals, their accountability stakes go to you.</p>
                     <a href="${acceptUrl}" style="display:inline-block;background:#d9a600;color:white;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;margin:20px 0">Accept Invite</a>
-                    <p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p>
+                    <p style="color:#888;font-size:12px;margin-top:30px">— RunMatch | Bet on a Better You</p>
                 </div>
             `
         });
@@ -2411,7 +2502,7 @@ app.get('/invites/accept/:inviteId', async (req, res) => {
         }
         
         if (invite.status === 'accepted') {
-            return res.send(`${pageHead}<body style="${pageStyle}"><h2 style="color:#d9a600;font-size:24px">Already Accepted</h2><p style="font-size:17px;color:#666">You've already accepted this invite from ${invite.payer?.full_name || 'the user'}.</p><p style="font-size:15px;color:#888;margin-top:24px">Open the EOS app to continue.</p></body></html>`);
+            return res.send(`${pageHead}<body style="${pageStyle}"><h2 style="color:#d9a600;font-size:24px">Already Accepted</h2><p style="font-size:17px;color:#666">You've already accepted this invite from ${invite.payer?.full_name || 'the user'}.</p><p style="font-size:15px;color:#888;margin-top:24px">Open the RunMatch app to continue.</p></body></html>`);
         }
         
         // Find recipient - try recipient_user_id first, fall back to phone field (stores email for email invites)
@@ -2426,7 +2517,7 @@ app.get('/invites/accept/:inviteId', async (req, res) => {
         }
         
         if (!recipientUser) {
-            return res.send(`${pageHead}<body style="${pageStyle}"><h2>Error</h2><p style="font-size:17px;color:#666">Recipient account not found. Make sure you have an EOS account.</p></body></html>`);
+            return res.send(`${pageHead}<body style="${pageStyle}"><h2>Error</h2><p style="font-size:17px;color:#666">Recipient account not found. Make sure you have a RunMatch account.</p></body></html>`);
         }
         
         // Create recipients table entry (needed for FK on users.custom_recipient_id)
@@ -2468,10 +2559,10 @@ app.get('/invites/accept/:inviteId', async (req, res) => {
             ${pageHead}<body style="${pageStyle}">
                 <div style="font-size:48px;margin-bottom:16px">🤝</div>
                 <h2 style="color:#d9a600;font-size:24px;margin-bottom:8px">Invite Accepted!</h2>
-                <p style="font-size:18px;line-height:1.5">You are now <strong>${payerName}'s</strong> designated recipient on EOS.</p>
+                <p style="font-size:18px;line-height:1.5">You are now <strong>${payerName}'s</strong> designated recipient on RunMatch.</p>
                 <p style="font-size:16px;color:#666;line-height:1.5">If they miss their fitness goals, their accountability stakes will be sent to you.</p>
-                <p style="font-size:15px;color:#888;margin-top:32px">Open the EOS app to see the update.</p>
-                <p style="color:#aaa;font-size:13px;margin-top:40px">— EOS | Dawn of Better Habits</p>
+                <p style="font-size:15px;color:#888;margin-top:32px">Open the RunMatch app to see the update.</p>
+                <p style="color:#aaa;font-size:13px;margin-top:40px">— RunMatch | Bet on a Better You</p>
             </body></html>
         `);
         
@@ -2482,7 +2573,7 @@ app.get('/invites/accept/:inviteId', async (req, res) => {
 });
 
 // Check if current user is a recipient for anyone
-app.get('/users/:userId/is-recipient', async (req, res) => {
+app.get('/users/:userId/is-recipient', optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -2541,7 +2632,7 @@ const STRAVA_VERIFY_TOKEN = process.env.STRAVA_VERIFY_TOKEN || 'eos-strava-verif
 // Start Strava OAuth flow
 app.get('/strava/connect/:userId', (req, res) => {
     const { userId } = req.params;
-    const redirectUri = encodeURIComponent('https://api.live-eos.com/strava/callback');
+    const redirectUri = encodeURIComponent('https://api.runmatch.io/strava/callback');
     const scope = 'activity:read';
     const authUrl = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${userId}`;
     res.redirect(authUrl);
@@ -2554,11 +2645,11 @@ app.get('/strava/callback', async (req, res) => {
         
         if (error) {
             console.log('Strava OAuth denied:', error);
-            return res.redirect('https://live-eos.com/portal?strava=denied');
+            return res.redirect('https://runmatch.io/portal?strava=denied');
         }
         
         if (!code || !userId) {
-            return res.redirect('https://live-eos.com/portal?strava=error');
+            return res.redirect('https://runmatch.io/portal?strava=error');
         }
         
         // Exchange code for tokens
@@ -2577,7 +2668,7 @@ app.get('/strava/callback', async (req, res) => {
         
         if (!tokenData.access_token) {
             console.error('Strava token exchange failed:', tokenData);
-            return res.redirect('https://live-eos.com/portal?strava=error');
+            return res.redirect('https://runmatch.io/portal?strava=error');
         }
         
         const { access_token, refresh_token, expires_at, athlete } = tokenData;
@@ -2598,7 +2689,7 @@ app.get('/strava/callback', async (req, res) => {
         
         if (connError) {
             console.error('Strava connection save error:', connError);
-            return res.redirect('https://live-eos.com/portal?strava=error');
+            return res.redirect('https://runmatch.io/portal?strava=error');
         }
         
         // Check if another user already has this Strava account linked
@@ -2610,7 +2701,7 @@ app.get('/strava/callback', async (req, res) => {
         
         if (existingUsers && existingUsers.length > 0) {
             console.log(`🚫 Strava account already linked to ${existingUsers[0].email}, rejecting for ${userId}`);
-            return res.redirect('https://live-eos.com/portal?strava=already_linked');
+            return res.redirect('https://runmatch.io/portal?strava=already_linked');
         }
         
         // Link to user
@@ -2622,11 +2713,11 @@ app.get('/strava/callback', async (req, res) => {
         console.log(`✅ Strava connected for user ${userId}, athlete: ${athlete.firstname}`);
         
         // Redirect back - use custom URL scheme for iOS app or web portal
-        res.redirect('https://live-eos.com/portal?strava=connected');
+        res.redirect('https://runmatch.io/portal?strava=connected');
         
     } catch (error) {
         console.error('Strava callback error:', error);
-        res.redirect('https://live-eos.com/portal?strava=error');
+        res.redirect('https://runmatch.io/portal?strava=error');
     }
 });
 
@@ -2961,16 +3052,16 @@ app.post('/strava/webhook', async (req, res) => {
                             ? `🏁 You won the "${comp.name}" race!`
                             : `🏁 "${comp.name}" race is over`;
                         const body = isWinner
-                            ? `Congratulations ${pUser.full_name || 'Champion'}! You finished first in "${comp.name}" with ${totalMiles.toFixed(1)} miles!${poolCents > 0 ? ` $${(poolCents/100).toFixed(2)} has been added to your EOS balance.` : ''}`
+                            ? `Congratulations ${pUser.full_name || 'Champion'}! You finished first in "${comp.name}" with ${totalMiles.toFixed(1)} miles!${poolCents > 0 ? ` $${(poolCents/100).toFixed(2)} has been added to your RunMatch balance.` : ''}`
                             : `${winnerName} finished the "${comp.name}" race first with ${totalMiles.toFixed(1)}/${raceTarget} miles.${poolCents > 0 ? ` The $${(poolCents/100).toFixed(2)} pool has been awarded to the winner.` : ''}`;
                         
                         try {
                             await emailTransporter.sendMail({
-                                from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+                                from: `"RunMatch" <${process.env.SMTP_USER || 'connect@runmatch.io'}>`,
                                 to: pUser.email,
                                 subject,
                                 text: body,
-                                html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">${subject}</h2><p>${body}</p><p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p></div>`
+                                html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">${subject}</h2><p>${body}</p><p style="color:#888;font-size:12px;margin-top:30px">— RunMatch | Bet on a Better You</p></div>`
                             });
                         } catch (emailErr) {
                             console.error('Race email error:', emailErr.message);
@@ -2988,7 +3079,7 @@ app.post('/strava/webhook', async (req, res) => {
 });
 
 // Check Strava connection status
-app.get('/strava/status/:userId', async (req, res) => {
+app.get('/strava/status/:userId', optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -3020,7 +3111,7 @@ app.get('/strava/status/:userId', async (req, res) => {
 });
 
 // Disconnect Strava
-app.delete('/strava/disconnect/:userId', async (req, res) => {
+app.delete('/strava/disconnect/:userId', optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -3133,7 +3224,7 @@ app.post('/recipient-onboarding', async (req, res) => {
       // Create Stripe Connect account
       const account = await stripe.accounts.create({
         type: "express",
-        business_profile: { url: "https://live-eos.com" },
+        business_profile: { url: "https://runmatch.io" },
         country: 'US',
         email: email,
         capabilities: {
@@ -3190,8 +3281,8 @@ app.post('/recipient-onboarding', async (req, res) => {
     if (!existingRecipient || !existingRecipient.stripe_connect_account_id) {
       const accountLink = await stripe.accountLinks.create({
         account: recipient.stripe_connect_account_id,
-        refresh_url: `https://app.live-eos.com/invite?code=${inviteCode}`,
-        return_url: `https://app.live-eos.com/invite?setup_complete=true`,
+        refresh_url: `https://app.runmatch.io/invite?code=${inviteCode}`,
+        return_url: `https://app.runmatch.io/invite?setup_complete=true`,
         type: 'account_onboarding',
       });
       
@@ -3201,7 +3292,7 @@ app.post('/recipient-onboarding', async (req, res) => {
     }
   } catch (err) {
     console.error('Error in recipient onboarding:', err);
-    res.status(500).json({ error: 'Failed to complete onboarding', detail: String(err.message) });
+    res.status(500).json({ error: 'Failed to complete onboarding' });
   }
 });
 
@@ -3255,12 +3346,12 @@ app.post('/process-payout', async (req, res) => {
       }
       
       try {
-        // Step 1: Transfer from EOS platform to connected account
+        // Step 1: Transfer from RunMatch platform to connected account
         const transfer = await stripe.transfers.create({
           amount: rule.fixed_amount_cents,
           currency: 'usd',
           destination: rule.recipient.stripe_connect_account_id,
-          description: `EOS missed goal payout from ${rule.payer.name}`,
+          description: `RunMatch missed goal payout from ${rule.payer.name}`,
           metadata: {
             payout_event_id: payoutEvent.id,
             payer_user_id: payerUserId,
@@ -3278,7 +3369,7 @@ app.post('/process-payout', async (req, res) => {
             amount: rule.fixed_amount_cents,
             currency: 'usd',
             method: 'instant',
-            description: 'EOS instant payout'
+            description: 'RunMatch instant payout'
           }, {
             stripeAccount: rule.recipient.stripe_connect_account_id
           });
@@ -3296,7 +3387,7 @@ app.post('/process-payout', async (req, res) => {
               amount: rule.fixed_amount_cents,
               currency: 'usd',
               method: 'standard',
-              description: 'EOS standard payout'
+              description: 'RunMatch standard payout'
             }, {
               stripeAccount: rule.recipient.stripe_connect_account_id
             });
@@ -3337,7 +3428,7 @@ app.post('/process-payout', async (req, res) => {
           await twilioClient.messages.create({
             to: rule.recipient.phone,
             from: process.env.TWILIO_FROM_NUMBER,
-            body: `💰 You received $${amountFormatted} from ${rule.payer.name} for missing their EOS fitness goal. ${timeMessage}`
+            body: `💰 You received $${amountFormatted} from ${rule.payer.name} for missing their RunMatch fitness goal. ${timeMessage}`
           });
         }
         
@@ -3440,7 +3531,7 @@ app.post("/recipient-hybrid-onboarding", async (req, res) => {
     // Create Stripe CUSTOM account (not Express!)
     const account = await stripe.accounts.create({
       type: "custom",
-      business_profile: { url: "https://live-eos.com" },
+      business_profile: { url: "https://runmatch.io" },
       country: "US",
       email: email,
       capabilities: {
@@ -3534,7 +3625,7 @@ app.post("/recipient-hybrid-onboarding", async (req, res) => {
         await twilioClient.messages.create({
           to: invite.phone,
           from: process.env.TWILIO_PHONE_NUMBER,
-          body: `✅ EOS setup complete! You will receive $${amountFormatted} to your ${payoutMethodName} each time ${payer?.full_name || "your partner"} misses their fitness goal.`
+          body: `✅ RunMatch setup complete! You will receive $${amountFormatted} to your ${payoutMethodName} each time ${payer?.full_name || "your partner"} misses their fitness goal.`
         });
       } catch (smsError) {
         console.error("SMS send error:", smsError);
@@ -3556,52 +3647,15 @@ app.post("/recipient-hybrid-onboarding", async (req, res) => {
   } catch (err) {
     console.error("Hybrid onboarding error:", err);
     res.status(500).json({ 
-      error: "Failed to complete setup", 
-      detail: err.message 
+      error: "Failed to complete setup" 
     });
   }
 });
-app.get('/debug/database', async (req, res) => {
-    try {
-        const results = {};
-        
-        // Check if Supabase client is initialized
-        results.supabaseConnected = !!supabase;
-        
-        // Test users table
-        const { data: usersData, error: usersError } = await supabase
-            .from('users')
-            .select('count');
-        results.usersTable = usersError ? { error: usersError.message } : { count: usersData?.length || 0 };
-        
-        // Test recipients table
-        const { data: recipientsData, error: recipientsError } = await supabase
-            .from('recipients')
-            .select('count');
-        results.recipientsTable = recipientsError ? { error: recipientsError.message } : { count: recipientsData?.length || 0 };
-        
-        // Test recipient_invites table
-        const { data: invitesData, error: invitesError } = await supabase
-            .from('recipient_invites')
-            .select('count');
-        results.invitesTable = invitesError ? { error: invitesError.message } : { count: invitesData?.length || 0 };
-        
-        res.json({
-            status: 'Database connectivity check',
-            timestamp: new Date().toISOString(),
-            results: results
-        });
-    } catch (error) {
-        res.status(500).json({ 
-            error: error.message,
-            stack: error.stack 
-        });
-    }
-});
+// Debug database endpoint removed for security
 
 
 // Manual trigger payout (for when objective is missed)
-app.post("/users/:userId/trigger-payout", async (req, res) => {
+app.post("/users/:userId/trigger-payout", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -3648,7 +3702,7 @@ app.post("/users/:userId/trigger-payout", async (req, res) => {
                         amount: payoutAmountCents,
                         currency: "usd",
                         destination: recipient.stripe_connect_account_id,
-                        description: `EOS payout from ${user.email} - missed objective`,
+                        description: `RunMatch payout from ${user.email} - missed objective`,
                         metadata: {
                             user_id: userId,
                             recipient_id: recipientId,
@@ -3732,7 +3786,7 @@ app.post("/users/:userId/trigger-payout", async (req, res) => {
 // ========== DAILY OBJECTIVE RESET SYSTEM ==========
 
 // Create daily sessions for all committed users (called at midnight)
-app.post("/objectives/create-daily-sessions", async (req, res) => {
+app.post("/objectives/create-daily-sessions", requireCronSecret, async (req, res) => {
     try {
         // Get all users with committed payouts
         const { data: users, error: usersError } = await supabase
@@ -3820,7 +3874,7 @@ app.post("/objectives/create-daily-sessions", async (req, res) => {
 });
 
 // Get today session for a user
-app.get("/objectives/today/:userId", async (req, res) => {
+app.get("/objectives/today/:userId", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -3852,7 +3906,7 @@ app.get("/objectives/today/:userId", async (req, res) => {
 });
 
 // Mark objective as completed
-app.post("/objectives/complete/:userId", async (req, res) => {
+app.post("/objectives/complete/:userId", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         const { completedCount, objectiveType = "pushups" } = req.body;
@@ -3908,8 +3962,16 @@ app.post("/objectives/complete/:userId", async (req, res) => {
             }
         }
         
-        // Always allow count to increase, even if already completed
-        const newCount = Math.max(completedCount || 0, session.completed_count || 0);
+        // Validate: cap increment to prevent score manipulation
+        const currentCount = session.completed_count || 0;
+        const requestedCount = completedCount || 0;
+        const delta = requestedCount - currentCount;
+        if (delta > 200) {
+            console.log(`🚫 Suspicious pushup delta: ${delta} for user ${userId} (current: ${currentCount}, requested: ${requestedCount})`);
+            return res.status(400).json({ error: 'Invalid count — too large of an increase in one sync.' });
+        }
+        
+        const newCount = Math.max(requestedCount, currentCount);
         const isComplete = newCount >= session.target_count;
         
         const { data: updated, error: updateError } = await supabase
@@ -3941,7 +4003,7 @@ app.post("/objectives/complete/:userId", async (req, res) => {
 });
 
 // Reset all sessions at midnight (mark missed ones, create new ones)
-app.post("/objectives/midnight-reset", async (req, res) => {
+app.post("/objectives/midnight-reset", requireCronSecret, async (req, res) => {
     try {
         // Get all users with committed payouts
         const { data: users } = await supabase
@@ -4007,7 +4069,7 @@ app.post("/objectives/midnight-reset", async (req, res) => {
 });
 
 // ========== SIGN IN ENDPOINT ==========
-app.post("/signin", async (req, res) => {
+app.post("/signin", authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -4078,9 +4140,13 @@ app.post("/signin", async (req, res) => {
         // Check if Strava is connected
         const stravaConnected = !!user.strava_connection_id;
 
+        // Generate auth token
+        const token = generateToken(user.id, user.email);
+        
         // Return full user data
         res.json({
             message: "Sign-in successful",
+            token,
             user: {
                 id: user.id,
                 full_name: user.full_name,
@@ -4145,8 +4211,8 @@ app.post("/recipients/:recipientId/onboarding-link", async (req, res) => {
         
         const accountLink = await stripe.accountLinks.create({
             account: recipient.stripe_connect_account_id,
-            refresh_url: refreshUrl || "https://app.live-eos.com/invite?refresh=true",
-            return_url: returnUrl || "https://app.live-eos.com/invite?success=true",
+            refresh_url: refreshUrl || "https://app.runmatch.io/invite?refresh=true",
+            return_url: returnUrl || "https://app.runmatch.io/invite?success=true",
             type: "account_onboarding",
         });
         
@@ -4200,7 +4266,7 @@ app.get("/recipients/:recipientId/status", async (req, res) => {
 // -----------------------------------------------------------------------------
 // Settings Lock - Get user's settings lock state
 // -----------------------------------------------------------------------------
-app.get("/users/:userId/settings-lock", async (req, res) => {
+app.get("/users/:userId/settings-lock", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -4227,7 +4293,7 @@ app.get("/users/:userId/settings-lock", async (req, res) => {
 // Objective Settings - Update user objective configuration
 // -----------------------------------------------------------------------------
 // GET objectives settings (using normalized user_objectives table)
-app.get("/objectives/settings/:userId", async (req, res) => {
+app.get("/objectives/settings/:userId", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -4299,7 +4365,7 @@ app.get("/objectives/settings/:userId", async (req, res) => {
     }
 });
 
-app.post("/objectives/settings/:userId", async (req, res) => {
+app.post("/objectives/settings/:userId", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         const { 
@@ -4352,9 +4418,16 @@ app.post("/objectives/settings/:userId", async (req, res) => {
         if (objective_count) updateData.objective_count = objective_count;
         if (objective_schedule) updateData.objective_schedule = objective_schedule;
         if ('objective_deadline' in req.body) updateData.objective_deadline = objective_deadline;
-        if (typeof missed_goal_payout === "number") { 
-            updateData.missed_goal_payout = missed_goal_payout; 
-            if (missed_goal_payout > 0) updateData.payout_committed = true; 
+        if (typeof missed_goal_payout === "number") {
+            // Cap payout to user's current balance
+            const { data: balUser } = await supabase.from("users").select("balance_cents").eq("id", userId).single();
+            const maxPayout = balUser ? (balUser.balance_cents || 0) / 100 : 0;
+            const cappedPayout = Math.min(missed_goal_payout, maxPayout);
+            updateData.missed_goal_payout = cappedPayout;
+            if (cappedPayout > 0) updateData.payout_committed = true;
+            if (missed_goal_payout > maxPayout && missed_goal_payout > 0) {
+                console.log(`⚠️ Payout capped: requested $${missed_goal_payout}, max $${maxPayout} for user ${userId}`);
+            }
         }
         if (timezone) updateData.timezone = timezone;
         // Handle settings_locked_until - allow null to clear the lock
@@ -4485,7 +4558,7 @@ app.post("/objectives/settings/:userId", async (req, res) => {
 // -----------------------------------------------------------------------------
 // Ensure Today Session - Create session for user if it does not exist
 // -----------------------------------------------------------------------------
-app.post("/objectives/ensure-session/:userId", async (req, res) => {
+app.post("/objectives/ensure-session/:userId", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -4564,7 +4637,7 @@ app.post("/objectives/ensure-session/:userId", async (req, res) => {
 });
 
 // Admin endpoint: Get charity payout totals
-app.get("/admin/charity-totals", async (req, res) => {
+app.get("/admin/charity-totals", requireCronSecret, async (req, res) => {
     try {
         const { data, error } = await supabase
             .from("charity_payouts")
@@ -4605,7 +4678,7 @@ app.get("/admin/charity-totals", async (req, res) => {
 });
 
 // Admin endpoint: Mark charity payouts as paid out
-app.post("/admin/charity-payout/:charityName", async (req, res) => {
+app.post("/admin/charity-payout/:charityName", requireCronSecret, async (req, res) => {
     try {
         const { charityName } = req.params;
         
@@ -4634,7 +4707,7 @@ app.post("/admin/charity-payout/:charityName", async (req, res) => {
 // -----------------------------------------------------------------------------
 
 // Create a competition (LOBBY — no money deducted, status = pending)
-app.post('/compete/create', async (req, res) => {
+app.post('/compete/create', optionalAuth, async (req, res) => {
     try {
         const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue, pushupTarget, runTarget } = req.body;
         
@@ -4763,7 +4836,7 @@ app.get('/compete/verify/:code', async (req, res) => {
 });
 
 // Join a competition
-app.post('/compete/join', async (req, res) => {
+app.post('/compete/join', optionalAuth, async (req, res) => {
     try {
         const { userId, code } = req.body;
         
@@ -4837,7 +4910,7 @@ app.post('/compete/join', async (req, res) => {
 });
 
 // START a competition (creator only — deducts all balances, sets active, starts timer)
-app.post('/compete/start', async (req, res) => {
+app.post('/compete/start', optionalAuth, async (req, res) => {
     try {
         const { userId, competitionId } = req.body;
         
@@ -4984,7 +5057,7 @@ app.post('/compete/start', async (req, res) => {
 });
 
 // Cancel/end a competition (creator only — refunds all participants)
-app.post('/compete/cancel', async (req, res) => {
+app.post('/compete/cancel', optionalAuth, async (req, res) => {
     try {
         const { userId, competitionId } = req.body;
         
@@ -5053,15 +5126,15 @@ app.post('/compete/cancel', async (req, res) => {
                 if (!pUser?.email) continue;
                 
                 const refundNote = buyIn > 0 && comp.status === 'active'
-                    ? ` Your $${buyIn} entry has been refunded to your EOS balance.`
+                    ? ` Your $${buyIn} entry has been refunded to your RunMatch balance.`
                     : '';
                 
                 await emailTransporter.sendMail({
-                    from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+                    from: `"RunMatch" <${process.env.SMTP_USER || 'connect@runmatch.io'}>`,
                     to: pUser.email,
                     subject: `Competition "${comp.name}" has been cancelled`,
                     text: `Hi ${pUser.full_name || 'there'}, the competition "${comp.name}" has been ended early by the creator.${refundNote} Thanks for participating!`,
-                    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">Competition Cancelled</h2><p>Hi ${pUser.full_name || 'there'},</p><p>The competition <strong>"${comp.name}"</strong> has been ended early by the creator.${refundNote}</p><p>Thanks for participating!</p><p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p></div>`
+                    html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">Competition Cancelled</h2><p>Hi ${pUser.full_name || 'there'},</p><p>The competition <strong>"${comp.name}"</strong> has been ended early by the creator.${refundNote}</p><p>Thanks for participating!</p><p style="color:#888;font-size:12px;margin-top:30px">— RunMatch | Bet on a Better You</p></div>`
                 });
                 console.log(`📧 Cancellation email sent to ${pUser.email}`);
             }
@@ -5078,7 +5151,7 @@ app.post('/compete/cancel', async (req, res) => {
 });
 
 // List competitions for a user
-app.get('/compete/user/:userId', async (req, res) => {
+app.get('/compete/user/:userId', optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
         
@@ -5265,7 +5338,8 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
             score = (competition.scoring_type === 'cumulative' || competition.scoring_type === 'race') ? totalCount : daysCompleted;
             
             // Extract today's progress, adjusted for baseline on start day
-            const todayStr = new Date().toISOString().split('T')[0];
+            const { data: pUserTz } = await supabase.from('users').select('timezone').eq('id', p.user_id).single();
+            const todayStr = getTodayForTimezone(pUserTz?.timezone);
             const todaySessions = allSessions.filter(s => s.session_date === todayStr);
             const todayProgress = {};
             for (const s of todaySessions) {
@@ -5368,7 +5442,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
 });
 
 // Cron: check and complete ended competitions, determine winners, pay out
-app.post('/compete/check-completed', async (req, res) => {
+app.post('/compete/check-completed', requireCronSecret, async (req, res) => {
     try {
         const now = new Date();
         const today = now.toISOString().split('T')[0];
@@ -5574,7 +5648,7 @@ app.post('/compete/check-completed', async (req, res) => {
                         body = `"${comp.name}" has ended with no winner.${poolAmount > 0 ? ' All buy-ins have been refunded since no one scored.' : ' Better luck next time!'}`;
                     } else if (isWinner && winners.length === 1) {
                         subject = `🏆 You won "${comp.name}"!`;
-                        body = `Congrats ${pUser.full_name || 'Champion'}! You won "${comp.name}" with a score of ${topScore}.${poolAmount > 0 ? ` $${poolAmount} has been added to your EOS balance.` : ''}`;
+                        body = `Congrats ${pUser.full_name || 'Champion'}! You won "${comp.name}" with a score of ${topScore}.${poolAmount > 0 ? ` $${poolAmount} has been added to your RunMatch balance.` : ''}`;
                     } else if (isWinner && winners.length > 1) {
                         const splitAmount = (Math.floor(Math.round(poolAmount * 100) / winners.length) / 100).toFixed(2);
                         subject = `🏆 You tied for first in "${comp.name}"!`;
@@ -5586,11 +5660,11 @@ app.post('/compete/check-completed', async (req, res) => {
                     }
                     
                     await emailTransporter.sendMail({
-                        from: `"EOS" <${process.env.SMTP_USER || 'connect@live-eos.com'}>`,
+                        from: `"RunMatch" <${process.env.SMTP_USER || 'connect@runmatch.io'}>`,
                         to: pUser.email,
                         subject,
                         text: body,
-                        html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">${subject}</h2><p>${body}</p><p style="color:#888;font-size:12px;margin-top:30px">— EOS | Dawn of Better Habits</p></div>`
+                        html: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:20px"><h2 style="color:#d9a600">${subject}</h2><p>${body}</p><p style="color:#888;font-size:12px;margin-top:30px">— RunMatch | Bet on a Better You</p></div>`
                     });
                     console.log(`📧 Competition email sent to ${pUser.email}`);
                 }
@@ -5613,4 +5687,4 @@ app.post('/compete/check-completed', async (req, res) => {
 // -----------------------------------------------------------------------------
 // Start server (must be after all route definitions)
 // -----------------------------------------------------------------------------
-app.listen(port, () => console.log(`EOS backend listening on port ${port}`));
+app.listen(port, () => console.log(`RunMatch backend listening on port ${port}`));

@@ -1,6 +1,6 @@
 //
 //  SplashView.swift
-//  EOS
+//  RunMatch
 //
 //  Created on 1/7/26.
 //
@@ -22,7 +22,7 @@ struct SplashView: View {
                 .edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 20) {
-                // EOS Logo - Will migrate to top
+                // RunMatch Logo - Will migrate to top
                 Image("eos logo final_original")
                     .resizable()
                     .scaledToFit()
@@ -31,7 +31,7 @@ struct SplashView: View {
                     .scaleEffect(logoScale)
                     .offset(y: logoOffset)
                 
-                // EOS Text with gradient
+                // RunMatch Text with gradient
                 Text("RunMatch")
                     .font(.system(size: 72, weight: .bold, design: .rounded))
                     .foregroundStyle(
@@ -134,7 +134,7 @@ struct SplashViewWithLogo: View {
                     .scaleEffect(logoScale)
                     .offset(y: logoOffset)
                 
-                // EOS Text with gradient matching home screen
+                // RunMatch Text with gradient matching home screen
                 Text("RunMatch")
                     .font(.system(size: 72, weight: .bold, design: .rounded))
                     .foregroundStyle(
@@ -234,7 +234,7 @@ struct SplashViewTextOnly: View {
             VStack(spacing: 30) {
                 Spacer()
                 
-                // EOS Text Logo with gradient
+                // RunMatch Text Logo with gradient
                 Text("RunMatch")
                     .font(.system(size: 80, weight: .bold, design: .rounded))
                     .foregroundStyle(

@@ -8,6 +8,27 @@ import QuickPoseCore
 import QuickPoseSwiftUI
 import QuickPoseCamera
 
+// MARK: - Auth Token Manager
+
+enum AuthToken {
+    private static let key = "authToken"
+    
+    static var token: String? {
+        get { UserDefaults.standard.string(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+    
+    static func applyTo(_ request: inout URLRequest) {
+        if let t = token {
+            request.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+        }
+    }
+    
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 // MARK: - Shared Objective Settings (Observable)
 
 /// Shared state for objective settings that syncs with UserDefaults
@@ -552,9 +573,11 @@ struct ContentView: View {
     /// Fetch today's objective progress from server (run distance from Strava, etc.)
     private func refreshTodayProgress() {
         guard !userId.isEmpty else { return }
-        guard let url = URL(string: "https://api.live-eos.com/objectives/today/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/objectives/today/\(userId)") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let sessions = json["sessions"] as? [[String: Any]] else { return }
@@ -680,9 +703,11 @@ struct ContentView: View {
             return
         }
         print("🏆 Widget: Fetching competitions for \(userId)")
-        guard let url = URL(string: "https://api.live-eos.com/compete/user/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/compete/user/\(userId)") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, _, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, _, error in
             if let error = error {
                 print("🏆 Widget: Network error: \(error.localizedDescription)")
                 return
@@ -714,9 +739,11 @@ struct ContentView: View {
             print("🏆 Widget: Active competition: \(active["name"] ?? "?") (\(compId))")
             
             // Fetch leaderboard for it
-            guard let lbUrl = URL(string: "https://api.live-eos.com/compete/\(compId)/leaderboard") else { return }
+            guard let lbUrl = URL(string: "https://api.runmatch.io/compete/\(compId)/leaderboard") else { return }
             
-            URLSession.shared.dataTask(with: lbUrl) { lbData, _, lbError in
+            var _req = URLRequest(url: lbUrl)
+            AuthToken.applyTo(&_req)
+            URLSession.shared.dataTask(with: _req) { lbData, _, lbError in
                 DispatchQueue.main.async {
                     if let lbError = lbError {
                         print("🏆 Widget: Leaderboard error: \(lbError.localizedDescription)")
@@ -741,14 +768,16 @@ struct ContentView: View {
             return 
         }
         
-        guard let url = URL(string: "https://api.live-eos.com/users/\(userId)/settings-lock") else { 
+        guard let url = URL(string: "https://api.runmatch.io/users/\(userId)/settings-lock") else { 
             print("❌ syncLockState: Invalid URL")
             return 
         }
         
         print("🔄 Syncing lock state from server for user: \(userId)")
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             if let error = error {
                 print("❌ syncLockState error: \(error.localizedDescription)")
                 return
@@ -829,11 +858,12 @@ struct ContentView: View {
             body["settings_locked_until"] = lockDate
         }
         
-        guard let url = URL(string: "/objectives/settings/\(userId)", relativeTo: URL(string: "https://api.live-eos.com")!) else { return }
+        guard let url = URL(string: "/objectives/settings/\(userId)", relativeTo: URL(string: "https://api.runmatch.io")!) else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -1141,10 +1171,11 @@ struct PushUpSessionView: View {
 
     private func syncPushupProgress(count: Int) {
         guard !userId.isEmpty else { return }
-        guard let url = URL(string: "https://api.live-eos.com/objectives/complete/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/objectives/complete/\(userId)") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["completedCount": count, "objectiveType": "pushups"])
         URLSession.shared.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse, http.statusCode == 200 {
@@ -1709,9 +1740,11 @@ struct ObjectiveSettingsView: View {
     private func syncLockFromServer() {
         guard !userId.isEmpty else { return }
         
-        guard let url = URL(string: "https://api.live-eos.com/users/\(userId)/settings-lock") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/users/\(userId)/settings-lock") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return
@@ -2215,7 +2248,7 @@ struct ObjectiveSettingsView: View {
             return
         }
         
-        guard let url = URL(string: "https://api.live-eos.com/objectives/settings/\(userId)") else {
+        guard let url = URL(string: "https://api.runmatch.io/objectives/settings/\(userId)") else {
             completion(false)
             return
         }
@@ -2223,6 +2256,7 @@ struct ObjectiveSettingsView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -2244,9 +2278,11 @@ struct ObjectiveSettingsView: View {
     private func loadObjectivesFromBackend() {
         guard !userId.isEmpty else { return }
         
-        guard let url = URL(string: "https://api.live-eos.com/objectives/settings/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/objectives/settings/\(userId)") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             
@@ -2580,6 +2616,7 @@ final class DepositPaymentService: ObservableObject {
         var request = URLRequest(url: StripeConfig.backendURL.appendingPathComponent("create-payment-intent"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
 
         let payload: [String: Any] = ["amount": cents, "userId": userId]
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload, options: [])
@@ -3015,7 +3052,7 @@ struct ProfileView: View {
                                         HStack {
                         Spacer()
                         Button(action: {
-                            if let url = URL(string: "https://live-eos.com/terms") {
+                            if let url = URL(string: "https://runmatch.io/terms") {
                                 UIApplication.shared.open(url)
                             }
                         }) {
@@ -3274,7 +3311,7 @@ struct ProfileView: View {
                     .cornerRadius(8)
                     .onTapGesture {
                         if !isWithdrawLocked {
-                            if let url = URL(string: "https://live-eos.com/portal") {
+                            if let url = URL(string: "https://runmatch.io/portal") {
                                 UIApplication.shared.open(url)
                             }
                         }
@@ -3780,7 +3817,7 @@ struct ProfileView: View {
             
             // Change password link
             Button(action: {
-                if let url = URL(string: "https://live-eos.com/forgot-password") {
+                if let url = URL(string: "https://runmatch.io/forgot-password") {
                     UIApplication.shared.open(url)
                 }
             }) {
@@ -4076,6 +4113,7 @@ struct ProfileView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -4101,7 +4139,9 @@ struct ProfileView: View {
         
         guard let url = URL(string: "/users/\(userId)/recipient", relativeTo: StripeConfig.backendURL) else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
             
@@ -4129,7 +4169,9 @@ struct ProfileView: View {
         
         guard let url = URL(string: "/users/\(userId)/invites", relativeTo: StripeConfig.backendURL) else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let invites = json["invites"] as? [[String: Any]] else { return }
@@ -4219,6 +4261,7 @@ struct ProfileView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         
         let body = ["recipientId": recipientId]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -4286,6 +4329,7 @@ struct ProfileView: View {
             var request = URLRequest(url: url)
             request.httpMethod = "DELETE"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId])
             URLSession.shared.dataTask(with: request) { _, _, error in
                 if let error = error {
@@ -4415,6 +4459,7 @@ struct ProfileView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -4501,6 +4546,7 @@ struct ProfileView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -4560,7 +4606,9 @@ struct ProfileView: View {
         
         guard let url = URL(string: "/users/\(userId)/balance", relativeTo: StripeConfig.backendURL) else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let balanceCents = json["balanceCents"] as? Int else { return }
@@ -4581,6 +4629,7 @@ struct ProfileView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data,
@@ -4602,7 +4651,7 @@ struct ProfileView: View {
             return
         }
         
-        let stravaConnectURL = "https://api.live-eos.com/strava/connect/\(userId)"
+        let stravaConnectURL = "https://api.runmatch.io/strava/connect/\(userId)"
         if let url = URL(string: stravaConnectURL) {
             UIApplication.shared.open(url)
         }
@@ -4611,7 +4660,7 @@ struct ProfileView: View {
     private func disconnectStrava() {
         guard !userId.isEmpty else { return }
         
-        guard let url = URL(string: "https://api.live-eos.com/strava/disconnect/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/strava/disconnect/\(userId)") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
@@ -4636,12 +4685,14 @@ struct ProfileView: View {
         
         isCheckingStrava = true
         
-        guard let url = URL(string: "https://api.live-eos.com/strava/status/\(userId)") else {
+        guard let url = URL(string: "https://api.runmatch.io/strava/status/\(userId)") else {
             isCheckingStrava = false
             return
         }
         
-        URLSession.shared.dataTask(with: url) { data, response, error in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, error in
             DispatchQueue.main.async {
                 self.isCheckingStrava = false
                 
@@ -4659,7 +4710,9 @@ struct ProfileView: View {
         
         guard let url = URL(string: "/users/\(userId)/is-recipient", relativeTo: StripeConfig.backendURL) else { return }
         
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, _, _ in
             DispatchQueue.main.async {
                 guard let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -4737,11 +4790,11 @@ struct AddRecipientSheet: View {
                                     .foregroundStyle(.secondary)
                                 
                                 Button(action: {
-                                    let shareText = "Want to get paid when I miss my goals? 💰\n\nSign up here: live-eos.com/invite-simple\nUse code: \(code)"
+                                    let shareText = "Want to get paid when I miss my goals? 💰\n\nSign up here: runmatch.io/invite-simple\nUse code: \(code)"
                                     UIPasteboard.general.string = shareText
                                     errorMessage = "✅ Copied!"
                                 }) {
-                                    Text("Want to get paid when I miss my goals? 💰\n\nSign up here: live-eos.com/invite-simple\nUse code: \(code)")
+                                    Text("Want to get paid when I miss my goals? 💰\n\nSign up here: runmatch.io/invite-simple\nUse code: \(code)")
                                         .font(.system(.subheadline, design: .rounded))
                                         .multilineTextAlignment(.leading)
                                         .foregroundStyle(.white)
@@ -4939,6 +4992,7 @@ struct AddRecipientSheet: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -5005,6 +5059,7 @@ struct AddRecipientSheet: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.timeoutInterval = 10
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "payerId": userId,
@@ -5090,6 +5145,7 @@ struct AddRecipientSheet: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -5312,7 +5368,7 @@ struct CompeteView: View {
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(Color.secondary)
                     
-                    Text("For questions, contact connect@live-eos.com")
+                    Text("For questions, contact connect@runmatch.io")
                         .font(.system(.caption2, design: .rounded))
                         .foregroundStyle(Color.secondary)
                     
@@ -5683,7 +5739,7 @@ struct CompeteView: View {
     private func loadCompetitions() {
         guard !userId.isEmpty else { isLoading = false; return }
         
-        guard let url = URL(string: "https://api.live-eos.com/compete/user/\(userId)") else {
+        guard let url = URL(string: "https://api.runmatch.io/compete/user/\(userId)") else {
             isLoading = false
             return
         }
@@ -5783,7 +5839,7 @@ struct CreateCompetitionView: View {
         let durationLabel = durationDays == 7 ? "1 week" : (durationDays == 14 ? "2 weeks" : (durationDays == 30 ? "1 month" : "\(durationDays) days"))
         let objLabel = objectiveType == "run" ? "running" : (objectiveType == "both" ? "running + pushups" : "pushups")
         let buyInLabel = buyInAmount > 0 ? " with a $\(Int(buyInAmount)) buy-in" : ""
-        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload EOS: live-eos.com"
+        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload EOS: runmatch.io"
     }
     
     @State private var codeCopied: Bool = false
@@ -6262,6 +6318,7 @@ struct CreateCompetitionView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         URLSession.shared.dataTask(with: request) { _, response, _ in
@@ -6347,7 +6404,7 @@ struct CreateCompetitionView: View {
         isCreating = true
         createError = nil
         
-        guard let url = URL(string: "https://api.live-eos.com/compete/create") else {
+        guard let url = URL(string: "https://api.runmatch.io/compete/create") else {
             isCreating = false
             createError = "Invalid server URL."
             return
@@ -6356,6 +6413,7 @@ struct CreateCompetitionView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.timeoutInterval = 5
         
         let targetValue: Double = objectiveType == "run" || objectiveType == "both" ? runDistance : Double(pushupTarget)
@@ -6640,9 +6698,11 @@ struct JoinCompetitionView: View {
     
     private func verifyCode() {
         isVerifying = true
-        guard let url = URL(string: "https://api.live-eos.com/compete/verify/\(code)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/compete/verify/\(code)") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, response, _ in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, response, _ in
             DispatchQueue.main.async {
                 self.isVerifying = false
                 guard let data = data,
@@ -6664,10 +6724,11 @@ struct JoinCompetitionView: View {
         guard !userId.isEmpty else { return }
         isJoining = true
         
-        guard let url = URL(string: "https://api.live-eos.com/compete/join") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/compete/join") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId, "code": code])
         
         URLSession.shared.dataTask(with: request) { data, _, _ in
@@ -6803,9 +6864,9 @@ struct CompetitionDetailView: View {
         let buyInLine = buyIn > 0 ? " $\(Int(buyIn)) entry." : ""
         
         if scoring == "race" {
-            return "Join my running race on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
+            return "Join my running race on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: runmatch.io"
         }
-        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: live-eos.com"
+        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: runmatch.io"
     }
     
     private func objectiveTypeDisplay(_ objType: String, targetValue: Double) -> String {
@@ -8343,7 +8404,7 @@ struct CompetitionDetailView: View {
     private func cancelCompetition() {
         isCancelling = true
         
-        guard let url = URL(string: "https://api.live-eos.com/compete/cancel") else {
+        guard let url = URL(string: "https://api.runmatch.io/compete/cancel") else {
             isCancelling = false
             return
         }
@@ -8351,6 +8412,7 @@ struct CompetitionDetailView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId, "competitionId": competitionId])
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -8371,7 +8433,7 @@ struct CompetitionDetailView: View {
         isStarting = true
         startError = nil
         
-        guard let url = URL(string: "https://api.live-eos.com/compete/start") else {
+        guard let url = URL(string: "https://api.runmatch.io/compete/start") else {
             isStarting = false
             startError = "Invalid URL"
             return
@@ -8380,6 +8442,7 @@ struct CompetitionDetailView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.timeoutInterval = 20
         request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "userId": userId,
@@ -8426,9 +8489,11 @@ struct CompetitionDetailView: View {
     
     private func loadLeaderboard(all: Bool = false) {
         let limitParam = all ? "" : "?limit=5"
-        guard let url = URL(string: "https://api.live-eos.com/compete/\(competitionId)/leaderboard\(limitParam)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/compete/\(competitionId)/leaderboard\(limitParam)") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, _, _ in
             DispatchQueue.main.async {
                 self.isLoading = false
                 guard let data = data,
@@ -8440,8 +8505,10 @@ struct CompetitionDetailView: View {
         
         // Fetch current pushup count so comp session logs correctly
         guard !userId.isEmpty,
-              let progressUrl = URL(string: "https://api.live-eos.com/objectives/today/\(userId)") else { return }
-        URLSession.shared.dataTask(with: progressUrl) { data, _, _ in
+              let progressUrl = URL(string: "https://api.runmatch.io/objectives/today/\(userId)") else { return }
+        var _req2 = URLRequest(url: progressUrl)
+        AuthToken.applyTo(&_req2)
+        URLSession.shared.dataTask(with: _req2) { data, _, _ in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let sessions = json["sessions"] as? [[String: Any]] else { return }
@@ -8587,7 +8654,7 @@ struct SignInView: View {
                     
                     // Forgot password link
                     Button(action: {
-                        if let url = URL(string: "https://live-eos.com/forgot-password") {
+                        if let url = URL(string: "https://runmatch.io/forgot-password") {
                             UIApplication.shared.open(url)
                         }
                     }) {
@@ -8635,6 +8702,7 @@ struct SignInView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -8673,6 +8741,11 @@ struct SignInView: View {
                 // Parse user data from response and populate ALL profile fields
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let user = json["user"] as? [String: Any] {
+                    
+                    // === AUTH TOKEN ===
+                    if let token = json["token"] as? String {
+                        AuthToken.token = token
+                    }
                     
                     // === IDENTITY ===
                     if let id = user["id"] as? String {
@@ -9008,6 +9081,7 @@ struct CreateAccountView: View {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -9029,7 +9103,7 @@ struct CreateAccountView: View {
                     return
                 }
                 
-                // Successfully created account - extract and save userId
+                // Successfully created account - extract and save userId + token
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     if let id = json["id"] as? String {
@@ -9038,6 +9112,9 @@ struct CreateAccountView: View {
                     } else if let id = json["id"] as? Int {
                         UserDefaults.standard.set(String(id), forKey: "userId")
                         print("✅ New account created, userId saved: \(id)")
+                    }
+                    if let token = json["token"] as? String {
+                        AuthToken.token = token
                     }
                 }
                 

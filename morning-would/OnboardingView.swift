@@ -35,6 +35,8 @@ struct OnboardingView: View {
     @State private var showCreateCompetition = false
     @State private var isCheckingStrava = false
     @State private var stravaJustLinked = false
+    @State private var stravaDelayComplete = false
+    @State private var stravaDelayProgress: CGFloat = 0
 
     // Animation state
     @State private var screenAppeared = false
@@ -161,15 +163,30 @@ struct OnboardingView: View {
 
     private var continueButton: some View {
         Button(action: advancePage) {
-            Text(currentPage == 0 ? "Get Started" : "Continue")
-                .font(.system(.headline, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(canContinue ? gold : Color.gray.opacity(0.3))
-                )
+            ZStack {
+                // Background track
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(canContinue ? gold : Color.gray.opacity(0.3))
+
+                // Gold fill animation for Strava delay
+                if currentPage == 13 && !stravaConnected && !stravaDelayComplete {
+                    GeometryReader { geo in
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(gold)
+                            .frame(width: geo.size.width * stravaDelayProgress)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+
+                Text(currentPage == 0 ? "Get Started" : "Continue")
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .scaleEffect(continueScale)
         .disabled(!canContinue)
@@ -220,7 +237,7 @@ struct OnboardingView: View {
         case 9: return true
         case 10, 11: return true
         case 12: return isSignedIn
-        case 13: return true
+        case 13: return stravaConnected || stravaDelayComplete
         default: return true
         }
     }
@@ -257,6 +274,24 @@ struct OnboardingView: View {
                     cardStagger[i] = true
                 }
             }
+        }
+        // Start Strava delay timer when landing on that page
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if self.currentPage == 13 && !self.stravaConnected {
+                self.startStravaDelay()
+            }
+        }
+    }
+
+    private func startStravaDelay() {
+        guard !stravaConnected else { return }
+        stravaDelayComplete = false
+        stravaDelayProgress = 0
+        withAnimation(.linear(duration: 5.0)) {
+            stravaDelayProgress = 1.0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            stravaDelayComplete = true
         }
     }
 
@@ -297,11 +332,12 @@ struct OnboardingView: View {
             "timezone": TimeZone.current.identifier
         ]
 
-        guard let url = URL(string: "https://api.live-eos.com/objectives/settings/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/objectives/settings/\(userId)") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         URLSession.shared.dataTask(with: request) { _, response, _ in
@@ -326,17 +362,19 @@ struct OnboardingView: View {
 
     private func connectStrava() {
         guard !userId.isEmpty else { return }
-        if let url = URL(string: "https://api.live-eos.com/strava/connect/\(userId)") {
+        if let url = URL(string: "https://api.runmatch.io/strava/connect/\(userId)") {
             UIApplication.shared.open(url)
         }
     }
 
     private func checkStravaStatus() {
         guard !userId.isEmpty else { return }
-        guard let url = URL(string: "https://api.live-eos.com/strava/status/\(userId)") else { return }
+        guard let url = URL(string: "https://api.runmatch.io/strava/status/\(userId)") else { return }
 
         isCheckingStrava = true
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        var _req = URLRequest(url: url)
+        AuthToken.applyTo(&_req)
+        URLSession.shared.dataTask(with: _req) { data, _, _ in
             DispatchQueue.main.async {
                 isCheckingStrava = false
                 guard let data = data,

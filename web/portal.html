@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EOS - Account Portal</title>
+    <title>RunMatch - Account Portal</title>
     <script type="text/javascript">
         (function(c,l,a,r,i,t,y){
             c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
@@ -371,7 +371,7 @@
     <div class="login-view" id="login-view">
         <div class="login-container">
             <div class="login-header">
-                <a href="/" style="text-decoration: none;"><h1>EOS</h1></a>
+                <a href="/" style="text-decoration: none;"><h1>RunMatch</h1></a>
                 <p>Sign in to your account</p>
             </div>
             
@@ -404,7 +404,7 @@
     <!-- Dashboard View -->
     <div class="dashboard" id="dashboard">
         <div class="header">
-            <a href="/" style="text-decoration: none;"><h1>EOS</h1></a>
+            <a href="/" style="text-decoration: none;"><h1>RunMatch</h1></a>
             <div class="header-user">
                 <span id="user-name">User</span>
                 <a href="/" class="signout-btn" style="text-decoration: none;">Home</a>
@@ -451,8 +451,15 @@
     </div>
     
     <script>
-        const API_URL = 'https://api.live-eos.com';
+        const API_URL = 'https://api.runmatch.io';
         let currentUser = null;
+        
+        function getAuthHeaders() {
+            const token = localStorage.getItem('eos_token');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            return headers;
+        }
         
         // Check for existing session
         function checkSession() {
@@ -493,6 +500,7 @@
                 
                 currentUser = data.user;
                 localStorage.setItem('eos_session', JSON.stringify(currentUser));
+                if (data.token) localStorage.setItem('eos_token', data.token);
                 
                 showDashboard();
                 loadUserData();
@@ -519,7 +527,7 @@
             // Fetch fresh balance and lock status from server
             let balanceDollars = (currentUser.balance_cents || 0) / 100;
             try {
-                const response = await fetch(`${API_URL}/users/${currentUser.id}/balance`);
+                const response = await fetch(`${API_URL}/users/${currentUser.id}/balance`, { headers: getAuthHeaders() });
                 if (response.ok) {
                     const data = await response.json();
                     balanceDollars = data.balanceDollars || 0;
@@ -573,7 +581,7 @@
         
         async function loadActivity() {
             try {
-                const response = await fetch(`${API_URL}/users/${currentUser.id}/transactions`);
+                const response = await fetch(`${API_URL}/users/${currentUser.id}/transactions`, { headers: getAuthHeaders() });
                 const data = await response.json();
                 
                 const activityList = document.getElementById('activity-list');
@@ -583,11 +591,12 @@
                     return;
                 }
                 
+                function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
                 activityList.innerHTML = data.transactions.map(tx => `
                     <div class="activity-item">
                         <div class="activity-info">
-                            <span class="activity-description">${tx.description || 'Transaction'}</span>
-                            <span class="activity-date">${formatDate(tx.created_at)}</span>
+                            <span class="activity-description">${esc(tx.description || 'Transaction')}</span>
+                            <span class="activity-date">${esc(formatDate(tx.created_at))}</span>
                         </div>
                         <span class="activity-amount ${tx.amount_cents < 0 ? 'negative' : ''}">
                             ${tx.amount_cents >= 0 ? '+' : ''}$${(Math.abs(tx.amount_cents) / 100).toFixed(2)}
@@ -613,6 +622,7 @@
         
         function signOut() {
             localStorage.removeItem('eos_session');
+            localStorage.removeItem('eos_token');
             currentUser = null;
             showLogin();
             
@@ -650,7 +660,7 @@
                 banner.textContent = '✅ Strava connected successfully! You can close this page and return to the app.';
                 banner.className = 'strava-banner success';
             } else if (strava === 'already_linked') {
-                banner.textContent = '⚠️ This Strava account is already linked to another EOS user. Each Strava account can only be connected to one EOS account.';
+                banner.textContent = '⚠️ This Strava account is already linked to another RunMatch user. Each Strava account can only be connected to one RunMatch account.';
                 banner.className = 'strava-banner error';
             } else if (strava === 'error') {
                 banner.textContent = '❌ Failed to connect Strava. Please try again from the app.';

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EOS - Accept Accountability Invite</title>
+    <title>RunMatch - Accept Accountability Invite</title>
     <style>
         * {
             margin: 0;
@@ -216,7 +216,7 @@
 <body>
     <div class="container">
         <div class="logo">
-            <h1>EOS</h1>
+            <h1>RunMatch</h1>
         </div>
         
         <!-- Step 1: Enter Code -->
@@ -233,7 +233,7 @@
             <button class="button" onclick="verifyCode()">Verify Code</button>
             
             <div class="signin-link">
-                Already have an account? <a href="https://live-eos.com/portal">Sign In</a>
+                Already have an account? <a href="https://runmatch.io/portal">Sign In</a>
             </div>
         </div>
         
@@ -310,18 +310,18 @@
             <div class="info-box">
                 <strong>What's next?</strong><br><br>
                 • Your earnings will show in your account<br>
-                • Download the EOS app to track your balance<br>
+                • Download the RunMatch app to track your balance<br>
                 • Withdraw anytime from your portal
             </div>
             
-            <button class="button" onclick="window.location.href='https://live-eos.com/portal'">Go to Portal</button>
+            <button class="button" onclick="window.location.href='https://runmatch.io/portal'">Go to Portal</button>
         </div>
         
         <div id="error-message" class="error" style="display: none;"></div>
     </div>
     
     <script>
-        const API_URL = 'https://api.live-eos.com';
+        const API_URL = 'https://api.runmatch.io';
         let inviteData = null;
         
         // Auto-uppercase invite code

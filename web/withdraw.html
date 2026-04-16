@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EOS - Withdraw Funds</title>
+    <title>RunMatch - Withdraw Funds</title>
     <script src="https://js.stripe.com/v3/"></script>
     <style>
         * {
@@ -275,7 +275,7 @@
 <body>
     <div class="container">
         <div class="logo">
-            <h1>EOS</h1>
+            <h1>RunMatch</h1>
         </div>
         
         <!-- Step 1: Confirm Amount -->
@@ -455,7 +455,7 @@
     </div>
     
     <script>
-        const API_URL = 'https://api.live-eos.com';
+        const API_URL = 'https://api.runmatch.io';
         // LIVE MODE
         const stripe = Stripe('pk_live_51SFmmBJvjEmusMrWmyxxYVbOCdbGXGPP1abyBQx6de058XiwPgiZwZ1QfsBSnxlaH2aXC1XQtr3D71F3rT09wNIp00yWIHDvsH');
         let currentUser = null;
@@ -476,7 +476,9 @@
                 
                 // Fetch fresh lock status from server
                 try {
-                    const balanceRes = await fetch(`${API_URL}/users/${currentUser.id}/balance`);
+                    const token = localStorage.getItem('eos_token');
+                    const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+                    const balanceRes = await fetch(`${API_URL}/users/${currentUser.id}/balance`, { headers: authHeaders });
                     if (balanceRes.ok) {
                         const data = await balanceRes.json();
                         currentUser.balance_cents = data.balanceCents || 0;
@@ -627,9 +629,12 @@
                 }
                 
                 // Submit to backend
+                const wToken = localStorage.getItem('eos_token');
+                const wHeaders = { 'Content-Type': 'application/json' };
+                if (wToken) wHeaders['Authorization'] = `Bearer ${wToken}`;
                 const response = await fetch(`${API_URL}/withdraw`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: wHeaders,
                     body: JSON.stringify({ ...formData, paymentToken })
                 });
                 
