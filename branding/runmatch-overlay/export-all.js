@@ -1,0 +1,126 @@
+const puppeteer = require('puppeteer');
+const path = require('path');
+const fs = require('fs');
+
+const overlays = [
+  { file: 'overlay-5k.html', output: 'runmatch-overlay-5mi.png', distance: '5.00 mi', winnings: '$200', time: '37m 15s' },
+  { file: 'overlay-15mi.html', output: 'runmatch-overlay-15mi.png', distance: '15.00 mi', winnings: '$1,200', time: '1h 48m' },
+  { file: 'overlay-marathon.html', output: 'runmatch-overlay-marathon.png', distance: '24.3 mi', winnings: '$10,000', time: '3h 12m' },
+];
+
+function buildHTML(distance, winnings, time) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700;1,800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 800px;
+      height: 1000px;
+      background: transparent;
+      font-family: 'Inter', -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .widget {
+      width: 800px;
+      height: 1000px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 44px;
+      padding: 60px 40px;
+    }
+    .stat { text-align: center; }
+    .stat-label {
+      font-size: 26px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.65);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 90px;
+      font-weight: 900;
+      color: #fff;
+      line-height: 1.05;
+      letter-spacing: -2px;
+    }
+    .stat-value.gold { color: #D9A600; }
+    .divider {
+      width: 60px;
+      height: 2px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 1px;
+    }
+    .logo-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .logo-wordmark {
+      font-family: 'Playfair Display', serif;
+      font-size: 64px;
+      color: #D9A600;
+      letter-spacing: 1px;
+    }
+    .logo-wordmark .run { font-weight: 800; font-style: normal; }
+    .logo-wordmark .match { font-weight: 700; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="widget">
+    <div class="stat">
+      <div class="stat-label">Distance</div>
+      <div class="stat-value">${distance}</div>
+    </div>
+    <div class="divider"></div>
+    <div class="stat">
+      <div class="stat-label">Winnings</div>
+      <div class="stat-value gold">${winnings}</div>
+    </div>
+    <div class="divider"></div>
+    <div class="stat">
+      <div class="stat-label">Time</div>
+      <div class="stat-value">${time}</div>
+    </div>
+    <div class="logo-section">
+      <div class="logo-wordmark"><span class="run">Run</span><span class="match">Match</span></div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+(async () => {
+  const browser = await puppeteer.launch({ headless: true });
+
+  for (const o of overlays) {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 800, height: 1000, deviceScaleFactor: 2 });
+
+    const html = buildHTML(o.distance, o.winnings, o.time);
+    const tmpPath = path.join(__dirname, o.file);
+    fs.writeFileSync(tmpPath, html);
+
+    await page.goto(`file://${tmpPath}`, { waitUntil: 'networkidle0', timeout: 15000 });
+    await new Promise(r => setTimeout(r, 1500));
+
+    await page.screenshot({
+      path: path.join(__dirname, o.output),
+      type: 'png',
+      omitBackground: true
+    });
+
+    console.log(`Exported: ${o.output}`);
+    await page.close();
+  }
+
+  await browser.close();
+  console.log('\nAll 3 overlays exported.');
+})();

@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RunMatch — Investor Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  @page {
+    size: 11in 8.5in;
+    margin: 0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --gold: #D9A600;
+    --gold-light: rgba(217, 166, 0, 0.08);
+    --gold-medium: rgba(217, 166, 0, 0.25);
+    --gold-dark: #B38F00;
+    --dark: #0A0A0A;
+    --darker: #050505;
+    --card-bg: #111111;
+    --gray: #999;
+    --light-gray: #1a1a1a;
+    --white: #ffffff;
+  }
+
+  html, body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--dark);
+    color: var(--white);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .slide {
+    width: 11in;
+    height: 8.5in;
+    padding: 0.7in 0.9in;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    page-break-after: always;
+    background: var(--dark);
+  }
+
+  .slide:last-child { page-break-after: auto; }
+
+  .slide::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--gold), var(--gold-dark), transparent);
+  }
+
+  .slide-footer {
+    position: absolute;
+    bottom: 0.4in;
+    left: 0.9in;
+    right: 0.9in;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--gray);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding-top: 12px;
+  }
+
+  .slide-footer .brand {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 800;
+    color: var(--gold);
+    font-size: 12px;
+    letter-spacing: -0.3px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 16px;
+  }
+
+  h1 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 52px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    margin-bottom: 20px;
+  }
+
+  h2 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1.15;
+    margin-bottom: 24px;
+  }
+
+  .gold { color: var(--gold); }
+
+  .subtitle {
+    font-size: 20px;
+    color: var(--gray);
+    font-weight: 400;
+    line-height: 1.5;
+    max-width: 8in;
+  }
+
+  .meta {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gray);
+    margin-top: 32px;
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-top: 32px;
+  }
+
+  .stat-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 28px 24px;
+    text-align: center;
+  }
+
+  .stat-card .number {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 42px;
+    font-weight: 800;
+    color: var(--gold);
+    letter-spacing: -1px;
+  }
+
+  .stat-card .label {
+    font-size: 13px;
+    color: var(--gray);
+    margin-top: 8px;
+    line-height: 1.4;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    margin-top: 28px;
+  }
+
+  .problem-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 36px 32px;
+  }
+
+  .problem-card h3 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    color: var(--white);
+  }
+
+  .problem-card p {
+    font-size: 15px;
+    color: var(--gray);
+    line-height: 1.65;
+  }
+
+  .comp-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin-top: 28px;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .comp-table th {
+    background: var(--card-bg);
+    padding: 16px 20px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--gray);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .comp-table td {
+    padding: 16px 20px;
+    font-size: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--gray);
+  }
+
+  .comp-table tr:last-child td { border-bottom: none; }
+
+  .comp-table tr.highlight {
+    background: rgba(217, 166, 0, 0.06);
+  }
+
+  .comp-table tr.highlight td {
+    color: var(--white);
+    font-weight: 600;
+  }
+
+  .comp-table .company {
+    font-weight: 700;
+    color: var(--white);
+  }
+
+  .comp-table tr.highlight .company {
+    color: var(--gold);
+  }
+
+  .check { color: var(--gold); font-weight: 700; }
+  .cross { color: #555; }
+
+  .gap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-top: 28px;
+  }
+
+  .gap-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 28px 24px;
+    text-align: center;
+  }
+
+  .gap-card .name {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+
+  .gap-card .name.gold-name { color: var(--gold); }
+
+  .gap-tag {
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 50px;
+    font-size: 12px;
+    font-weight: 600;
+    margin: 3px 4px;
+  }
+
+  .gap-tag.yes {
+    background: rgba(217, 166, 0, 0.12);
+    color: var(--gold);
+    border: 1px solid rgba(217, 166, 0, 0.25);
+  }
+
+  .gap-tag.no {
+    background: rgba(255,255,255,0.04);
+    color: #555;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .revenue-list {
+    margin-top: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .revenue-item {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 28px 28px;
+  }
+
+  .revenue-num {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 32px;
+    font-weight: 800;
+    color: var(--gold);
+    min-width: 44px;
+  }
+
+  .revenue-item h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .revenue-item p {
+    font-size: 14px;
+    color: var(--gray);
+    line-height: 1.55;
+  }
+
+  .valid-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    margin-top: 32px;
+  }
+
+  .valid-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 32px 24px;
+    text-align: center;
+  }
+
+  .valid-card .big {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 44px;
+    font-weight: 800;
+    color: var(--gold);
+    letter-spacing: -1px;
+  }
+
+  .valid-card .desc {
+    font-size: 14px;
+    color: var(--gray);
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+
+  .ask-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    margin-top: 32px;
+  }
+
+  .ask-amount {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .ask-amount .dollar {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 72px;
+    font-weight: 800;
+    color: var(--gold);
+    letter-spacing: -2px;
+  }
+
+  .ask-amount .note {
+    font-size: 18px;
+    color: var(--gray);
+    margin-top: 8px;
+  }
+
+  .alloc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .alloc-item {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .alloc-pct {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--gold);
+    min-width: 70px;
+  }
+
+  .alloc-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--white);
+  }
+
+  .bar-track {
+    height: 6px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 3px;
+    margin-top: 28px;
+    overflow: hidden;
+    display: flex;
+  }
+
+  .bar-fill-1 {
+    width: 70%;
+    background: var(--gold);
+    border-radius: 3px 0 0 3px;
+  }
+
+  .bar-fill-2 {
+    width: 20%;
+    background: var(--gold-dark);
+  }
+
+  .bar-fill-3 {
+    width: 10%;
+    background: rgba(217, 166, 0, 0.4);
+    border-radius: 0 3px 3px 0;
+  }
+
+  .why-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    margin-top: 28px;
+  }
+
+  .why-card {
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 36px 32px;
+  }
+
+  .why-card h3 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 14px;
+    color: var(--gold);
+  }
+
+  .why-card p {
+    font-size: 15px;
+    color: var(--gray);
+    line-height: 1.65;
+  }
+
+  .closing-tagline {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-top: 40px;
+    text-align: center;
+    letter-spacing: -0.5px;
+  }
+
+  .disc {
+    font-size: 10px;
+    color: #555;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1: TITLE -->
+<div class="slide">
+  <div class="section-label">Investor Pitch &middot; Pre-Seed</div>
+  <h1><span class="gold">RunMatch</span></h1>
+  <p class="subtitle">The accountability platform for runners that pays you to show up.<br>Match with runners like you. Build consistency. Compete for cash.</p>
+  <p class="meta">Pre-Seed Round &middot; Delaware C-Corp &middot; RunMatch, Inc.</p>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>Confidential &middot; 2026</span>
+  </div>
+</div>
+
+<!-- SLIDE 2: MARKET OPPORTUNITY -->
+<div class="slide">
+  <div class="section-label">Market Opportunity</div>
+  <h2>A massive, growing market</h2>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="number">$13.5B</div>
+      <div class="label">Global fitness app<br>market 2026</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">$4.75B</div>
+      <div class="label">US market<br>alone</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">13%</div>
+      <div class="label">CAGR through<br>2034</div>
+    </div>
+    <div class="stat-card">
+      <div class="number">40%</div>
+      <div class="label">More engagement<br>with gamified apps</div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>Market data: Straits Research, Business of Apps &middot; 2</span>
+  </div>
+</div>
+
+<!-- SLIDE 3: THE PROBLEM -->
+<div class="slide">
+  <div class="section-label">The Problem</div>
+  <h2>Runners need more than tracking</h2>
+  <div class="two-col">
+    <div class="problem-card">
+      <h3>Runners quit alone</h3>
+      <p>Most running apps track performance but don't build accountability. Without a matched community, motivation fades — <strong style="color:var(--white)">80% of new runners quit within 6 months.</strong></p>
+    </div>
+    <div class="problem-card">
+      <h3>No financial skin in the game</h3>
+      <p>Research shows people who put money on the line are <strong style="color:var(--gold)">3x more likely to complete a fitness goal.</strong> Yet no running app combines accountability, matching, and real cash stakes.</p>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>Source: Mayo Clinic research &middot; 3</span>
+  </div>
+</div>
+
+<!-- SLIDE 4: COMPETITIVE LANDSCAPE -->
+<div class="slide">
+  <div class="section-label">Competitive Landscape</div>
+  <h2>Nobody owns this intersection</h2>
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th>Company</th>
+        <th>Positioning</th>
+        <th>Scale</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="highlight">
+        <td class="company">RunMatch</td>
+        <td>Full stack — accountability + matching + cash + community</td>
+        <td>$100K raising</td>
+      </tr>
+      <tr>
+        <td class="company">Strava</td>
+        <td>Community & tracking — no cash, no matching</td>
+        <td>$415M rev · $2.2B val</td>
+      </tr>
+      <tr>
+        <td class="company">StepBet</td>
+        <td>Cash competitions — solo goals only, no matching</td>
+        <td>$14.4M raised</td>
+      </tr>
+      <tr>
+        <td class="company">HealthyWage</td>
+        <td>Weight loss betting — no running focus</td>
+        <td>Bootstrapped</td>
+      </tr>
+      <tr>
+        <td class="company">Sweatcoin</td>
+        <td>Passive step rewards — no competition stakes</td>
+        <td>$10M rev · $50M val</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>Competitor figures: PitchBook, publicly reported estimates &middot; 4</span>
+  </div>
+</div>
+
+<!-- SLIDE 5: THE GAP -->
+<div class="slide">
+  <div class="section-label">The Gap RunMatch Fills</div>
+  <h2>Where others fall short</h2>
+  <div class="gap-grid">
+    <div class="gap-card">
+      <div class="name">Strava</div>
+      <div><span class="gap-tag yes">Community</span><span class="gap-tag yes">Tracking</span></div>
+      <div style="margin-top:8px"><span class="gap-tag no">No cash prizes</span><span class="gap-tag no">No matching</span></div>
+    </div>
+    <div class="gap-card" style="border-color: rgba(217,166,0,0.25); background: rgba(217,166,0,0.04);">
+      <div class="name gold-name">RunMatch</div>
+      <div><span class="gap-tag yes">Community</span><span class="gap-tag yes">Matching</span></div>
+      <div style="margin-top:8px"><span class="gap-tag yes">Accountability</span><span class="gap-tag yes">Cash prizes</span></div>
+    </div>
+    <div class="gap-card">
+      <div class="name">StepBet</div>
+      <div><span class="gap-tag yes">Cash prizes</span></div>
+      <div style="margin-top:8px"><span class="gap-tag no">No matching</span><span class="gap-tag no">Solo goals only</span><span class="gap-tag no">No run clubs</span></div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>5</span>
+  </div>
+</div>
+
+<!-- SLIDE 6: REVENUE MODEL -->
+<div class="slide">
+  <div class="section-label">Revenue Model</div>
+  <h2>Three revenue streams</h2>
+  <div class="revenue-list">
+    <div class="revenue-item">
+      <div class="revenue-num">1</div>
+      <div>
+        <h3>Competition entry fees — 10–15% commission</h3>
+        <p>Runners put skin in the game. Winners split the pot. RunMatch takes 10–15% — the same proven model as StepBet, which paid out $100M+ to users.</p>
+      </div>
+    </div>
+    <div class="revenue-item">
+      <div class="revenue-num">2</div>
+      <div>
+        <h3>Subscription tier — RunMatch Pro</h3>
+        <p>Premium features: multiple simultaneous competitions, advanced matching, coaching integrations, and run club management tools.</p>
+      </div>
+    </div>
+    <div class="revenue-item">
+      <div class="revenue-num">3</div>
+      <div>
+        <h3>Corporate wellness partnerships</h3>
+        <p>Employers pay RunMatch to run sponsored team challenges — a proven revenue stream for HealthyWage with Fortune 500 clients.</p>
+      </div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>6</span>
+  </div>
+</div>
+
+<!-- SLIDE 7: MARKET VALIDATION -->
+<div class="slide">
+  <div class="section-label">Market Validation</div>
+  <h2>The model works. The audience exists.</h2>
+  <div class="valid-grid">
+    <div class="valid-card">
+      <div class="big">$100M+</div>
+      <div class="desc">Paid out by StepBet — proving cash competition model works at scale</div>
+    </div>
+    <div class="valid-card">
+      <div class="big">180M</div>
+      <div class="desc">Strava users — proving massive demand for social running platforms</div>
+    </div>
+    <div class="valid-card">
+      <div class="big">3x</div>
+      <div class="desc">More likely to hit fitness goals when financial stakes are involved (Mayo Clinic)</div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>7</span>
+  </div>
+</div>
+
+<!-- SLIDE 8: THE ASK -->
+<div class="slide">
+  <div class="section-label">The Ask</div>
+  <h2>Pre-seed round — SAFE note</h2>
+  <div class="ask-grid">
+    <div class="ask-amount">
+      <div class="dollar">$100K</div>
+      <div class="note">Pre-seed round</div>
+      <div class="bar-track">
+        <div class="bar-fill-1"></div>
+        <div class="bar-fill-2"></div>
+        <div class="bar-fill-3"></div>
+      </div>
+    </div>
+    <div class="alloc-list">
+      <div class="alloc-item">
+        <div class="alloc-pct">70%</div>
+        <div class="alloc-label">Customer acquisition & community growth</div>
+      </div>
+      <div class="alloc-item">
+        <div class="alloc-pct">20%</div>
+        <div class="alloc-label">Product development</div>
+      </div>
+      <div class="alloc-item">
+        <div class="alloc-pct">10%</div>
+        <div class="alloc-label">Legal & compliance</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch</span>
+    <span>8</span>
+  </div>
+</div>
+
+<!-- SLIDE 9: WHY NOW -->
+<div class="slide">
+  <div class="section-label">Why Now</div>
+  <h2>The timing is right</h2>
+  <div class="why-grid">
+    <div class="why-card">
+      <h3>Running is booming</h3>
+      <p>Marathon participation hit record highs in 2024. Running culture is mainstream and the audience has never been larger or more digitally engaged.</p>
+    </div>
+    <div class="why-card">
+      <h3>The model is proven, the gap is open</h3>
+      <p>StepBet proved cash competitions work. Strava proved running community is worth billions. Nobody has combined both for runners — that's RunMatch.</p>
+    </div>
+  </div>
+  <div class="closing-tagline">Match with runners like you. Build consistency. Compete for cash.</div>
+  <div class="slide-footer">
+    <span class="brand">RunMatch, Inc.</span>
+    <span>Delaware C-Corporation &middot; Pre-Seed Stage &middot; 9</span>
+  </div>
+</div>
+
+</body>
+</html>

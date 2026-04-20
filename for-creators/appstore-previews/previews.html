@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700;1,800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    .slide {
+      width: 1260px;
+      height: 2736px;
+      background: #fff;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 40px;
+    }
+
+    .logo {
+      margin-top: 100px;
+      font-family: 'Playfair Display', serif;
+      font-size: 52px;
+      color: #D9A600;
+      letter-spacing: 1px;
+    }
+    .logo .run { font-weight: 800; }
+    .logo .match { font-weight: 700; font-style: italic; }
+
+    .headline {
+      font-family: 'Inter', sans-serif;
+      font-size: 108px;
+      font-weight: 900;
+      color: #1a1a1a;
+      text-align: center;
+      line-height: 1.05;
+      letter-spacing: -3px;
+      margin-top: 48px;
+      padding: 0 80px;
+    }
+
+    .subtext {
+      font-family: 'Inter', sans-serif;
+      font-size: 36px;
+      font-weight: 500;
+      color: #999;
+      text-align: center;
+      margin-top: 20px;
+    }
+
+    .phones {
+      position: absolute;
+      bottom: -40px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      gap: 30px;
+    }
+
+    .phone {
+      width: 480px;
+      border-radius: 48px;
+      overflow: hidden;
+      box-shadow: 0 20px 80px rgba(0,0,0,0.12), 0 8px 30px rgba(0,0,0,0.08);
+      border: 2px solid rgba(0,0,0,0.06);
+      flex-shrink: 0;
+    }
+    .phone img {
+      width: 100%;
+      display: block;
+    }
+
+    .phones.dual { gap: 36px; }
+    .phones.dual .phone { width: 460px; }
+    .phones.dual .phone:first-child { transform: rotate(-4deg) translateY(40px); }
+    .phones.dual .phone:last-child { transform: rotate(4deg) translateY(40px); }
+
+    .phones.single .phone { width: 540px; }
+
+    .gold-accent {
+      width: 60px;
+      height: 4px;
+      background: #D9A600;
+      border-radius: 2px;
+      margin-top: 28px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- SLIDE 1: Get paid to run -->
+  <div class="slide" id="slide-1">
+    <div class="logo"><span class="run">Run</span><span class="match">Match</span></div>
+    <div class="gold-accent"></div>
+    <div class="headline">Get paid<br>to run</div>
+    <div class="phones dual">
+      <div class="phone"><img src="../app screen shots/1-home.png" alt=""></div>
+      <div class="phone"><img src="../app screen shots/2-stakes.png" alt=""></div>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: Set your stakes -->
+  <div class="slide" id="slide-2">
+    <div class="logo"><span class="run">Run</span><span class="match">Match</span></div>
+    <div class="gold-accent"></div>
+    <div class="headline">Set your<br>stakes</div>
+    <div class="phones single">
+      <div class="phone"><img src="../app screen shots/3-objective.png" alt=""></div>
+    </div>
+  </div>
+
+  <!-- SLIDE 3: Compete with friends -->
+  <div class="slide" id="slide-3">
+    <div class="logo"><span class="run">Run</span><span class="match">Match</span></div>
+    <div class="gold-accent"></div>
+    <div class="headline">Compete with<br>your friends</div>
+    <div class="phones dual">
+      <div class="phone"><img src="../app screen shots/4-compete.png" alt=""></div>
+      <div class="phone"><img src="../app screen shots/6-comp.png" alt=""></div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4: Track with Strava -->
+  <div class="slide" id="slide-4">
+    <div class="logo"><span class="run">Run</span><span class="match">Match</span></div>
+    <div class="gold-accent"></div>
+    <div class="headline">Track with<br>Strava</div>
+    <div class="phones single">
+      <div class="phone"><img src="../app screen shots/5-strava.png" alt=""></div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: Bet on a better you -->
+  <div class="slide" id="slide-5">
+    <div class="logo"><span class="run">Run</span><span class="match">Match</span></div>
+    <div class="gold-accent"></div>
+    <div class="headline">Bet on a<br>better you</div>
+    <div class="phones single">
+      <div class="phone"><img src="../app screen shots/8-habits.png" alt=""></div>
+    </div>
+  </div>
+
+</body>
+</html>

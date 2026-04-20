@@ -2026,6 +2026,21 @@ app.post("/objectives/check-missed", requireCronSecret, async (req, res) => {
             const destination = user.committed_destination || user.payout_destination || "charity";
             const recipientId = user.committed_recipient_id || user.custom_recipient_id;
             
+            // No recipient set on custom destination: skip deduction, mark as missed
+            if (destination === "custom" && !recipientId) {
+                await supabase.from("objective_sessions").update({ 
+                    status: "missed", 
+                    payout_triggered: true
+                }).eq("user_id", user.id).eq("session_date", today);
+                
+                await supabase.from("users").update({ 
+                    settings_locked_until: null
+                }).eq("id", user.id);
+                
+                console.log(`⚠️ User ${user.email} missed objectives but has no recipient set — skipping deduction`);
+                continue;
+            }
+            
             // Zero balance: mark as missed but don't attempt deduction or transfer
             if (userBalance <= 0) {
                 await supabase.from("objective_sessions").update({ 

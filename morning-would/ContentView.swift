@@ -2914,6 +2914,7 @@ struct ProfileView: View {
     @State private var acknowledgedVoluntary: Bool = false
     @State private var acknowledgedNoRefund: Bool = false
     @State private var acknowledgedOver18: Bool = false
+    @State private var showStakesWarning: Bool = false
     @State private var showSignInView = false
     @State private var showCreateAccountView = false
     @FocusState private var isPayoutAmountFocused: Bool
@@ -3653,7 +3654,13 @@ struct ProfileView: View {
                 stakesAcknowledgments
             }
             
-                            Button(action: commitPayout) {
+                            Button(action: {
+                                if payoutCommitted {
+                                    commitPayout()
+                                } else {
+                                    showStakesWarning = true
+                                }
+                            }) {
                                 HStack {
                                     Image(systemName: payoutCommitted ? "checkmark.circle.fill" : "lock.fill")
                                         .font(.body)
@@ -3671,6 +3678,14 @@ struct ProfileView: View {
                             .buttonStyle(.plain)
             .disabled(!canSetStakes)
                             .padding(.top, 4)
+            .alert("Heads Up", isPresented: $showStakesWarning) {
+                Button("I Understand", role: .destructive) {
+                    commitPayout()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Once stakes are set and a recipient is connected, missed goal stakes will be automatically deducted from your balance upon your goal not being met.")
+            }
                         }
                     }
     
@@ -5839,7 +5854,7 @@ struct CreateCompetitionView: View {
         let durationLabel = durationDays == 7 ? "1 week" : (durationDays == 14 ? "2 weeks" : (durationDays == 30 ? "1 month" : "\(durationDays) days"))
         let objLabel = objectiveType == "run" ? "running" : (objectiveType == "both" ? "running + pushups" : "pushups")
         let buyInLabel = buyInAmount > 0 ? " with a $\(Int(buyInAmount)) buy-in" : ""
-        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload EOS: runmatch.io"
+        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
     }
     
     @State private var codeCopied: Bool = false
@@ -6864,9 +6879,9 @@ struct CompetitionDetailView: View {
         let buyInLine = buyIn > 0 ? " $\(Int(buyIn)) entry." : ""
         
         if scoring == "race" {
-            return "Join my running race on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: runmatch.io"
+            return "Join my running race on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
         }
-        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload EOS: runmatch.io"
+        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
     }
     
     private func objectiveTypeDisplay(_ objType: String, targetValue: Double) -> String {
