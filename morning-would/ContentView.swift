@@ -514,6 +514,7 @@ struct ContentView: View {
             refreshTodayProgress()
             refreshActiveCompetition()
             notificationManager.requestPermissions()
+            notificationManager.scheduleReengagementNotifications()
             if shouldShowObjective && hasAnyObjective && !objectiveMet {
                 notificationManager.scheduleObjectiveReminder(
                     deadline: objectiveDeadline,
@@ -523,6 +524,14 @@ struct ContentView: View {
                     runDistance: objectiveSettings.runDistance,
                     scheduleType: scheduleType
                 )
+                notificationManager.scheduleDeadlineWarning(
+                    deadline: objectiveDeadline,
+                    stakeAmount: UserDefaults.standard.double(forKey: "missedGoalPayout"),
+                    balance: UserDefaults.standard.double(forKey: "profileCashHoldings"),
+                    scheduleType: scheduleType
+                )
+            } else {
+                notificationManager.cancelDeadlineWarning()
             }
         }
         .onReceive(countdownTimer) { time in
@@ -592,7 +601,12 @@ struct ContentView: View {
                     
                     if objType == "run" {
                         self.todayRunDistance = max(self.todayRunDistance, completedCount)
+                        let wasComplete = self.hasCompletedTodayRun
                         self.hasCompletedTodayRun = self.hasCompletedTodayRun || (status == "completed")
+                        if !wasComplete && self.hasCompletedTodayRun {
+                            NotificationManager().sendGoalCompletedNotification()
+                            NotificationManager().cancelDeadlineWarning()
+                        }
                     } else if objType == "pushups" {
                         let serverCount = Int(completedCount)
                         if serverCount >= self.todayPushUpCount {
@@ -1120,6 +1134,10 @@ struct PushUpSessionView: View {
                 let newCount = todayPushUpCount + pushupCount
                 todayPushUpCount = newCount
                 syncPushupProgress(count: newCount)
+                if newCount >= objective && objective > 0 {
+                    NotificationManager().sendGoalCompletedNotification()
+                    NotificationManager().cancelDeadlineWarning()
+                }
                                 dismiss()
                             }) {
                                 Text("Done")
@@ -2187,6 +2205,12 @@ struct ObjectiveSettingsView: View {
                         runDistance: self.settings.runDistance,
                         scheduleType: self.scheduleType
                     )
+                    self.notificationManager.scheduleDeadlineWarning(
+                        deadline: self.deadline,
+                        stakeAmount: UserDefaults.standard.double(forKey: "missedGoalPayout"),
+                        balance: UserDefaults.standard.double(forKey: "profileCashHoldings"),
+                        scheduleType: self.scheduleType
+                    )
                     
                     withAnimation {
                         self.isScheduleExpanded = false
@@ -2596,6 +2620,88 @@ final class NotificationManager {
             return ["pushupObjectiveFailure_daily"]
         }
     }
+    
+    // MARK: - Deadline Warning (1hr before)
+    
+    func scheduleDeadlineWarning(deadline: Date, stakeAmount: Double, balance: Double, scheduleType: String) {
+        let center = UNUserNotificationCenter.current()
+        let warningIds = ["deadline_warning_daily"] + (2...6).map { "deadline_warning_weekday_\($0)" }
+        center.removePendingNotificationRequests(withIdentifiers: warningIds)
+        
+        guard stakeAmount > 0 && balance > 0 else { return }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "⏰ 1 Hour Left"
+        content.body = "Your $\(Int(stakeAmount)) is on the line. Your recipient gets paid in 60 minutes unless you move."
+        content.sound = .default
+        
+        let warningTime = Calendar.current.date(byAdding: .minute, value: -60, to: deadline) ?? deadline
+        let components = Calendar.current.dateComponents([.hour, .minute], from: warningTime)
+        
+        if scheduleType == "Weekdays" {
+            for weekday in 2...6 {
+                var wc = components
+                wc.weekday = weekday
+                let trigger = UNCalendarNotificationTrigger(dateMatching: wc, repeats: true)
+                center.add(UNNotificationRequest(identifier: "deadline_warning_weekday_\(weekday)", content: content, trigger: trigger))
+            }
+        } else {
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+            center.add(UNNotificationRequest(identifier: "deadline_warning_daily", content: content, trigger: trigger))
+        }
+    }
+    
+    func cancelDeadlineWarning() {
+        let center = UNUserNotificationCenter.current()
+        let warningIds = ["deadline_warning_daily"] + (2...6).map { "deadline_warning_weekday_\($0)" }
+        center.removePendingNotificationRequests(withIdentifiers: warningIds)
+    }
+    
+    // MARK: - Goal Completed
+    
+    func sendGoalCompletedNotification() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let key = "lastGoalCompletedNotif"
+        if let last = UserDefaults.standard.object(forKey: key) as? Date, Calendar.current.isDate(last, inSameDayAs: today) {
+            return
+        }
+        UserDefaults.standard.set(today, forKey: key)
+        
+        let content = UNMutableNotificationContent()
+        content.title = "✅ Goal Crushed"
+        content.body = "Your money stays yours. See you tomorrow."
+        content.sound = .default
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "goal_completed", content: content, trigger: trigger))
+    }
+    
+    // MARK: - Re-engagement (3 / 7 / 14 days)
+    
+    func scheduleReengagementNotifications() {
+        let center = UNUserNotificationCenter.current()
+        let ids = ["reengagement_3d", "reengagement_7d", "reengagement_14d"]
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        
+        let notifications: [(String, TimeInterval, String, String)] = [
+            ("reengagement_3d", 3, "👀 It's Been 3 Days", "Your goals shouldn't pause because you did."),
+            ("reengagement_7d", 7, "🏃 A Week Without RunMatch", "Your friends are still running. Are you?"),
+            ("reengagement_14d", 14, "We Miss You", "Your goals don't achieve themselves.")
+        ]
+        
+        for (id, days, title, body) in notifications {
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            
+            var fireDate = Calendar.current.date(byAdding: .day, value: Int(days), to: Date()) ?? Date()
+            fireDate = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: fireDate) ?? fireDate
+            let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        }
+    }
 }
 
 // MARK: - Stripe deposit payment helper
@@ -2670,7 +2776,7 @@ final class DepositPaymentService: ObservableObject {
             configuration.allowsDelayedPaymentMethods = true
             
             // Return URL for app redirects (required for 3DS authentication)
-            configuration.returnURL = "eos-app://stripe-redirect"
+            configuration.returnURL = "runmatch-app://stripe-redirect"
 
             DispatchQueue.main.async {
                 self.paymentSheet = PaymentSheet(paymentIntentClientSecret: clientSecret,
@@ -2891,6 +2997,8 @@ struct ProfileView: View {
     @State private var isRecipientOfPayers: [String] = []
     @State private var depositAmount: String = ""
     @State private var showPayoutSelector: Bool = false
+    @State private var showAddFundsSheet: Bool = false
+    @State private var addFundsAmount: String = ""
     @StateObject private var depositPaymentService = DepositPaymentService()
     @State private var isProcessingDeposit = false
     @State private var depositErrorMessage: String?
@@ -3036,9 +3144,7 @@ struct ProfileView: View {
                 
                 recipientSection
                 
-                stakesSection
-
-                balanceSection
+                stakesAndBalanceSection
 
                 if let error = profileErrorMessage {
                     Section {
@@ -3339,6 +3445,215 @@ struct ProfileView: View {
                         .listRowBackground(Color.white)
                     }
                 
+    // MARK: - Combined Stakes & Balance Section
+    
+    @State private var isStakesExpanded: Bool = true
+    
+    private var stakesAndBalanceSection: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let isWithdrawLocked = settingsLockedUntil > Date()
+        
+        return Section {
+            VStack(spacing: 12) {
+                // Balance row
+                HStack {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.body)
+                        .foregroundStyle(goldColor)
+                    Text("$\(profileCashHoldings, specifier: "%.2f")")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(goldColor)
+                    
+                    if payoutCommitted {
+                        Text("· $\(committedPayoutAmount, specifier: "%.0f")/goal")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.4))
+                    }
+                    
+                    Spacer()
+                    
+                    Text("Add Funds")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(goldColor)
+                        .cornerRadius(6)
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showAddFundsSheet.toggle()
+                            }
+                        }
+                    
+                    Text("Withdraw")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                        .foregroundStyle(isWithdrawLocked ? Color.gray : goldColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(isWithdrawLocked ? Color.gray.opacity(0.1) : goldColor.opacity(0.1))
+                        .cornerRadius(6)
+                        .onTapGesture {
+                            if !isWithdrawLocked {
+                                if let url = URL(string: "https://runmatch.io/portal") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                        }
+                    
+                    Image(systemName: isStakesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.3))
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isStakesExpanded.toggle()
+                                if !isStakesExpanded {
+                                    showPayoutSelector = false
+                                    showAddFundsSheet = false
+                                }
+                            }
+                        }
+                }
+                
+                // Add funds dropdown (independent of expand/collapse)
+                if showAddFundsSheet {
+                    HStack(spacing: 8) {
+                        ForEach([50, 100], id: \.self) { amt in
+                            Button(action: {
+                                depositAmount = "\(amt)"
+                                withAnimation { showAddFundsSheet = false }
+                                startDeposit()
+                            }) {
+                                Text("$\(amt)")
+                                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(goldColor.opacity(0.12))
+                                    .foregroundStyle(goldColor)
+                                    .cornerRadius(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                        HStack(spacing: 4) {
+                            Text("$")
+                                .font(.system(.caption, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color.black)
+                            TextField("Custom", text: $addFundsAmount, prompt: Text("Custom").foregroundColor(.black.opacity(0.5)))
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black)
+                                .keyboardType(.decimalPad)
+                                .frame(width: 55)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.gray.opacity(0.12))
+                        .cornerRadius(8)
+                        
+                        Button(action: {
+                            depositAmount = addFundsAmount
+                            withAnimation { showAddFundsSheet = false }
+                            addFundsAmount = ""
+                            startDeposit()
+                        }) {
+                            Text("Deposit")
+                                .font(.system(.caption, design: .rounded, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(addFundsAmount.isEmpty ? Color.gray.opacity(0.3) : goldColor)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(addFundsAmount.isEmpty)
+                    }
+                }
+                
+                Divider()
+                
+                // Daily Stakes label
+                Text("Daily Stakes")
+                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.black.opacity(0.35))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                // COLLAPSED: show stakes preview (tappable to expand)
+                // EXPANDED: show full stakes selector
+                if !isStakesExpanded {
+                    // Preview row
+                    if isSettingsLocked {
+                        HStack {
+                            Image(systemName: "lock.fill")
+                                .font(.title3)
+                                .foregroundStyle(Color.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(payoutCommitted ? "$\(committedPayoutAmount, specifier: "%.0f") stakes committed" : "No stakes set")
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(Color.black)
+                                Text("Locked until commitment period ends")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.orange)
+                            }
+                            Spacer()
+                        }
+                        .opacity(0.7)
+                    } else if payoutCommitted {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(goldColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("$\(committedPayoutAmount, specifier: "%.0f") per goal")
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(Color.black)
+                                Text("Tap to change")
+                                    .font(.system(.caption2, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.4))
+                            }
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) { isStakesExpanded = true }
+                        }
+                    } else {
+                        HStack {
+                            Image(systemName: "exclamationmark.circle")
+                                .font(.title3)
+                                .foregroundStyle(Color.gray)
+                            Text("No stakes set — tap to configure")
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundStyle(Color.black.opacity(0.5))
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) { isStakesExpanded = true }
+                        }
+                    }
+                } else {
+                    // Full stakes selector
+                    stakesFullSelector
+                }
+                
+                if let error = depositErrorMessage {
+                    HStack {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption)
+                        Text(error)
+                            .font(.system(.caption, design: .rounded))
+                    }
+                    .foregroundStyle(Color.red)
+                }
+            }
+        } header: {
+            Text("Stakes & Balance")
+                .foregroundStyle(Color.white.opacity(0.95))
+        } footer: {
+            stakesFooterText
+        }
+        .listRowBackground(Color.white)
+    }
+    
     // MARK: - Recipient Section (extracted for compiler performance)
     
     private var recipientSection: some View {
@@ -3655,7 +3970,7 @@ struct ProfileView: View {
             }
             
                             Button(action: {
-                                if payoutCommitted {
+                                if missedGoalPayout == 0 || payoutCommitted {
                                     commitPayout()
                                 } else {
                                     showStakesWarning = true
@@ -4068,25 +4383,25 @@ struct ProfileView: View {
         return !hasActiveRecipient
     }
     
-    /// Returns true if user can set stakes (either already committed, or has acknowledged all terms)
     private var canSetStakes: Bool {
-        guard missedGoalPayout > 0 else { return false }
-        // If already committed, they can update without re-acknowledging
+        if missedGoalPayout == 0 { return true }
         if payoutCommitted { return true }
-        // First time: must check all acknowledgment boxes
         return acknowledgedVoluntary && acknowledgedNoRefund && acknowledgedOver18
     }
     
 
     private func commitPayout() {
-        guard missedGoalPayout > 0 else { return }
+        // If balance is insufficient for non-zero stakes, auto-trigger deposit
+        if missedGoalPayout > 0 && profileCashHoldings < missedGoalPayout {
+            let needed = missedGoalPayout - profileCashHoldings
+            depositAmount = "\(Int(ceil(needed)))"
+            startDeposit()
+        }
         
-        // Update committed values
         committedPayoutAmount = missedGoalPayout
         payoutCommitted = true
         showPayoutSelector = false
         
-        // Save to backend (using dedicated sync that doesn't require password)
         syncPayoutSettings()
     }
 
@@ -4119,8 +4434,7 @@ struct ProfileView: View {
             "payoutCommitted": payoutCommitted,
             "destinationCommitted": destinationCommitted,
             "committedDestination": committedDestination.lowercased(),
-            "committedRecipientId": committedRecipientId,
-            "balanceCents": Int((profileCashHoldings * 100).rounded())
+            "committedRecipientId": committedRecipientId
         ]
         
         guard let url = URL(string: "/users/profile", relativeTo: StripeConfig.backendURL) else { return }
@@ -4406,8 +4720,6 @@ struct ProfileView: View {
                         self.profileCashHoldings += amount
                         self.depositAmount = ""
                         self.depositErrorMessage = nil
-                        // Sync new balance to backend
-                        self.syncPayoutSettings()
                     case .canceled, .failed:
                         break
                     }
@@ -4451,7 +4763,6 @@ struct ProfileView: View {
             "email": trimmedEmail,
             "phone": trimmedPhone,
             "password": trimmedPassword,
-            "balanceCents": Int((profileCashHoldings * 100).rounded()),
             "objective_type": "pushups",
             "objective_count": pushupObjective,
             "objective_schedule": scheduleType.lowercased(),
@@ -5615,7 +5926,9 @@ struct CompeteView: View {
         let code = comp["inviteCode"] as? String ?? ""
         let target = comp["targetValue"] as? Double ?? 0
         let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
-        let poolTotal = buyIn * Double(participants)
+        let seeded = comp["seededAmount"] as? Double ?? (comp["seededAmount"] as? Int).map { Double($0) } ?? 0
+        let poolTotal = buyIn * Double(participants) + seeded
+        let isSeededComp = seeded > 0
         let compIsRace = comp["isRace"] as? Bool ?? (comp["scoringType"] as? String == "race")
         let runTarget = comp["runTarget"] as? Double ?? 0
         
@@ -5719,18 +6032,24 @@ struct CompeteView: View {
                 }
                 .padding(14)
                 
-                if (isActive || isPending) && buyIn > 0 {
+                if (isActive || isPending) && (buyIn > 0 || isSeededComp) {
                     Divider().padding(.horizontal, 14)
                     HStack(spacing: 6) {
-                        Image(systemName: "dollarsign.circle.fill")
+                        Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "dollarsign.circle.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(goldColor)
-                        Text("$\(Int(buyIn)) buy-in")
-                            .font(.system(.caption2, design: .rounded, weight: .medium))
-                            .foregroundStyle(Color.black.opacity(0.6))
+                        if isSeededComp && buyIn == 0 {
+                            Text("Free Entry")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.green)
+                        } else {
+                            Text("$\(Int(buyIn)) buy-in")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.6))
+                        }
                         Text("·")
                             .foregroundStyle(Color.gray.opacity(0.4))
-                        Text("$\(Int(poolTotal)) pool")
+                        Text("$\(Int(poolTotal)) prize")
                             .font(.system(.caption2, design: .rounded, weight: .bold))
                             .foregroundStyle(goldColor)
                     }
@@ -5794,6 +6113,9 @@ struct CreateCompetitionView: View {
     @State private var buyInAmount: Double = 0
     @State private var buyInText: String = ""
     @State private var showCustomBuyIn: Bool = false
+    @State private var seededAmount: Double = 0
+    @State private var seededText: String = ""
+    @State private var isSeeded: Bool = false
     @State private var isCreating: Bool = false
     @State private var createdCode: String? = nil
     @AppStorage("profileEmail") private var profileEmail: String = ""
@@ -5853,8 +6175,16 @@ struct CreateCompetitionView: View {
     private var shareMessage: String {
         let durationLabel = durationDays == 7 ? "1 week" : (durationDays == 14 ? "2 weeks" : (durationDays == 30 ? "1 month" : "\(durationDays) days"))
         let objLabel = objectiveType == "run" ? "running" : (objectiveType == "both" ? "running + pushups" : "pushups")
-        let buyInLabel = buyInAmount > 0 ? " with a $\(Int(buyInAmount)) buy-in" : ""
-        return "Join my \(durationLabel) \(objLabel) competition\(buyInLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
+        let stakeLabel: String = {
+            if seededAmount > 0 && buyInAmount == 0 {
+                return " — FREE entry, $\(Int(seededAmount)) prize"
+            } else if buyInAmount > 0 {
+                let total = buyInAmount + seededAmount
+                return " with a $\(Int(buyInAmount)) buy-in" + (seededAmount > 0 ? " + $\(Int(seededAmount)) bonus prize" : "")
+            }
+            return ""
+        }()
+        return "Join my \(durationLabel) \(objLabel) competition\(stakeLabel) on RunMatch!\n\nCode: \(createdCode ?? "")\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
     }
     
     @State private var codeCopied: Bool = false
@@ -6175,6 +6505,67 @@ struct CreateCompetitionView: View {
         }
         .listRowBackground(Color.white)
         
+        // Seeded Prize (platform-funded)
+        Section {
+            Toggle(isOn: $isSeeded) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gift.fill")
+                        .foregroundStyle(goldColor)
+                    Text("Seed a Prize")
+                        .font(.system(.body, design: .rounded, weight: .medium))
+                }
+            }
+            .tint(goldColor)
+            .onChange(of: isSeeded) { _, on in
+                if !on {
+                    seededAmount = 0
+                    seededText = ""
+                }
+            }
+            
+            if isSeeded {
+                HStack(spacing: 8) {
+                    Text("$")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    TextField("Amount", text: $seededText)
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                        .keyboardType(.decimalPad)
+                        .onChange(of: seededText) { _, newValue in
+                            seededAmount = Double(newValue) ?? 0
+                        }
+                }
+                .padding(.vertical, 4)
+                
+                HStack(spacing: 8) {
+                    ForEach([50.0, 100.0, 250.0, 500.0], id: \.self) { amt in
+                        Button(action: {
+                            seededAmount = amt
+                            seededText = "\(Int(amt))"
+                        }) {
+                            Text("$\(Int(amt))")
+                                .font(.system(.caption, design: .rounded, weight: .bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(seededAmount == amt ? goldColor : Color.gray.opacity(0.08))
+                                )
+                                .foregroundStyle(seededAmount == amt ? Color.white : Color.black)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        } header: {
+            Text("Sponsored Prize")
+        } footer: {
+            Text(isSeeded && seededAmount > 0 ? "Platform seeds $\(Int(seededAmount)) — users join free and compete for the prize." : "Add platform money to the prize pool. Users don't need to pay to enter.")
+                .font(.system(.caption2, design: .rounded))
+        }
+        .listRowBackground(Color.white)
+        
         // 6. Balance check for buy-in competitions
         if buyInAmount > 0 {
             Section {
@@ -6312,7 +6703,6 @@ struct CreateCompetitionView: View {
                 self.depositService.present { result in
                     if case .completed = result {
                         self.profileCashHoldings += amount
-                        self.syncBalanceToBackend()
                     }
                     self.isDepositing = false
                 }
@@ -6320,30 +6710,6 @@ struct CreateCompetitionView: View {
         }
     }
     
-    private func syncBalanceToBackend() {
-        guard !userId.isEmpty, !profileEmail.isEmpty else { return }
-        
-        let body: [String: Any] = [
-            "email": profileEmail,
-            "balanceCents": Int((profileCashHoldings * 100).rounded())
-        ]
-        
-        guard let url = URL(string: "/users/profile", relativeTo: StripeConfig.backendURL) else { return }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        AuthToken.applyTo(&request)
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        URLSession.shared.dataTask(with: request) { _, response, _ in
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                print("✅ Balance synced to backend after deposit")
-            } else {
-                print("❌ Balance sync failed: \((response as? HTTPURLResponse)?.statusCode ?? -1)")
-            }
-        }.resume()
-    }
     
     @ViewBuilder
     private var createTargetPickers: some View {
@@ -6432,7 +6798,7 @@ struct CreateCompetitionView: View {
         request.timeoutInterval = 5
         
         let targetValue: Double = objectiveType == "run" || objectiveType == "both" ? runDistance : Double(pushupTarget)
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "userId": userId,
             "name": name,
             "objectiveType": objectiveType,
@@ -6443,6 +6809,9 @@ struct CreateCompetitionView: View {
             "runTarget": runDistance,
             "buyInAmount": buyInAmount
         ]
+        if seededAmount > 0 {
+            body["seededAmount"] = seededAmount
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         print("🏆 Creating competition: \(body)")
@@ -6639,8 +7008,22 @@ struct JoinCompetitionView: View {
                         .font(.system(.caption, design: .rounded))
                         .foregroundStyle(Color.red)
                 } else {
-                    // Show buy-in notice if applicable
-                    if let buyIn = data["buyInAmount"] as? Double, buyIn > 0 {
+                    // Show buy-in or seeded prize notice
+                    if let seededAmt = data["seededAmount"] as? Double, seededAmt > 0, (data["buyInAmount"] as? Double ?? 0) == 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "gift.fill")
+                                .font(.caption2)
+                                .foregroundStyle(goldColor)
+                            Text("Free Entry · $\(Int(seededAmt)) sponsored prize")
+                                .font(.system(.caption, design: .rounded, weight: .medium))
+                                .foregroundStyle(goldColor)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(goldColor.opacity(0.1))
+                        .cornerRadius(8)
+                    } else if let buyIn = data["buyInAmount"] as? Double, buyIn > 0 {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption2)
@@ -6774,6 +7157,7 @@ struct CompetitionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("userId") private var userId: String = ""
     @AppStorage("profileCashHoldings") private var profileCashHoldings: Double = 0
+    @AppStorage("stravaConnected") private var stravaConnected: Bool = false
     var onOpenProfile: (() -> Void)? = nil
     
     let competitionId: String
@@ -6792,6 +7176,7 @@ struct CompetitionDetailView: View {
     @State private var isCancelling: Bool = false
     @State private var messageCopied: Bool = false
     @State private var showAllParticipants: Bool = false
+    @State private var showStravaRequiredForStart: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     
@@ -6831,6 +7216,11 @@ struct CompetitionDetailView: View {
             } message: {
                 Text(insufficientNames)
             }
+            .alert("Strava Required", isPresented: $showStravaRequiredForStart) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("This competition includes running. Connect Strava before starting so runs can be tracked. Go to Profile → Account → Strava.")
+            }
             .sheet(isPresented: $showPushUpSession, onDismiss: { loadLeaderboard() }) {
                 PushUpSessionView(todayPushUpCount: $todayPushUpCount, objective: 0, isInCompetition: true)
             }
@@ -6847,10 +7237,13 @@ struct CompetitionDetailView: View {
     
     private var startConfirmMessage: String {
         let buyIn = competition?["buyInAmount"] as? Double ?? (competition?["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let seeded = competition?["seededAmount"] as? Double ?? (competition?["seededAmount"] as? Int).map { Double($0) } ?? 0
         let count = leaderboard.count
-        let pool = buyIn * Double(count)
+        let pool = buyIn * Double(count) + seeded
         let days = competition?["durationDays"] as? Int ?? 7
-        if buyIn > 0 {
+        if seeded > 0 && buyIn == 0 {
+            return "Start the competition now with a $\(Int(seeded)) sponsored prize. \(count) participants will begin competing. The timer starts now."
+        } else if buyIn > 0 {
             return "This will lock $\(Int(buyIn)) from each of the \(count) participants ($\(Int(pool)) total pool). Funds are non-refundable and the entire pool goes to the winner. The timer starts now."
         } else {
             return "Start the \(days)-day timer now? All \(count) participants will begin competing."
@@ -6864,6 +7257,7 @@ struct CompetitionDetailView: View {
         let scoring = comp["scoringType"] as? String ?? "consistency"
         let durationDays = comp["durationDays"] as? Int ?? 7
         let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let seeded = comp["seededAmount"] as? Double ?? (comp["seededAmount"] as? Int).map { Double($0) } ?? 0
         
         let objWord = objType == "run" ? "running" : (objType == "both" ? "workouts" : "pushups")
         let runTarget = comp["runTarget"] as? Double ?? 0
@@ -6876,12 +7270,19 @@ struct CompetitionDetailView: View {
         } else {
             hookLine = "Whoever hits their daily goal the most days wins."
         }
-        let buyInLine = buyIn > 0 ? " $\(Int(buyIn)) entry." : ""
+        let stakeLine: String = {
+            if seeded > 0 && buyIn == 0 {
+                return " FREE entry, $\(Int(seeded)) prize!"
+            } else if buyIn > 0 {
+                return " $\(Int(buyIn)) entry."
+            }
+            return ""
+        }()
         
         if scoring == "race" {
-            return "Join my running race on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
+            return "Join my running race on RunMatch!\(stakeLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
         }
-        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(buyInLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
+        return "Join my \(durationDays)-day \(objWord) competition on RunMatch!\(stakeLine) \(hookLine)\n\nCode: \(inviteCode)\n\nDownload RunMatch: https://apps.apple.com/us/app/runmatch/id6758569221"
     }
     
     private func objectiveTypeDisplay(_ objType: String, targetValue: Double) -> String {
@@ -6906,7 +7307,9 @@ struct CompetitionDetailView: View {
         let lobbyPushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
         let lobbyRunTarget = comp["runTarget"] as? Double ?? 0
         let totalParticipants = comp["totalParticipants"] as? Int ?? leaderboard.count
-        let poolTotal = buyIn * Double(totalParticipants)
+        let seeded = comp["seededAmount"] as? Double ?? (comp["seededAmount"] as? Int).map { Double($0) } ?? 0
+        let poolTotal = buyIn * Double(totalParticipants) + seeded
+        let isSeededComp = seeded > 0
         let durationLabel = scoring == "race" ? "Until 1st Finished" : (durationDays == 7 ? "1 Week" : (durationDays == 14 ? "2 Weeks" : (durationDays == 30 ? "1 Month" : "\(durationDays) \(durationDays == 1 ? "day" : "days")")))
         
         return ScrollView {
@@ -6938,11 +7341,11 @@ struct CompetitionDetailView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 30)
                     
-                    if buyIn > 0 {
+                    if buyIn > 0 || isSeededComp {
                         HStack(spacing: 6) {
-                            Image(systemName: "dollarsign.circle.fill")
+                            Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "dollarsign.circle.fill")
                                 .foregroundStyle(goldColor)
-                            Text("$\(Int(poolTotal)) pool so far")
+                            Text(isSeededComp && buyIn == 0 ? "$\(Int(poolTotal)) prize · Free Entry" : "$\(Int(poolTotal)) pool so far")
                                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
                                 .foregroundStyle(goldColor)
                         }
@@ -7159,17 +7562,23 @@ struct CompetitionDetailView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 16)
                 
-                // Buy-in notice
-                if buyIn > 0 {
+                // Buy-in / seeded notice
+                if buyIn > 0 || isSeededComp {
                     HStack(spacing: 10) {
-                        Image(systemName: "lock.shield.fill")
+                        Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "lock.shield.fill")
                             .font(.title3)
                             .foregroundStyle(goldColor)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("$\(Int(buyIn)) locked from each player at start")
-                                .font(.system(.caption, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                            Text("Winner takes the $\(Int(poolTotal)) pot")
+                            if isSeededComp && buyIn == 0 {
+                                Text("Free entry — sponsored prize")
+                                    .font(.system(.caption, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black)
+                            } else {
+                                Text("$\(Int(buyIn)) locked from each player at start")
+                                    .font(.system(.caption, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black)
+                            }
+                            Text("Winner takes the $\(Int(poolTotal)) prize")
                                 .font(.system(.caption2, design: .rounded))
                                 .foregroundStyle(goldColor)
                         }
@@ -7211,7 +7620,13 @@ struct CompetitionDetailView: View {
                 if isCreator {
                     Button(action: {
                         if leaderboard.count >= 2 && !isStarting {
-                            showStartConfirm = true
+                            let objType = (competition ?? [:])["objectiveType"] as? String ?? "pushups"
+                            let needsStrava = objType == "run" || objType == "both"
+                            if needsStrava && !stravaConnected {
+                                showStravaRequiredForStart = true
+                            } else {
+                                showStartConfirm = true
+                            }
                         }
                     }) {
                         HStack(spacing: 10) {
@@ -7293,7 +7708,9 @@ struct CompetitionDetailView: View {
         let pushupTarget = comp["pushupTarget"] as? Int ?? (comp["pushupTarget"] as? Double).map { Int($0) } ?? 0
         let runTarget = comp["runTarget"] as? Double ?? 0
         let totalParticipants = comp["totalParticipants"] as? Int ?? leaderboard.count
-        let poolTotal = buyIn * Double(totalParticipants)
+        let seeded = comp["seededAmount"] as? Double ?? (comp["seededAmount"] as? Int).map { Double($0) } ?? 0
+        let poolTotal = buyIn * Double(totalParticipants) + seeded
+        let isSeededComp = seeded > 0
         
         let scoreUnit: String = {
             if scoring == "race" { return "mi" }
@@ -7339,9 +7756,9 @@ struct CompetitionDetailView: View {
                         .font(.system(.subheadline, design: .rounded))
                         .foregroundStyle(Color.gray)
                     
-                    if buyIn > 0 {
+                    if buyIn > 0 || isSeededComp {
                         HStack(spacing: 6) {
-                            Image(systemName: "dollarsign.circle.fill")
+                            Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "dollarsign.circle.fill")
                                 .foregroundStyle(goldColor)
                             Text("$\(Int(poolTotal)) prize pool awarded")
                                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
@@ -7958,7 +8375,9 @@ struct CompetitionDetailView: View {
             return min(1.0, Double(daysElapsed) / Double(max(1, totalDays)))
         }()
         let totalParticipantsCount = comp["totalParticipants"] as? Int ?? leaderboard.count
-        let poolTotal = buyIn * Double(totalParticipantsCount)
+        let seeded = comp["seededAmount"] as? Double ?? (comp["seededAmount"] as? Int).map { Double($0) } ?? 0
+        let poolTotal = buyIn * Double(totalParticipantsCount) + seeded
+        let isSeededComp = seeded > 0
         let maxScore = leaderboard.compactMap { $0["score"] as? Double }.max() ?? 1
         
         let scoreUnit: String = {
@@ -8096,12 +8515,12 @@ struct CompetitionDetailView: View {
                         }
                     }
                     
-                    // Pool total badge (always show for paid comps)
-                    if buyIn > 0 {
+                    // Pool total badge
+                    if buyIn > 0 || isSeededComp {
                         HStack(spacing: 6) {
-                            Image(systemName: "dollarsign.circle.fill")
+                            Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "dollarsign.circle.fill")
                                 .foregroundStyle(goldColor)
-                            Text("$\(Int(poolTotal)) in the pool")
+                            Text(isSeededComp && buyIn == 0 ? "$\(Int(poolTotal)) prize · Free Entry" : "$\(Int(poolTotal)) in the pool")
                                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
                                 .foregroundStyle(goldColor)
                         }

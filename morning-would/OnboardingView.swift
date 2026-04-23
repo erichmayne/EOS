@@ -440,7 +440,7 @@ struct OnboardingView: View {
             VStack(spacing: 24) {
                 Spacer().frame(height: 40)
 
-                Image("EOSLogo")
+                Image("RunMatchLogo")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 180, height: 180)
@@ -1033,7 +1033,7 @@ struct OnboardingView: View {
                         .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(Color.black)
                 } else {
-                    Image("EOSLogo")
+                    Image("RunMatchLogo")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 120, height: 120)

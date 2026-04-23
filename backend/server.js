@@ -49,6 +49,78 @@ app.use(cors({
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Stripe webhook needs raw body for signature verification — must be before express.json()
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+
+app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    let event;
+
+    if (STRIPE_WEBHOOK_SECRET) {
+        const sig = req.headers['stripe-signature'];
+        try {
+            event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+        } catch (err) {
+            console.error('⚠️ Stripe webhook signature failed:', err.message);
+            return res.status(400).send(`Webhook Error: ${err.message}`);
+        }
+    } else {
+        // No secret configured — parse raw body (dev/fallback only)
+        try {
+            event = JSON.parse(req.body.toString());
+        } catch (err) {
+            return res.status(400).send('Invalid JSON');
+        }
+    }
+
+    if (event.type === 'payment_intent.succeeded') {
+        const pi = event.data.object;
+        const userId = pi.metadata?.userId;
+        const depositCents = parseInt(pi.metadata?.depositAmountCents) || 0;
+        const source = pi.metadata?.source;
+
+        if (source === 'runmatch_deposit' && userId && depositCents > 0) {
+            try {
+                const { data: user } = await supabase
+                    .from('users')
+                    .select('balance_cents, email, full_name')
+                    .eq('id', userId)
+                    .single();
+
+                if (user) {
+                    const newBalance = (user.balance_cents || 0) + depositCents;
+                    await supabase
+                        .from('users')
+                        .update({ balance_cents: newBalance, active_balance_cents: newBalance })
+                        .eq('id', userId);
+
+                    await supabase.from('transactions').insert({
+                        user_id: userId,
+                        type: 'deposit',
+                        amount_cents: depositCents,
+                        status: 'completed',
+                        description: 'Deposit via Stripe',
+                        stripe_payment_id: pi.id
+                    });
+
+                    const dollars = (depositCents / 100).toFixed(2);
+                    console.log(`✅ DEPOSIT CONFIRMED: $${dollars} credited to ${user.full_name || userId} (balance: $${(newBalance/100).toFixed(2)})`);
+                    notifySlack(`✅ *Deposit Confirmed*\n• Amount: $${dollars}\n• User: ${user.full_name || user.email || userId}\n• New Balance: $${(newBalance/100).toFixed(2)}`);
+                } else {
+                    console.error(`⚠️ Stripe webhook: user ${userId} not found for deposit`);
+                }
+            } catch (dbErr) {
+                console.error('⚠️ Stripe webhook DB error:', dbErr.message);
+                return res.status(500).json({ error: 'DB error' });
+            }
+        } else {
+            console.log(`ℹ️ payment_intent.succeeded (non-deposit or missing metadata): ${pi.id}`);
+        }
+    }
+
+    res.json({ received: true });
+});
+
 app.use(express.json());
 
 // -----------------------------------------------------------------------------
@@ -263,10 +335,14 @@ app.post('/create-payment-intent', paymentLimiter, optionalAuth, async (req, res
       currency: 'usd',
       customer: customerId,
       automatic_payment_methods: { enabled: true },
+      metadata: {
+        userId: userId || '',
+        depositAmountCents: String(amount),
+        source: 'runmatch_deposit'
+      }
     });
 
-    const depositDollars = (amount / 100).toFixed(2);
-    notifySlack(`💰 *New Deposit*\n• Amount: $${depositDollars}\n• User: ${userId || 'Unknown'}`);
+    console.log(`💳 PaymentIntent created: ${paymentIntent.id} for $${(amount/100).toFixed(2)} deposit (user: ${userId || 'anonymous'})`);
     
     res.json({
       paymentIntentClientSecret: paymentIntent.client_secret,
@@ -3036,14 +3112,15 @@ app.post('/strava/webhook', async (req, res) => {
                         .eq('status', 'active');
                     
                     const buyIn = parseFloat(comp.buy_in_amount) || 0;
-                    const poolCents = Math.round(buyIn * 100) * (allParticipants?.length || 0);
+                    const seededCents = Math.round((parseFloat(comp.seeded_amount) || 0) * 100);
+                    const poolCents = Math.round(buyIn * 100) * (allParticipants?.length || 0) + seededCents;
                     
                     // Award pool to winner
                     if (poolCents > 0) {
                         const { data: winnerUser } = await supabase.from('users').select('balance_cents').eq('id', user.id).single();
                         const newBal = (winnerUser?.balance_cents || 0) + poolCents;
                         await supabase.from('users').update({ balance_cents: newBal }).eq('id', user.id);
-                        console.log(`💰 Race payout: $${(poolCents/100).toFixed(2)} to ${user.id}`);
+                        console.log(`💰 Race payout: $${(poolCents/100).toFixed(2)} to ${user.id}${seededCents > 0 ? ` (includes $${(seededCents/100).toFixed(2)} seeded)` : ''}`);
                     }
                     
                     // Mark competition completed
@@ -4724,7 +4801,7 @@ app.post("/admin/charity-payout/:charityName", requireCronSecret, async (req, re
 // Create a competition (LOBBY — no money deducted, status = pending)
 app.post('/compete/create', optionalAuth, async (req, res) => {
     try {
-        const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue, pushupTarget, runTarget } = req.body;
+        const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue, pushupTarget, runTarget, seededAmount } = req.body;
         
         if (!userId || !name || !objectiveType) {
             return res.status(400).json({ error: 'Missing required fields: userId, name, objectiveType' });
@@ -4732,6 +4809,7 @@ app.post('/compete/create', optionalAuth, async (req, res) => {
         
         const isRace = scoringType === 'race';
         const buyIn = parseFloat(buyInAmount) || 0;
+        const seeded = parseFloat(seededAmount) || 0;
         const days = isRace ? null : (parseInt(durationDays) || 7);
         
         if (buyIn > 0) {
@@ -4770,6 +4848,7 @@ app.post('/compete/create', optionalAuth, async (req, res) => {
                 pushup_target: pushupTarget || 0,
                 run_target: runTarget || 0,
                 buy_in_amount: buyIn,
+                seeded_amount: seeded,
                 duration_days: days
             })
             .select()
@@ -4791,11 +4870,12 @@ app.post('/compete/create', optionalAuth, async (req, res) => {
                 buy_in_amount: buyIn
             });
         
-        console.log(`🏆 Competition created (PENDING): "${name}" (${inviteCode}) by ${userId}`);
+        console.log(`🏆 Competition created (PENDING): "${name}" (${inviteCode}) by ${userId}${seeded > 0 ? ` [SEEDED $${seeded}]` : ''}`);
         
         const compType = isRace ? 'Race' : (scoringType === 'cumulative' ? 'Total Count' : 'Days Completed');
         const buyInLabel = buyIn > 0 ? `$${buyIn} buy-in` : 'Free';
-        notifySlack(`🏆 *New Competition Created*\n• Name: ${name.trim()}\n• Type: ${compType} (${isRace ? 'run' : objectiveType})\n• Stakes: ${buyInLabel}\n• Code: ${inviteCode}`);
+        const seededLabel = seeded > 0 ? `\n• Seeded Prize: $${seeded}` : '';
+        notifySlack(`🏆 *New Competition Created*\n• Name: ${name.trim()}\n• Type: ${compType} (${isRace ? 'run' : objectiveType})\n• Stakes: ${buyInLabel}${seededLabel}\n• Code: ${inviteCode}`);
         
         res.json({ success: true, competition, inviteCode });
         
@@ -4839,6 +4919,7 @@ app.get('/compete/verify/:code', async (req, res) => {
             pushupTarget: competition.pushup_target || 0,
             runTarget: competition.run_target || 0,
             buyInAmount: competition.buy_in_amount,
+            seededAmount: parseFloat(competition.seeded_amount) || 0,
             durationDays: competition.duration_days || 7,
             creatorUserId: competition.creator_user_id,
             creatorName: competition.creator?.full_name || 'Unknown',
@@ -5219,6 +5300,7 @@ app.get('/compete/user/:userId', optionalAuth, async (req, res) => {
                 pushupTarget: comp.pushup_target || 0,
                 runTarget: comp.run_target || 0,
                 buyInAmount: comp.buy_in_amount,
+                seededAmount: parseFloat(comp.seeded_amount) || 0,
                 durationDays: comp.duration_days,
                 isRace: comp.scoring_type === 'race',
                 creatorUserId: comp.creator_user_id,
@@ -5423,6 +5505,8 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
         let compPushupTarget = competition.pushup_target ?? 0;
         let compRunTarget = competition.run_target ?? 0;
         
+        const seededAmt = parseFloat(competition.seeded_amount) || 0;
+
         res.json({
             competition: {
                 id: competition.id,
@@ -5437,6 +5521,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 pushupTarget: compPushupTarget,
                 runTarget: compRunTarget,
                 buyInAmount: competition.buy_in_amount,
+                seededAmount: seededAmt,
                 durationDays: competition.duration_days || 7,
                 creatorUserId: competition.creator_user_id,
                 totalDays,
@@ -5586,12 +5671,14 @@ app.post('/compete/check-completed', requireCronSecret, async (req, res) => {
             
             // --- Payout logic ---
             const buyIn = parseFloat(comp.buy_in_amount) || 0;
-            const poolAmount = buyIn * participants.length;
+            const seededCents = Math.round((parseFloat(comp.seeded_amount) || 0) * 100);
+            const buyInPoolCents = Math.round(buyIn * 100) * participants.length;
+            const totalPoolCents = buyInPoolCents + seededCents;
+            const poolAmount = totalPoolCents / 100;
             let payoutDone = false;
             
-            if (poolAmount > 0 && winners.length > 0) {
-                // Split pool among all tied winners
-                const splitCents = Math.floor(Math.round(poolAmount * 100) / winners.length);
+            if (totalPoolCents > 0 && winners.length > 0) {
+                const splitCents = Math.floor(totalPoolCents / winners.length);
                 
                 for (const winner of winners) {
                     const { data: winnerUser } = await supabase
@@ -5606,12 +5693,12 @@ app.post('/compete/check-completed', requireCronSecret, async (req, res) => {
                         participant_count: participants.length
                     });
                     
-                    console.log(`🏆 PAYOUT: $${(splitCents/100).toFixed(2)} to ${winner.name} (${winner.userId}) for "${comp.name}"${winners.length > 1 ? ` (split ${winners.length} ways)` : ''}`);
+                    console.log(`🏆 PAYOUT: $${(splitCents/100).toFixed(2)} to ${winner.name} (${winner.userId}) for "${comp.name}"${winners.length > 1 ? ` (split ${winners.length} ways)` : ''}${seededCents > 0 ? ` (includes $${(seededCents/100).toFixed(2)} seeded)` : ''}`);
                 }
                 
                 payoutDone = true;
-            } else if (poolAmount > 0 && winners.length === 0) {
-                // Nobody scored — refund all participants
+            } else if (totalPoolCents > 0 && winners.length === 0) {
+                // Nobody scored — refund buy-ins only (seeded money is not refunded)
                 for (const p of participants) {
                     if (p.buy_in_amount > 0) {
                         const refundCents = Math.round(parseFloat(p.buy_in_amount) * 100);
@@ -5621,7 +5708,7 @@ app.post('/compete/check-completed', requireCronSecret, async (req, res) => {
                         await supabase.from('users').update({ balance_cents: newBal }).eq('id', p.user_id);
                     }
                 }
-                console.log(`🏆 REFUND: All participants refunded for "${comp.name}" (no one scored)`);
+                console.log(`🏆 REFUND: Buy-ins refunded for "${comp.name}" (no one scored)${seededCents > 0 ? ` — $${(seededCents/100).toFixed(2)} seeded amount forfeited` : ''}`);
             }
             
             // Mark competition completed with winner(s)

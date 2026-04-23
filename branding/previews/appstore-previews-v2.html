@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RunMatch — App Store Previews (v2)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Playfair+Display:ital,wght@0,700;0,800;1,700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    :root {
+      --gold: #D4A017;
+      --gold-light: #F2C94C;
+      --gold-dark: #9B7B0A;
+      --panel-bg: #0E0E0E;
+      --bezel: #1A1A1C;
+      --border-gold: rgba(212, 160, 23, 0.4);
+      --border-gold-shine: rgba(212, 160, 23, 0.15);
+    }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      font-family: 'Inter', -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 32px;
+      min-height: 100vh;
+    }
+
+    .strip {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      zoom: var(--strip-zoom, 1);
+    }
+
+    /* ─── Panel ─── */
+    .panel {
+      width: 430px;
+      height: 932px;
+      background: var(--panel-bg);
+      border-radius: 28px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .panel:hover {
+      transform: scale(1.012);
+      box-shadow: 0 0 80px rgba(212, 160, 23, 0.06);
+    }
+
+    .panel::before {
+      content: '';
+      position: absolute;
+      top: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 500px;
+      height: 400px;
+      background: radial-gradient(ellipse, rgba(212, 160, 23, 0.06), transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ─── Logo watermark ─── */
+    .watermark {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      width: 64px;
+      height: 64px;
+      opacity: 0.55;
+      z-index: 2;
+      pointer-events: none;
+      object-fit: contain;
+    }
+
+    /* ─── Headline ─── */
+    .headline {
+      position: relative;
+      z-index: 1;
+      padding: 88px 36px 0;
+      font-size: 44px;
+      font-weight: 800;
+      color: #fff;
+      text-align: center;
+      line-height: 1.10;
+      letter-spacing: -0.5px;
+    }
+
+    .headline .accent {
+      color: var(--gold);
+    }
+
+    .sub {
+      position: relative;
+      z-index: 1;
+      font-size: 16px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.45);
+      text-align: center;
+      padding: 16px 40px 0;
+      line-height: 1.4;
+    }
+
+    /* ─── Spacer ─── */
+    .spacer { flex: 1; min-height: 16px; }
+
+    /* ─── Phone frame ─── */
+    .phone {
+      position: relative;
+      z-index: 1;
+      width: 290px;
+      background: var(--bezel);
+      border-radius: 44px;
+      padding: 9px;
+      margin-bottom: -55px;
+      flex-shrink: 0;
+      box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.5),
+        0 24px 64px rgba(0, 0, 0, 0.35);
+      border: 1.5px solid var(--border-gold);
+    }
+
+    .phone::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 46px;
+      background: linear-gradient(170deg, rgba(212,160,23,0.25) 0%, transparent 25%, transparent 80%, rgba(212,160,23,0.08) 100%);
+      pointer-events: none;
+    }
+
+    .phone-screen {
+      width: 100%;
+      border-radius: 35px;
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 1179 / 2556;
+      position: relative;
+    }
+
+    .phone-screen img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .phone-screen::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 40%);
+      border-radius: inherit;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .phone .side-btn {
+      position: absolute;
+      right: -2px;
+      top: 130px;
+      width: 3px;
+      height: 48px;
+      background: var(--gold-dark);
+      border-radius: 0 2px 2px 0;
+    }
+
+    /* ─── Center branding panel ─── */
+    .panel-center::before {
+      top: -40px;
+      height: 500px;
+      background: radial-gradient(ellipse, rgba(212, 160, 23, 0.09), transparent 60%);
+    }
+
+    .center-logo {
+      position: relative;
+      z-index: 1;
+      width: 160px;
+      height: 160px;
+      margin-top: 80px;
+      object-fit: contain;
+    }
+
+    .center-wordmark {
+      position: relative;
+      z-index: 1;
+      margin-top: 14px;
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 54px;
+      font-weight: 800;
+      color: var(--gold);
+      letter-spacing: -0.5px;
+    }
+
+    .center-wordmark .match {
+      font-style: italic;
+      font-weight: 700;
+    }
+
+    .center-tagline {
+      position: relative;
+      z-index: 1;
+      font-size: 20px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.7);
+      margin-top: 6px;
+      letter-spacing: 0.3px;
+    }
+
+    .center-divider {
+      position: relative;
+      z-index: 1;
+      width: 56px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      margin-top: 24px;
+    }
+
+    .stars {
+      position: relative;
+      z-index: 1;
+      margin-top: 20px;
+      font-size: 28px;
+      letter-spacing: 4px;
+      color: var(--gold);
+    }
+
+    .rating-label {
+      position: relative;
+      z-index: 1;
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.4);
+      margin-top: 8px;
+      letter-spacing: 0.8px;
+    }
+
+    .center-phone {
+      width: 300px;
+      margin-bottom: -90px;
+    }
+
+    /* ─── Export overlay ─── */
+    .overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #000;
+      z-index: 50;
+    }
+
+    .overlay.active { display: block; }
+
+    /* ─── Isolated export mode (3× → 1290×2796) ─── */
+    .panel.isolated {
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 100;
+      border-radius: 0;
+      transform: none !important;
+      box-shadow: none;
+      width: 1290px;
+      height: 2796px;
+    }
+
+    .panel.isolated::before {
+      top: -360px;
+      width: 1500px;
+      height: 1200px;
+    }
+
+    .panel.isolated .watermark {
+      top: 72px;
+      left: 72px;
+      width: 192px;
+      height: 192px;
+    }
+
+    .panel.isolated .headline {
+      padding: 264px 108px 0;
+      font-size: 132px;
+      letter-spacing: -1.5px;
+    }
+
+    .panel.isolated .sub {
+      font-size: 48px;
+      padding: 48px 120px 0;
+    }
+
+    .panel.isolated .phone {
+      width: 870px;
+      border-radius: 132px;
+      padding: 27px;
+      margin-bottom: -165px;
+      box-shadow:
+        0 12px 60px rgba(0, 0, 0, 0.5),
+        0 60px 180px rgba(0, 0, 0, 0.35);
+      border-width: 4px;
+    }
+
+    .panel.isolated .phone::after {
+      border-radius: 134px;
+    }
+
+    .panel.isolated .phone-screen {
+      border-radius: 105px;
+    }
+
+    .panel.isolated .phone .side-btn {
+      top: 390px;
+      width: 9px;
+      height: 144px;
+      border-radius: 0 6px 6px 0;
+    }
+
+    .panel.isolated .center-logo {
+      width: 480px;
+      height: 480px;
+      margin-top: 240px;
+    }
+
+    .panel.isolated .center-wordmark {
+      font-size: 162px;
+      margin-top: 42px;
+    }
+
+    .panel.isolated .center-tagline {
+      font-size: 60px;
+      margin-top: 18px;
+    }
+
+    .panel.isolated .center-divider {
+      width: 168px;
+      height: 6px;
+      margin-top: 72px;
+    }
+
+    .panel.isolated .stars {
+      margin-top: 60px;
+      font-size: 84px;
+      letter-spacing: 12px;
+    }
+
+    .panel.isolated .rating-label {
+      font-size: 42px;
+      margin-top: 24px;
+    }
+
+    .panel.isolated .center-phone {
+      width: 900px;
+      margin-bottom: -270px;
+    }
+
+    /* ─── Controls ─── */
+    .controls {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-top: 32px;
+    }
+
+    .hint {
+      color: #444;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      text-align: center;
+    }
+
+    .export-btn {
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      color: #000;
+      background: var(--gold);
+      border: none;
+      border-radius: 8px;
+      padding: 10px 24px;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: opacity 0.15s;
+    }
+    .export-btn:hover { opacity: 0.85; }
+    .export-btn:disabled { opacity: 0.4; cursor: wait; }
+
+    .export-progress {
+      color: var(--gold);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      min-width: 120px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="overlay" id="overlay"></div>
+
+  <div class="strip" id="strip">
+
+    <!-- Panel 1: Set Your Goal -->
+    <div class="panel" data-name="01-set-your-goal" onclick="toggleIsolate(this)">
+      <img class="watermark" src="../../runmatch-logo-transparent.png" alt="">
+      <h2 class="headline">Set Your<br><span class="accent">Daily Run</span><br>Goal</h2>
+      <div class="spacer"></div>
+      <div class="phone">
+        <div class="side-btn"></div>
+        <div class="phone-screen">
+          <img src="../../screenshots/cutouts/screen-2.png" alt="Goal tracker">
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 2: Win Real Money -->
+    <div class="panel" data-name="02-compete-win-money" onclick="toggleIsolate(this)">
+      <img class="watermark" src="../../runmatch-logo-transparent.png" alt="">
+      <h2 class="headline">Compete &<br>Win <span class="accent">Real<br>Money</span></h2>
+      <div class="sub">Run with friends. Winner takes the pot.</div>
+      <div class="spacer"></div>
+      <div class="phone">
+        <div class="side-btn"></div>
+        <div class="phone-screen">
+          <img src="../../screenshots/cutouts/screen-3.png" alt="Competition">
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 3: Center Branding -->
+    <div class="panel panel-center" data-name="03-runmatch-branding" onclick="toggleIsolate(this)">
+      <img class="center-logo" src="../../runmatch-logo-transparent.png" alt="RunMatch">
+      <div class="center-wordmark">Run<span class="match">Match</span></div>
+      <div class="center-tagline">Bet on a Better You</div>
+      <div class="center-divider"></div>
+      <div class="stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+      <div class="rating-label">5.0 Rating &nbsp;&bull;&nbsp; Running &amp; Fitness</div>
+      <div class="spacer"></div>
+      <div class="phone center-phone">
+        <div class="side-btn"></div>
+        <div class="phone-screen">
+          <img src="../../screenshots/cutouts/screen-1.png" alt="RunMatch splash">
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 4: Challenge Friends -->
+    <div class="panel" data-name="04-challenge-friends" onclick="toggleIsolate(this)">
+      <img class="watermark" src="../../runmatch-logo-transparent.png" alt="">
+      <h2 class="headline">Challenge<br>Your <span class="accent">Friends</span></h2>
+      <div class="sub">Share a code. Start a competition.</div>
+      <div class="spacer"></div>
+      <div class="phone">
+        <div class="side-btn"></div>
+        <div class="phone-screen">
+          <img src="../../screenshots/cutouts/screen-4.png" alt="Invite friends">
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel 5: Bet on a Better You -->
+    <div class="panel" data-name="05-bet-on-better-you" onclick="toggleIsolate(this)">
+      <img class="watermark" src="../../runmatch-logo-transparent.png" alt="">
+      <h2 class="headline"><span class="accent">Bet</span> on a<br>Better You</h2>
+      <div class="spacer"></div>
+      <div class="phone">
+        <div class="side-btn"></div>
+        <div class="phone-screen">
+          <img src="../../screenshots/cutouts/screen-6.png" alt="Get started">
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="controls">
+    <button class="export-btn" id="exportBtn" onclick="exportAll()">Export All as PNG</button>
+    <span class="export-progress" id="exportProgress"></span>
+  </div>
+  <p class="hint" style="margin-top:12px">Click any panel to isolate at 1290 &times; 2796 &nbsp;&middot;&nbsp; Esc to close &nbsp;&middot;&nbsp; Arrow keys to cycle</p>
+
+  <script>
+    const overlay = document.getElementById('overlay');
+    const strip = document.getElementById('strip');
+    const panels = document.querySelectorAll('.panel');
+    const exportBtn = document.getElementById('exportBtn');
+    const exportProgress = document.getElementById('exportProgress');
+
+    function fitStrip() {
+      const totalW = panels.length * 430 + (panels.length - 1) * 18 + 64;
+      const zoom = Math.min(1, (window.innerWidth - 64) / totalW);
+      strip.style.setProperty('--strip-zoom', zoom);
+    }
+
+    fitStrip();
+    window.addEventListener('resize', fitStrip);
+
+    function toggleIsolate(el) {
+      const wasIsolated = el.classList.contains('isolated');
+      panels.forEach(p => {
+        p.classList.remove('isolated');
+        if (p.parentNode === document.body) strip.appendChild(p);
+      });
+      overlay.classList.remove('active');
+      if (!wasIsolated) {
+        document.body.appendChild(el);
+        el.classList.add('isolated');
+        overlay.classList.add('active');
+      }
+    }
+
+    overlay.addEventListener('click', () => {
+      panels.forEach(p => p.classList.remove('isolated'));
+      overlay.classList.remove('active');
+    });
+
+    function isolateByHash() {
+      const h = location.hash.replace('#', '');
+      if (h && h.startsWith('panel-')) {
+        const idx = parseInt(h.split('-')[1]) - 1;
+        if (panels[idx]) { toggleIsolate(panels[idx]); }
+      }
+    }
+    isolateByHash();
+    window.addEventListener('hashchange', isolateByHash);
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        panels.forEach(p => p.classList.remove('isolated'));
+        overlay.classList.remove('active');
+      }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        const current = document.querySelector('.panel.isolated');
+        if (!current) return;
+        const arr = [...panels];
+        const idx = arr.indexOf(current);
+        const next = e.key === 'ArrowRight'
+          ? arr[(idx + 1) % arr.length]
+          : arr[(idx - 1 + arr.length) % arr.length];
+        current.classList.remove('isolated');
+        next.classList.add('isolated');
+      }
+    });
+
+    async function exportAll() {
+      exportBtn.disabled = true;
+      const arr = [...panels];
+
+      for (let i = 0; i < arr.length; i++) {
+        const panel = arr[i];
+        const name = panel.dataset.name || `panel-${i + 1}`;
+        exportProgress.textContent = `Exporting ${i + 1} of ${arr.length}…`;
+
+        panels.forEach(p => p.classList.remove('isolated'));
+        overlay.classList.remove('active');
+        panel.classList.add('isolated');
+        overlay.classList.add('active');
+
+        await new Promise(r => setTimeout(r, 500));
+
+        try {
+          const canvas = await html2canvas(panel, {
+            width: 1290,
+            height: 2796,
+            scale: 1,
+            useCORS: true,
+            backgroundColor: '#0E0E0E',
+            logging: false,
+            x: 0,
+            y: 0,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: 1290,
+            windowHeight: 2796,
+          });
+
+          const link = document.createElement('a');
+          link.download = `${name}.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+
+          await new Promise(r => setTimeout(r, 800));
+        } catch (err) {
+          console.error(`Failed to export ${name}:`, err);
+        }
+      }
+
+      panels.forEach(p => p.classList.remove('isolated'));
+      overlay.classList.remove('active');
+      exportBtn.disabled = false;
+      exportProgress.textContent = 'Done — 5 PNGs saved!';
+      setTimeout(() => { exportProgress.textContent = ''; }, 4000);
+    }
+  </script>
+</body>
+</html>

@@ -23,7 +23,7 @@ struct SplashView: View {
             
             VStack(spacing: 20) {
                 // RunMatch Logo - Will migrate to top
-                Image("eos logo final_original")
+                Image("RunMatchLogo")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 160, height: 160)
@@ -126,7 +126,7 @@ struct SplashViewWithLogo: View {
                 Spacer()
                 
                 // Logo Image - Bigger
-                Image("EOSLogo")
+                Image("RunMatchLogo")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 220, height: 220)

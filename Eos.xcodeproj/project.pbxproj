@@ -37,7 +37,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		51463A8B2F0B8FF300AB4AC7 /* EOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		51463A8B2F0B8FF300AB4AC7 /* RunMatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RunMatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		51463A9D2F0B8FF400AB4AC7 /* morning-wouldTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "morning-wouldTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		51463AA72F0B8FF400AB4AC7 /* morning-wouldUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "morning-wouldUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -122,7 +122,7 @@
 		51463A8C2F0B8FF300AB4AC7 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				51463A8B2F0B8FF300AB4AC7 /* EOS.app */,
+				51463A8B2F0B8FF300AB4AC7 /* RunMatch.app */,
 				51463A9D2F0B8FF400AB4AC7 /* morning-wouldTests.xctest */,
 				51463AA72F0B8FF400AB4AC7 /* morning-wouldUITests.xctest */,
 			);
@@ -168,7 +168,7 @@
 				5162129F2F7346DD00196569 /* QuickPoseSwiftUI */,
 			);
 			productName = "morning-would";
-			productReference = 51463A8B2F0B8FF300AB4AC7 /* EOS.app */;
+			productReference = 51463A8B2F0B8FF300AB4AC7 /* RunMatch.app */;
 			productType = "com.apple.product-type.application";
 		};
 		51463A9C2F0B8FF400AB4AC7 /* morning-wouldTests */ = {
@@ -473,7 +473,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.emayne.eos$(BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = RunMatch;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -509,7 +509,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.emayne.eos$(BUNDLE_ID_SUFFIX)";
 				PRODUCT_NAME = RunMatch;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -531,7 +531,7 @@
 				DEVELOPMENT_TEAM = 3W9Q24UY7J;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -553,7 +553,7 @@
 				DEVELOPMENT_TEAM = 3W9Q24UY7J;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -573,7 +573,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3W9Q24UY7J;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -593,7 +593,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3W9Q24UY7J;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.emayne.eosUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
