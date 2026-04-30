@@ -464,6 +464,7 @@
 				INFOPLIST_FILE = "morning-would/Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to track your push-ups using on-device AI.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "We use your contacts only so you can pick a recipient's phone number to invite.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save your RunMatch win cards to your photo library to share your achievements.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -500,6 +501,7 @@
 				INFOPLIST_FILE = "morning-would/Info.plist";
 				INFOPLIST_KEY_NSCameraUsageDescription = "We use the camera to track your push-ups using on-device AI.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "We use your contacts only so you can pick a recipient's phone number to invite.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save your RunMatch win cards to your photo library to share your achievements.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

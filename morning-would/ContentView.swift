@@ -4,6 +4,7 @@ import Vision
 import StripePaymentSheet
 import ContactsUI
 import Combine
+import PhotosUI
 import QuickPoseCore
 import QuickPoseSwiftUI
 import QuickPoseCamera
@@ -5588,6 +5589,9 @@ struct CompeteView: View {
     @State private var showDetail: Bool = false
     @State private var showPastCompetitions: Bool = false
     @State private var showContestRules: Bool = false
+    @State private var showWinCardDirect: Bool = false
+    @State private var winCardDirectData: WinCardData? = nil
+    @State private var isLoadingWinCard: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     private let lightGold = Color(UIColor(red: 0.95, green: 0.75, blue: 0.1, alpha: 1))
@@ -5656,6 +5660,11 @@ struct CompeteView: View {
                             onOpenProfile?()
                         }
                     }, competitionId: compId)
+                }
+            }
+            .sheet(isPresented: $showWinCardDirect) {
+                if let data = winCardDirectData {
+                    WinCardSheet(data: data, isPresented: $showWinCardDirect)
                 }
             }
             .onAppear { loadCompetitions() }
@@ -5875,37 +5884,50 @@ struct CompeteView: View {
                     .padding(.horizontal, 20)
                 }
                 
-                // Past competitions
+                // Past competitions — show 3 by default, expand with "More" button
                 if !completed.isEmpty {
-                    VStack(spacing: 10) {
-                        Button(action: { withAnimation(.easeInOut(duration: 0.25)) { showPastCompetitions.toggle() } }) {
-                            HStack {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.caption)
-                                    .foregroundStyle(Color.gray)
-                                Text("Past Competitions (\(completed.count))")
-                                    .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.7))
-                                Spacer()
-                                Image(systemName: showPastCompetitions ? "chevron.up" : "chevron.down")
-                                    .font(.caption2)
-                                    .foregroundStyle(Color.white.opacity(0.4))
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(Color.white.opacity(0.08))
-                            )
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "trophy.fill")
+                                .font(.caption2)
+                                .foregroundStyle(goldColor.opacity(0.7))
+                            Text("Past Competitions")
+                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                .foregroundStyle(goldColor.opacity(0.9))
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 4)
                         
-                        if showPastCompetitions {
-                            VStack(spacing: 10) {
-                                ForEach(completed.indices, id: \.self) { i in
-                                    competitionCard(completed[i])
-                                }
+                        let visibleCount = showPastCompetitions ? completed.count : min(3, completed.count)
+                        
+                        VStack(spacing: 10) {
+                            ForEach(0..<visibleCount, id: \.self) { i in
+                                competitionCard(completed[i])
                             }
+                        }
+                        
+                        if completed.count > 3 && !showPastCompetitions {
+                            Button(action: { withAnimation(.easeInOut(duration: 0.25)) { showPastCompetitions = true } }) {
+                                HStack {
+                                    Spacer()
+                                    Text("Show \(completed.count - 3) More")
+                                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                                        .foregroundStyle(goldColor)
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(goldColor.opacity(0.7))
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(goldColor.opacity(0.06))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(goldColor.opacity(0.15), lineWidth: 1)
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -5957,20 +5979,19 @@ struct CompeteView: View {
         let isCompleted = status == "completed"
         let isActive = status == "active"
         let isPending = status == "pending"
+        let winnerUserId = comp["winnerUserId"] as? String ?? ""
+        let iWon = isCompleted && !winnerUserId.isEmpty && winnerUserId == UserDefaults.standard.string(forKey: "userId")
         
-        return Button(action: {
-            selectedCompetition = comp
-            showDetail = true
-        }) {
+        return VStack(spacing: 0) {
             VStack(spacing: 0) {
                 HStack(spacing: 14) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(isCompleted ? Color.gray.opacity(0.1) : goldColor.opacity(0.12))
+                            .fill(iWon ? goldColor.opacity(0.15) : (isCompleted ? Color.gray.opacity(0.1) : goldColor.opacity(0.12)))
                             .frame(width: 48, height: 48)
-                        Image(systemName: objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional"))
+                        Image(systemName: iWon ? "crown.fill" : (objType == "run" ? "figure.run" : (objType == "both" ? "flame.fill" : "figure.strengthtraining.traditional")))
                             .font(.title3)
-                            .foregroundStyle(isCompleted ? Color.gray : goldColor)
+                            .foregroundStyle(iWon ? goldColor : (isCompleted ? Color.gray : goldColor))
                     }
                     
                     VStack(alignment: .leading, spacing: 4) {
@@ -6019,6 +6040,28 @@ struct CompeteView: View {
                                 .font(.caption2)
                                 .foregroundStyle(Color.gray.opacity(0.4))
                         }
+                    } else if iWon {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(goldColor.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(goldColor.opacity(0.25), lineWidth: 1)
+                                )
+                            if isLoadingWinCard {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                    .tint(goldColor)
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(goldColor)
+                            }
+                        }
+                        .frame(width: 40, height: 40)
+                        .onTapGesture {
+                            openWinCardDirectly(for: comp)
+                        }
                     } else {
                         HStack(spacing: 6) {
                             Image(systemName: "trophy.fill")
@@ -6063,11 +6106,71 @@ struct CompeteView: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isActive ? goldColor.opacity(0.15) : (isPending ? Color.orange.opacity(0.15) : Color.clear), lineWidth: 1)
+                    .stroke(
+                        iWon ? goldColor.opacity(0.5) : (isActive ? goldColor.opacity(0.15) : (isPending ? Color.orange.opacity(0.15) : Color.clear)),
+                        lineWidth: iWon ? 1.5 : 1
+                    )
             )
-            .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .shadow(color: iWon ? goldColor.opacity(0.12) : Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectedCompetition = comp
+            showDetail = true
+        }
+    }
+    
+    /// Fetch leaderboard for a comp and build full WinCardData identical to the detail view's version,
+    /// then present the win card sheet. Same data, same component — just bypasses the detail screen.
+    private func openWinCardDirectly(for comp: [String: Any]) {
+        guard let compId = comp["id"] as? String else { return }
+        guard let url = URL(string: "https://api.runmatch.io/compete/\(compId)/leaderboard") else { return }
+        
+        isLoadingWinCard = true
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        AuthToken.applyTo(&request)
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            DispatchQueue.main.async {
+                isLoadingWinCard = false
+                
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let competition = json["competition"] as? [String: Any],
+                      let leaderboard = json["leaderboard"] as? [[String: Any]],
+                      let winner = leaderboard.first else { return }
+                
+                // Mirror CompetitionDetailView.buildWinCardData() exactly
+                let scoring = competition["scoringType"] as? String ?? "consistency"
+                let compName = competition["name"] as? String ?? "Competition"
+                let totalDays = competition["totalDays"] as? Int ?? 1
+                let buyIn = competition["buyInAmount"] as? Double ?? (competition["buyInAmount"] as? Int).map { Double($0) } ?? 0
+                let seeded = competition["seededAmount"] as? Double ?? (competition["seededAmount"] as? Int).map { Double($0) } ?? 0
+                let totalParticipants = competition["totalParticipants"] as? Int ?? leaderboard.count
+                let poolTotal = buyIn * Double(totalParticipants) + seeded
+                
+                let winnerName = winner["name"] as? String ?? "You"
+                let winnerScore = winner["score"] as? Double ?? 0
+                
+                let formatter = DateFormatter()
+                formatter.dateFormat = "MMMM yyyy"
+                let monthYear = formatter.string(from: Date())
+                
+                winCardDirectData = WinCardData(
+                    winnerName: winnerName,
+                    competitionName: compName,
+                    scoringType: scoring,
+                    distanceMiles: winnerScore,
+                    durationDays: totalDays,
+                    finishTime: nil,
+                    prizeAmount: poolTotal,
+                    totalParticipants: max(1, totalParticipants),
+                    monthYear: monthYear
+                )
+                showWinCardDirect = true
+            }
+        }.resume()
     }
     
     private func loadCompetitions() {
@@ -6079,11 +6182,16 @@ struct CompeteView: View {
         }
         
         var request = URLRequest(url: url)
-        request.timeoutInterval = 3
+        request.timeoutInterval = 15
+        AuthToken.applyTo(&request)
         
-        URLSession.shared.dataTask(with: request) { data, _, _ in
+        URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 self.isLoading = false
+                if let error = error {
+                    print("❌ Competition list fetch error: \(error.localizedDescription)")
+                    return
+                }
                 guard let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let comps = json["competitions"] as? [[String: Any]] else { return }
@@ -6505,66 +6613,8 @@ struct CreateCompetitionView: View {
         }
         .listRowBackground(Color.white)
         
-        // Seeded Prize (platform-funded)
-        Section {
-            Toggle(isOn: $isSeeded) {
-                HStack(spacing: 8) {
-                    Image(systemName: "gift.fill")
-                        .foregroundStyle(goldColor)
-                    Text("Seed a Prize")
-                        .font(.system(.body, design: .rounded, weight: .medium))
-                }
-            }
-            .tint(goldColor)
-            .onChange(of: isSeeded) { _, on in
-                if !on {
-                    seededAmount = 0
-                    seededText = ""
-                }
-            }
-            
-            if isSeeded {
-                HStack(spacing: 8) {
-                    Text("$")
-                        .font(.system(.title3, design: .rounded, weight: .bold))
-                        .foregroundStyle(Color.black)
-                    TextField("Amount", text: $seededText)
-                        .font(.system(.title3, design: .rounded, weight: .bold))
-                        .foregroundStyle(Color.black)
-                        .keyboardType(.decimalPad)
-                        .onChange(of: seededText) { _, newValue in
-                            seededAmount = Double(newValue) ?? 0
-                        }
-                }
-                .padding(.vertical, 4)
-                
-                HStack(spacing: 8) {
-                    ForEach([50.0, 100.0, 250.0, 500.0], id: \.self) { amt in
-                        Button(action: {
-                            seededAmount = amt
-                            seededText = "\(Int(amt))"
-                        }) {
-                            Text("$\(Int(amt))")
-                                .font(.system(.caption, design: .rounded, weight: .bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(seededAmount == amt ? goldColor : Color.gray.opacity(0.08))
-                                )
-                                .foregroundStyle(seededAmount == amt ? Color.white : Color.black)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        } header: {
-            Text("Sponsored Prize")
-        } footer: {
-            Text(isSeeded && seededAmount > 0 ? "Platform seeds $\(Int(seededAmount)) — users join free and compete for the prize." : "Add platform money to the prize pool. Users don't need to pay to enter.")
-                .font(.system(.caption2, design: .rounded))
-        }
-        .listRowBackground(Color.white)
+        // Sponsored Prize section hidden from UI — backend-only feature for promotional comps
+        // (Set seeded_amount on the competition row directly via SQL/API to enable for a specific comp)
         
         // 6. Balance check for buy-in competitions
         if buyInAmount > 0 {
@@ -7177,6 +7227,7 @@ struct CompetitionDetailView: View {
     @State private var messageCopied: Bool = false
     @State private var showAllParticipants: Bool = false
     @State private var showStravaRequiredForStart: Bool = false
+    @State private var showWinCard: Bool = false
     
     private let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     
@@ -7752,9 +7803,35 @@ struct CompetitionDetailView: View {
                         .font(.system(.title, design: .rounded, weight: .bold))
                         .foregroundStyle(goldColor)
                     
-                    Text(scoring == "race" ? "\(winnerScoreText) mi — first to the finish" : "\(winnerScoreText) \(scoreUnit) over \(totalDays) days")
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(Color.gray)
+                    if iWon {
+                        Button(action: { showWinCard = true }) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "square.and.arrow.up.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("View & Share Your Win Card")
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            }
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [goldColor, goldColor.opacity(0.75)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            )
+                            .shadow(color: goldColor.opacity(0.3), radius: 10, y: 4)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(scoring == "race" ? "\(winnerScoreText) mi — first to the finish" : "\(winnerScoreText) \(scoreUnit) over \(totalDays) days")
+                            .font(.system(.subheadline, design: .rounded))
+                            .foregroundStyle(Color.gray)
+                    }
                     
                     if buyIn > 0 || isSeededComp {
                         HStack(spacing: 6) {
@@ -7905,6 +7982,42 @@ struct CompetitionDetailView: View {
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
+        .sheet(isPresented: $showWinCard) {
+            if iWon, let data = buildWinCardData() {
+                WinCardSheet(data: data, isPresented: $showWinCard)
+            }
+        }
+    }
+    
+    private func buildWinCardData() -> WinCardData? {
+        guard let comp = competition, let winner = leaderboard.first else { return nil }
+        
+        let scoring = comp["scoringType"] as? String ?? "consistency"
+        let compName = comp["name"] as? String ?? "Competition"
+        let totalDays = comp["totalDays"] as? Int ?? 1
+        let buyIn = comp["buyInAmount"] as? Double ?? (comp["buyInAmount"] as? Int).map { Double($0) } ?? 0
+        let seeded = comp["seededAmount"] as? Double ?? (comp["seededAmount"] as? Int).map { Double($0) } ?? 0
+        let totalParticipants = comp["totalParticipants"] as? Int ?? leaderboard.count
+        let poolTotal = buyIn * Double(totalParticipants) + seeded
+        
+        let winnerName = winner["name"] as? String ?? "You"
+        let winnerScore = winner["score"] as? Double ?? 0
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        let monthYear = formatter.string(from: Date())
+        
+        return WinCardData(
+            winnerName: winnerName,
+            competitionName: compName,
+            scoringType: scoring,
+            distanceMiles: winnerScore,
+            durationDays: totalDays,
+            finishTime: nil,
+            prizeAmount: poolTotal,
+            totalParticipants: max(1, totalParticipants),
+            monthYear: monthYear
+        )
     }
     
     private func completedStatCard(icon: String, value: String, label: String, accent: Bool) -> some View {
@@ -9561,6 +9674,616 @@ struct CreateAccountView: View {
             }
         }.resume()
     }
+}
+
+// MARK: - Win Card
+
+struct WinCardData {
+    let winnerName: String
+    let competitionName: String
+    let scoringType: String     // "race" | "cumulative" | "consistency"
+    let distanceMiles: Double
+    let durationDays: Int
+    let finishTime: String?     // race comps only
+    let prizeAmount: Double
+    let totalParticipants: Int
+    let monthYear: String
+}
+
+/// The shareable win card. Typography and spacing scale from `cardWidth`
+/// so the same view looks identical whether rendered at 360pt on screen or 1080pt for export.
+struct WinCardView: View {
+    let data: WinCardData
+    let cardWidth: CGFloat
+    
+    private let gold = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    // Base design width of 360pt — all sizes below are specified in that coordinate space
+    private var s: CGFloat { cardWidth / 360.0 }
+    private var cardHeight: CGFloat { cardWidth * (16.0 / 9.0) }
+    
+    private var distanceText: String {
+        data.distanceMiles == floor(data.distanceMiles)
+            ? "\(Int(data.distanceMiles)) miles"
+            : String(format: "%.1f miles", data.distanceMiles)
+    }
+    
+    private var durationLabel: String {
+        switch data.scoringType {
+        case "race": return "Finish Time"
+        default: return "Duration"
+        }
+    }
+    
+    private var durationValue: String {
+        switch data.scoringType {
+        case "race": return data.finishTime ?? "—"
+        case "consistency": return "\(data.durationDays) days straight"
+        default: return "in \(data.durationDays) days"
+        }
+    }
+    
+    var body: some View {
+        ZStack {
+            // Rich dark gradient base (not pure black — gives depth)
+            LinearGradient(
+                colors: [
+                    Color(red: 0.08, green: 0.08, blue: 0.09),
+                    Color(red: 0.02, green: 0.02, blue: 0.03)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            // Geometric polygon facets — more visible like the mockup
+            GeometryReader { geo in
+                // Bottom-left large triangle
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: geo.size.height * 0.55))
+                    path.addLine(to: CGPoint(x: geo.size.width * 0.55, y: geo.size.height))
+                    path.addLine(to: CGPoint(x: 0, y: geo.size.height))
+                    path.closeSubpath()
+                }
+                .fill(Color.white.opacity(0.05))
+                
+                // Bottom-left inner triangle (darker overlap)
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: geo.size.height * 0.75))
+                    path.addLine(to: CGPoint(x: geo.size.width * 0.3, y: geo.size.height))
+                    path.addLine(to: CGPoint(x: 0, y: geo.size.height))
+                    path.closeSubpath()
+                }
+                .fill(Color.white.opacity(0.03))
+                
+                // Top-right large triangle
+                Path { path in
+                    path.move(to: CGPoint(x: geo.size.width, y: 0))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height * 0.45))
+                    path.addLine(to: CGPoint(x: geo.size.width * 0.45, y: 0))
+                    path.closeSubpath()
+                }
+                .fill(Color.white.opacity(0.05))
+                
+                // Top-right inner triangle
+                Path { path in
+                    path.move(to: CGPoint(x: geo.size.width, y: 0))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height * 0.22))
+                    path.addLine(to: CGPoint(x: geo.size.width * 0.7, y: 0))
+                    path.closeSubpath()
+                }
+                .fill(Color.white.opacity(0.03))
+                
+                // Middle-right accent
+                Path { path in
+                    path.move(to: CGPoint(x: geo.size.width, y: geo.size.height * 0.45))
+                    path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height * 0.65))
+                    path.addLine(to: CGPoint(x: geo.size.width * 0.85, y: geo.size.height * 0.55))
+                    path.closeSubpath()
+                }
+                .fill(Color.white.opacity(0.025))
+            }
+            
+            // Gold accent line on left edge
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [gold.opacity(0.3), gold.opacity(0.8), gold.opacity(0.3)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 3 * s)
+                Spacer()
+            }
+            
+            // Content — uses a single VStack with .frame to FORCE fit within cardHeight
+            VStack(spacing: 8 * s) {
+                // Top: logo inline with RUNMATCH text
+                HStack(spacing: 8 * s) {
+                    Image("RunMatchLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 36 * s, height: 36 * s)
+                    
+                    HStack(spacing: 0) {
+                        Text("RUN")
+                            .foregroundStyle(gold)
+                        Text("MATCH")
+                            .foregroundStyle(Color.white)
+                    }
+                    .font(.system(size: 18 * s, weight: .semibold, design: .serif))
+                    .tracking(4 * s)
+                }
+                .padding(.top, 24 * s)
+                
+                // Trophy
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 44 * s))
+                    .foregroundStyle(gold)
+                    .padding(.top, 8 * s)
+                
+                // Winner + comp name
+                Text("Winner")
+                    .font(.system(size: 46 * s, weight: .bold, design: .serif))
+                    .italic()
+                    .foregroundStyle(gold)
+                
+                Text(data.competitionName)
+                    .font(.system(size: 17 * s, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 30 * s)
+                
+                // Stat panels
+                VStack(spacing: 0) {
+                    statPanel(label: "Distance", value: distanceText, isGold: false)
+                    Rectangle().fill(gold.opacity(0.2)).frame(height: 1)
+                    statPanel(label: "Prize Won", value: "$\(Int(data.prizeAmount))", isGold: true)
+                    Rectangle().fill(gold.opacity(0.2)).frame(height: 1)
+                    statPanel(label: durationLabel, value: durationValue, isGold: false)
+                }
+                .background(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14 * s)
+                        .stroke(gold.opacity(0.35), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14 * s))
+                .padding(.horizontal, 28 * s)
+                .padding(.top, 8 * s)
+                
+                Spacer()
+                
+                // Winner name + vs runners + date
+                VStack(spacing: 3 * s) {
+                    Text("\(data.winnerName) vs. \(data.totalParticipants) runners")
+                        .font(.system(size: 18 * s, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.white)
+                    
+                    Text(data.monthYear)
+                        .font(.system(size: 13 * s, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.5))
+                }
+                
+                // Bottom branding — flame + RunMatch + App Store badge
+                VStack(spacing: 8 * s) {
+                    HStack(spacing: 6 * s) {
+                        Image("RunMatchLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 22 * s, height: 22 * s)
+                        
+                        HStack(spacing: 0) {
+                            Text("Run")
+                                .foregroundStyle(gold)
+                            Text("Match")
+                                .foregroundStyle(Color.white)
+                        }
+                        .font(.system(size: 18 * s, weight: .bold, design: .rounded))
+                    }
+                    
+                    HStack(spacing: 5 * s) {
+                        Image(systemName: "apple.logo")
+                            .font(.system(size: 10 * s, weight: .medium))
+                            .foregroundStyle(Color.white)
+                        Text("App Store")
+                            .font(.system(size: 10 * s, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color.white)
+                    }
+                    .padding(.horizontal, 10 * s)
+                    .padding(.vertical, 3 * s)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.1))
+                            .overlay(Capsule().stroke(gold.opacity(0.3), lineWidth: 0.5))
+                    )
+                }
+                .padding(.bottom, 24 * s)
+            }
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 24 * s))
+    }
+    
+    private func statPanel(label: String, value: String, isGold: Bool) -> some View {
+        VStack(spacing: 3 * s) {
+            Text(label)
+                .font(.system(size: 11 * s, weight: .semibold, design: .rounded))
+                .foregroundStyle(gold.opacity(0.85))
+                .tracking(1.5 * s)
+                .textCase(.uppercase)
+            
+            Text(value)
+                .font(.system(size: isGold ? 46 * s : 26 * s, weight: .bold, design: .rounded))
+                .foregroundStyle(isGold ? gold : Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, isGold ? 16 * s : 12 * s)
+        .padding(.horizontal, 12 * s)
+    }
+}
+
+/// Win card presented as a sheet. Dark background, card centered, action buttons at top.
+enum WinCardMode: String, CaseIterable, Identifiable {
+    case card = "Card"
+    case overlay = "Overlay"
+    var id: String { rawValue }
+}
+
+struct WinCardSheet: View {
+    let data: WinCardData
+    @Binding var isPresented: Bool
+    @State private var savedToPhotos = false
+    @State private var mode: WinCardMode = .card
+    @State private var pickedItem: PhotosPickerItem? = nil
+    @State private var overlayPhoto: UIImage? = nil
+    @State private var isLoadingPhoto: Bool = false
+    
+    private let gold = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Apple-style segmented control
+                    Picker("Mode", selection: $mode) {
+                        ForEach(WinCardMode.allCases) { m in
+                            Text(m.rawValue).tag(m)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 60)
+                    .padding(.top, 8)
+                    
+                    let screenWidth = UIScreen.main.bounds.width
+                    let cardWidth = screenWidth - 48
+                    
+                    // Card preview switches based on mode
+                    if mode == .card {
+                        WinCardView(data: data, cardWidth: cardWidth)
+                            .shadow(color: Color.black.opacity(0.5), radius: 20, y: 8)
+                    } else {
+                        if let photo = overlayPhoto {
+                            WinCardOverlayView(data: data, photo: photo, cardWidth: cardWidth)
+                                .shadow(color: Color.black.opacity(0.5), radius: 20, y: 8)
+                        } else {
+                            // Photo placeholder + picker
+                            PhotosPicker(selection: $pickedItem, matching: .images) {
+                                VStack(spacing: 16) {
+                                    Image(systemName: isLoadingPhoto ? "hourglass" : "photo.badge.plus.fill")
+                                        .font(.system(size: 56, weight: .light))
+                                        .foregroundStyle(gold)
+                                    Text(isLoadingPhoto ? "Loading photo…" : "Choose a Photo")
+                                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                                        .foregroundStyle(Color.white)
+                                    Text("Pick a photo from your run to overlay your stats on")
+                                        .font(.system(.caption, design: .rounded))
+                                        .foregroundStyle(Color.white.opacity(0.6))
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 30)
+                                }
+                                .frame(width: cardWidth, height: cardWidth * 16 / 9)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 24)
+                                        .fill(Color.white.opacity(0.05))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 24)
+                                                .strokeBorder(gold.opacity(0.4), style: StrokeStyle(lineWidth: 2, dash: [8]))
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    
+                    // If overlay mode + photo loaded, show "Choose Different Photo" link
+                    if mode == .overlay && overlayPhoto != nil {
+                        PhotosPicker(selection: $pickedItem, matching: .images) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.caption)
+                                Text("Choose Different Photo")
+                                    .font(.system(.caption, design: .rounded, weight: .medium))
+                            }
+                            .foregroundStyle(gold)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    // Action buttons
+                    HStack(spacing: 16) {
+                        Button(action: doSave) {
+                            HStack(spacing: 8) {
+                                Image(systemName: savedToPhotos ? "checkmark" : "arrow.down.to.line")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text(savedToPhotos ? "Saved!" : "Save to Photos")
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            }
+                            .foregroundStyle(Color.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(gold)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .opacity(canExport ? 1.0 : 0.4)
+                        }
+                        .disabled(!canExport)
+                        
+                        Button(action: doShare) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("Share")
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                            }
+                            .foregroundStyle(Color.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.white.opacity(0.15))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.3), lineWidth: 1))
+                            .opacity(canExport ? 1.0 : 0.4)
+                        }
+                        .disabled(!canExport)
+                    }
+                    .padding(.horizontal, 24)
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 40)
+            }
+            .background(Color.black)
+            .scrollIndicators(.hidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { isPresented = false }
+                        .foregroundStyle(gold)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Win Card")
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundStyle(Color.white)
+                }
+            }
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.black, for: .navigationBar)
+        }
+        .onChange(of: pickedItem) { _, newItem in
+            guard let newItem = newItem else { return }
+            isLoadingPhoto = true
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    await MainActor.run {
+                        overlayPhoto = img
+                        isLoadingPhoto = false
+                    }
+                } else {
+                    await MainActor.run { isLoadingPhoto = false }
+                }
+            }
+        }
+    }
+    
+    private var canExport: Bool {
+        if mode == .card { return true }
+        return overlayPhoto != nil
+    }
+    
+    @MainActor
+    private func renderCurrent() -> UIImage? {
+        let renderer: ImageRenderer<AnyView>
+        if mode == .card {
+            renderer = ImageRenderer(content: AnyView(WinCardView(data: data, cardWidth: 1080).frame(width: 1080, height: 1920)))
+        } else {
+            guard let photo = overlayPhoto else { return nil }
+            renderer = ImageRenderer(content: AnyView(WinCardOverlayView(data: data, photo: photo, cardWidth: 1080).frame(width: 1080, height: 1920)))
+        }
+        renderer.scale = 1.0
+        return renderer.uiImage
+    }
+    
+    private func doShare() {
+        guard let img = renderCurrent() else { return }
+        presentShare(img)
+    }
+    
+    private func presentShare(_ img: UIImage) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first,
+              let root = window.rootViewController else { return }
+        
+        var top: UIViewController = root
+        while let presented = top.presentedViewController { top = presented }
+        
+        let vc = UIActivityViewController(activityItems: [img], applicationActivities: nil)
+        if let pop = vc.popoverPresentationController {
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: 100, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        top.present(vc, animated: true)
+    }
+    
+    private func doSave() {
+        guard let img = renderCurrent() else { return }
+        UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+        withAnimation { savedToPhotos = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation { savedToPhotos = false }
+        }
+    }
+}
+
+/// Strava-style overlay: photo as background with stats over a gradient at the bottom.
+struct WinCardOverlayView: View {
+    let data: WinCardData
+    let photo: UIImage
+    let cardWidth: CGFloat
+    
+    private let gold = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    private var s: CGFloat { cardWidth / 360.0 }
+    private var cardHeight: CGFloat { cardWidth * (16.0 / 9.0) }
+    
+    private var distanceText: String {
+        data.distanceMiles == floor(data.distanceMiles)
+            ? "\(Int(data.distanceMiles)) miles"
+            : String(format: "%.1f miles", data.distanceMiles)
+    }
+    
+    private var durationValue: String {
+        switch data.scoringType {
+        case "race": return data.finishTime ?? "—"
+        case "consistency": return "\(data.durationDays) days"
+        default: return "\(data.durationDays) days"
+        }
+    }
+    
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // Photo background, scaled to fill
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: cardWidth, height: cardHeight)
+                .clipped()
+            
+            // Top gradient for branding readability
+            VStack {
+                LinearGradient(
+                    colors: [Color.black.opacity(0.6), Color.black.opacity(0.0)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 120 * s)
+                Spacer()
+            }
+            
+            // Bottom gradient for stats readability
+            LinearGradient(
+                colors: [Color.black.opacity(0.0), Color.black.opacity(0.5), Color.black.opacity(0.92)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: cardHeight * 0.55)
+            
+            // Top branding
+            VStack {
+                HStack(spacing: 8 * s) {
+                    Image("RunMatchLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 28 * s, height: 28 * s)
+                    HStack(spacing: 0) {
+                        Text("RUN").foregroundStyle(gold)
+                        Text("MATCH").foregroundStyle(Color.white)
+                    }
+                    .font(.system(size: 16 * s, weight: .semibold, design: .serif))
+                    .tracking(3 * s)
+                    Spacer()
+                }
+                .padding(.horizontal, 24 * s)
+                .padding(.top, 32 * s)
+                Spacer()
+            }
+            
+            // Bottom stat block
+            VStack(alignment: .leading, spacing: 12 * s) {
+                HStack(spacing: 6 * s) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 14 * s))
+                        .foregroundStyle(gold)
+                    Text("WINNER")
+                        .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                        .tracking(2 * s)
+                        .foregroundStyle(gold)
+                }
+                
+                Text(data.competitionName)
+                    .font(.system(size: 22 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                
+                HStack(alignment: .bottom, spacing: 24 * s) {
+                    VStack(alignment: .leading, spacing: 2 * s) {
+                        Text("DISTANCE")
+                            .font(.system(size: 9 * s, weight: .semibold, design: .rounded))
+                            .tracking(1.2 * s)
+                            .foregroundStyle(Color.white.opacity(0.6))
+                        Text(distanceText)
+                            .font(.system(size: 22 * s, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.white)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 2 * s) {
+                        Text("DURATION")
+                            .font(.system(size: 9 * s, weight: .semibold, design: .rounded))
+                            .tracking(1.2 * s)
+                            .foregroundStyle(Color.white.opacity(0.6))
+                        Text(durationValue)
+                            .font(.system(size: 22 * s, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.white)
+                    }
+                    
+                    Spacer()
+                    
+                    VStack(alignment: .trailing, spacing: 2 * s) {
+                        Text("PRIZE")
+                            .font(.system(size: 9 * s, weight: .semibold, design: .rounded))
+                            .tracking(1.2 * s)
+                            .foregroundStyle(gold.opacity(0.9))
+                        Text("$\(Int(data.prizeAmount))")
+                            .font(.system(size: 32 * s, weight: .bold, design: .rounded))
+                            .foregroundStyle(gold)
+                    }
+                }
+                
+                HStack {
+                    Text("\(data.winnerName) · vs. \(data.totalParticipants) runners · \(data.monthYear)")
+                        .font(.system(size: 11 * s, design: .rounded))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                    Spacer()
+                }
+            }
+            .padding(.horizontal, 24 * s)
+            .padding(.bottom, 36 * s)
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 24 * s))
+    }
+}
+
+/// UIActivityViewController bridge for sharing
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Preview

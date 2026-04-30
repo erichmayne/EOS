@@ -11,7 +11,7 @@ struct TutorialStep {
 
 let appTutorialSteps: [TutorialStep] = [
     TutorialStep(targetId: nil,
-                 title: "Welcome to EOS!",
+                 title: "Welcome to RunMatch!",
                  message: "Let us show you around. This quick tour walks you through everything you need.",
                  icon: "hand.wave.fill"),
     TutorialStep(targetId: "goals-card",
@@ -36,7 +36,7 @@ let appTutorialSteps: [TutorialStep] = [
                  icon: "trophy.fill"),
     TutorialStep(targetId: "strava-badge",
                  title: "Runs Track Automatically",
-                 message: "Once Strava is linked, every GPS-tracked run on Strava you complete automatically counts toward your goals and competitions in EOS. No manual logging needed.",
+                 message: "Once Strava is linked, every GPS-tracked run on Strava you complete automatically counts toward your goals and competitions in RunMatch. No manual logging needed.",
                  icon: "figure.run"),
     TutorialStep(targetId: nil,
                  title: "You're All Set!",

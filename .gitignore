@@ -40,3 +40,13 @@ build/
 *.webp
 Pasted Graphic*.png
 strava.logo
+
+# Video edits (too large for git — keep in cloud storage)
+*.mov
+*.mp4
+
+# Generated promo asset internals (keep finals in branding/promos/)
+branding/decks/_assets/
+branding/decks/_slides/
+branding/promos/burke-gilman/_clean-map.png
+branding/promos/launch/overlays/_assets/

@@ -124,6 +124,18 @@ app.post('/stripe/webhook', express.raw({ type: 'application/json' }), async (re
 app.use(express.json());
 
 // -----------------------------------------------------------------------------
+// App config: forced update, feature flags
+// -----------------------------------------------------------------------------
+const MIN_APP_VERSION = process.env.MIN_APP_VERSION || '2.3';
+
+app.get('/app/config', (req, res) => {
+    res.json({
+        minVersion: MIN_APP_VERSION,
+        storeUrl: 'https://apps.apple.com/us/app/runmatch/id6758569221'
+    });
+});
+
+// -----------------------------------------------------------------------------
 // Security: Rate limiting
 // -----------------------------------------------------------------------------
 const globalLimiter = rateLimit({
@@ -3900,21 +3912,14 @@ app.post("/objectives/create-daily-sessions", requireCronSecret, async (req, res
                 .eq("user_id", user.id)
                 .eq("enabled", true);
             
-            // Determine which objectives to create sessions for
-            let objectivesToCreate = [];
-            if (enabledObjectives && enabledObjectives.length > 0) {
-                // Use user_objectives table (modern multi-objective)
-                objectivesToCreate = enabledObjectives.map(obj => ({
-                    type: obj.objective_type,
-                    target: obj.target_value
-                }));
-            } else if (user.objective_count && user.objective_count > 0) {
-                // Legacy fallback: no user_objectives rows, use users table
-                objectivesToCreate = [{
-                    type: user.objective_type || "pushups",
-                    target: user.objective_count
-                }];
-            }
+            // Only create sessions for explicit enabled rows in user_objectives.
+            // Legacy fallback to users.objective_count was removed — it was
+            // silently creating pushup sessions for users who never enabled
+            // pushups (because of a stale `DEFAULT 50` on that column).
+            const objectivesToCreate = (enabledObjectives || []).map(obj => ({
+                type: obj.objective_type,
+                target: obj.target_value
+            }));
             
             if (objectivesToCreate.length === 0) continue;
             
@@ -4121,22 +4126,35 @@ app.post("/objectives/midnight-reset", requireCronSecret, async (req, res) => {
                 .select();
             missedCount += (missed?.length || 0);
             
-            // Create new session for user's today if it doesn't exist
+            // Create new sessions for today (only for objectives the user has
+            // explicitly enabled). Previously this unconditionally inserted a
+            // pushup session with target=50, which is exactly the bug that
+            // pinned the 50-pushup objective onto users who never enabled it.
+            const { data: enabledObjectives } = await supabase
+                .from("user_objectives")
+                .select("objective_type, target_value")
+                .eq("user_id", user.id)
+                .eq("enabled", true);
+
+            if (!enabledObjectives || enabledObjectives.length === 0) continue;
+
             const { data: existing } = await supabase
                 .from("objective_sessions")
-                .select("id")
+                .select("objective_type")
                 .eq("user_id", user.id)
-                .eq("session_date", userToday)
-                .limit(1);
-            
-            if (!existing || existing.length === 0) {
+                .eq("session_date", userToday);
+
+            const existingTypes = new Set((existing || []).map(s => s.objective_type));
+
+            for (const obj of enabledObjectives) {
+                if (existingTypes.has(obj.objective_type)) continue;
                 const { data: newSession } = await supabase
                     .from("objective_sessions")
                     .insert({
                         user_id: user.id,
                         session_date: userToday,
-                        objective_type: user.objective_type || "pushups",
-                        target_count: user.objective_count || 50,
+                        objective_type: obj.objective_type,
+                        target_count: obj.target_value,
                         completed_count: 0,
                         deadline: parseDeadlineTime(user.objective_deadline),
                         status: "pending",
@@ -4144,7 +4162,6 @@ app.post("/objectives/midnight-reset", requireCronSecret, async (req, res) => {
                     })
                     .select()
                     .single();
-                
                 if (newSession) newSessions.push(newSession.id);
             }
         }
@@ -4246,16 +4263,21 @@ app.post("/signin", authLimiter, async (req, res) => {
                 phone: user.phone,
                 balance_cents: user.balance_cents,
                 timezone: user.timezone,
-                // Objective settings
-                objective_type: user.objective_type || "pushups",
+                // Legacy single-objective fields (kept for backwards compat with
+                // older clients only). These will be null for users who never
+                // explicitly opted into pushups; new clients should rely on the
+                // pushups_enabled / run_enabled fields below instead.
+                objective_type: user.objective_type,
                 objective_count: user.objective_count,
                 objective_schedule: user.objective_schedule || "daily",
                 objective_deadline: parseDeadlineTime(user.objective_deadline),
-                // Multi-objective support (legacy fallback only if NO user_objectives rows exist)
-                pushups_enabled: userObjectives && userObjectives.length > 0 
-                    ? (objectivesMap.pushups?.enabled ?? false)
-                    : (user.objective_count > 0),
-                pushups_count: objectivesMap.pushups?.target ?? user.objective_count ?? 50,
+                // Multi-objective: pushups are only enabled if the user has an
+                // explicit, enabled row in user_objectives. The legacy
+                // `users.objective_count` field is no longer trusted as a
+                // signal because it had a `DEFAULT 50` that was silently
+                // assigning pushups to every new account.
+                pushups_enabled: objectivesMap.pushups?.enabled ?? false,
+                pushups_count: objectivesMap.pushups?.target ?? 0,
                 run_enabled: objectivesMap.run?.enabled ?? false,
                 run_distance: objectivesMap.run?.target ?? 2.0,
                 // Strava
@@ -4423,18 +4445,12 @@ app.get("/objectives/settings/:userId", optionalAuth, async (req, res) => {
             objMap[obj.objective_type] = { target: obj.target_value, enabled: obj.enabled };
         });
         
-        // Determine pushups state from user_objectives table
-        // Legacy fallback ONLY applies if user has zero rows in user_objectives (never migrated)
-        let pushupsEnabled = objMap.pushups?.enabled ?? false;
-        let pushupsCount = objMap.pushups?.target ?? 50;
-        
-        const hasAnyObjectives = objectives && objectives.length > 0;
-        if (!hasAnyObjectives && user.objective_count && user.objective_count > 0) {
-            // User has NO rows in user_objectives at all — use legacy data
-            pushupsEnabled = true;
-            pushupsCount = user.objective_count;
-            console.log(`Legacy fallback: user ${userId} has objective_count=${user.objective_count} (no user_objectives rows)`);
-        }
+        // Pushups only enabled if there's an explicit row in user_objectives.
+        // The legacy `users.objective_count > 0` fallback was removed because
+        // a stale `DEFAULT 50` on that column was silently activating
+        // pushups for every new account.
+        const pushupsEnabled = objMap.pushups?.enabled ?? false;
+        const pushupsCount = objMap.pushups?.target ?? 0;
         
         res.json({
             // New format: objectives array
@@ -5278,36 +5294,39 @@ app.get('/compete/user/:userId', optionalAuth, async (req, res) => {
             return res.status(500).json({ error: compError.message });
         }
         
-        // For each competition, get participant count
-        const results = [];
-        for (const comp of (competitions || [])) {
-            const { count } = await supabase
-                .from('competition_participants')
-                .select('*', { count: 'exact', head: true })
-                .eq('competition_id', comp.id)
-                .eq('status', 'active');
-            
-            results.push({
-                id: comp.id,
-                name: comp.name,
-                objectiveType: comp.objective_type,
-                scoringType: comp.scoring_type,
-                startDate: comp.start_date,
-                endDate: comp.end_date,
-                status: comp.status,
-                inviteCode: comp.invite_code,
-                targetValue: comp.target_value || 0,
-                pushupTarget: comp.pushup_target || 0,
-                runTarget: comp.run_target || 0,
-                buyInAmount: comp.buy_in_amount,
-                seededAmount: parseFloat(comp.seeded_amount) || 0,
-                durationDays: comp.duration_days,
-                isRace: comp.scoring_type === 'race',
-                creatorUserId: comp.creator_user_id,
-                creatorName: comp.creator?.full_name || 'Unknown',
-                participantCount: count || 0
-            });
+        // Batch-fetch participant counts for all comps in ONE query (was N+1)
+        const { data: allParticipants } = await supabase
+            .from('competition_participants')
+            .select('competition_id')
+            .in('competition_id', compIds)
+            .eq('status', 'active');
+        
+        const countByComp = {};
+        for (const p of (allParticipants || [])) {
+            countByComp[p.competition_id] = (countByComp[p.competition_id] || 0) + 1;
         }
+        
+        const results = (competitions || []).map(comp => ({
+            id: comp.id,
+            name: comp.name,
+            objectiveType: comp.objective_type,
+            scoringType: comp.scoring_type,
+            startDate: comp.start_date,
+            endDate: comp.end_date,
+            status: comp.status,
+            inviteCode: comp.invite_code,
+            targetValue: comp.target_value || 0,
+            pushupTarget: comp.pushup_target || 0,
+            runTarget: comp.run_target || 0,
+            buyInAmount: comp.buy_in_amount,
+            seededAmount: parseFloat(comp.seeded_amount) || 0,
+            durationDays: comp.duration_days,
+            isRace: comp.scoring_type === 'race',
+            creatorUserId: comp.creator_user_id,
+            creatorName: comp.creator?.full_name || 'Unknown',
+            participantCount: countByComp[comp.id] || 0,
+            winnerUserId: comp.winner_user_id || null
+        }));
         
         res.json({ competitions: results });
         

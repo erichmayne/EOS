@@ -29,6 +29,11 @@ struct OnboardingView: View {
     @State private var runTarget = 1.0
     @State private var deadlineHour = 18
 
+    // "yes" = save the recommended goal/deadline as their daily personal
+    // objective; "nil" = user hasn't picked yet (Start/Skip stay locked).
+    // "no" = blank-slate home screen (no objectives, no deadline).
+    @State private var dailyGoalChoice: String? = nil
+
     @State private var showCreateAccountSheet = false
     @State private var showSignInSheet = false
     @State private var accountAction = ""
@@ -126,12 +131,11 @@ struct OnboardingView: View {
         }) {
             CreateCompetitionView(onCreated: { })
         }
-        .onChange(of: isSignedIn) { _, signedIn in
-            guard signedIn else { return }
-            if accountAction == "create" {
-                writeObjectiveSettings()
-                syncObjectivesToBackend()
-            }
+        .onChange(of: isSignedIn) { _, _ in
+            // Daily-goal settings are no longer auto-written at account
+            // creation. They're written once the user makes the explicit
+            // Yes/No choice on the final onboarding screen — see
+            // `finishOnboarding` and `handleCompetitionCTA`.
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && currentPage == 13 && !userId.isEmpty && !stravaConnected {
@@ -210,15 +214,21 @@ struct OnboardingView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(RoundedRectangle(cornerRadius: 14).fill(gold))
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(dailyGoalChoice == nil ? Color.gray.opacity(0.3) : gold)
+                )
             }
+            .disabled(dailyGoalChoice == nil)
 
             Button(action: finishOnboarding) {
                 Text("Skip for now")
                     .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(Color.gray)
+                    .foregroundStyle(dailyGoalChoice == nil ? Color.gray.opacity(0.4) : Color.gray)
             }
+            .disabled(dailyGoalChoice == nil)
         }
+        .animation(.easeInOut(duration: 0.2), value: dailyGoalChoice)
     }
 
     // MARK: - Validation
@@ -300,6 +310,21 @@ struct OnboardingView: View {
     private func writeObjectiveSettings() {
         let defaults = UserDefaults.standard
 
+        if dailyGoalChoice == "no" {
+            // Blank-slate path: no daily objectives, no deadline, no schedule.
+            defaults.set(false, forKey: "pushupsEnabled")
+            defaults.set(false, forKey: "pushupsIsSet")
+            defaults.set(false, forKey: "runEnabled")
+            defaults.set(false, forKey: "runIsSet")
+            defaults.set(0, forKey: "pushupObjective")
+            defaults.set(0.0, forKey: "runDistance")
+            defaults.set(false, forKey: "scheduleIsSet")
+            defaults.removeObject(forKey: "scheduleType")
+            defaults.removeObject(forKey: "objectiveDeadline")
+            return
+        }
+
+        // "yes" path (default behavior): personalized run goal + deadline.
         defaults.set(false, forKey: "pushupsEnabled")
         defaults.set(false, forKey: "pushupsIsSet")
         defaults.set(true, forKey: "runEnabled")
@@ -318,19 +343,35 @@ struct OnboardingView: View {
     private func syncObjectivesToBackend() {
         guard !userId.isEmpty else { return }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        let deadlineDate = Calendar.current.date(from: DateComponents(hour: deadlineHour, minute: 0)) ?? Date()
-
-        let body: [String: Any] = [
-            "pushups_enabled": false,
-            "pushups_count": 0,
-            "run_enabled": true,
-            "run_distance": runTarget,
-            "objective_schedule": "daily",
-            "objective_deadline": formatter.string(from: deadlineDate),
-            "timezone": TimeZone.current.identifier
-        ]
+        let choice = dailyGoalChoice
+        let body: [String: Any]
+        if choice == "no" {
+            // Blank slate: explicitly disable everything on the server too so
+            // no daily session ever gets created for this user.
+            body = [
+                "pushups_enabled": false,
+                "pushups_count": 0,
+                "run_enabled": false,
+                "run_distance": 0,
+                "objective_schedule": "daily",
+                "objective_deadline": NSNull(),
+                "timezone": TimeZone.current.identifier
+            ]
+        } else {
+            // "yes" path: personalized run goal + deadline from onboarding.
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            let deadlineDate = Calendar.current.date(from: DateComponents(hour: deadlineHour, minute: 0)) ?? Date()
+            body = [
+                "pushups_enabled": false,
+                "pushups_count": 0,
+                "run_enabled": true,
+                "run_distance": runTarget,
+                "objective_schedule": "daily",
+                "objective_deadline": formatter.string(from: deadlineDate),
+                "timezone": TimeZone.current.identifier
+            ]
+        }
 
         guard let url = URL(string: "https://api.runmatch.io/objectives/settings/\(userId)") else { return }
 
@@ -342,19 +383,25 @@ struct OnboardingView: View {
 
         URLSession.shared.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                print("✅ Onboarding objectives synced to backend")
+                print("✅ Onboarding objectives synced (\(choice ?? "default"))")
             }
         }.resume()
     }
 
     private func finishOnboarding() {
-        if accountAction == "create" || !isSignedIn {
-            writeObjectiveSettings()
-        }
+        // Both Skip and Start now flow through here AFTER the user has
+        // explicitly picked Yes/No on the daily-goal selector, so we always
+        // write+sync settings (the body of those functions branches on
+        // dailyGoalChoice).
+        writeObjectiveSettings()
+        syncObjectivesToBackend()
         hasCompletedOnboarding = true
     }
 
     private func handleCompetitionCTA() {
+        // Persist the daily-goal choice before opening the competition sheet.
+        writeObjectiveSettings()
+        syncObjectivesToBackend()
         showCreateCompetition = true
     }
 
@@ -1226,13 +1273,50 @@ struct OnboardingView: View {
 
             summaryCard
 
-            Text("The best way to start? Challenge a friend.")
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(Color.gray)
-                .multilineTextAlignment(.center)
-                .opacity(screenAppeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.4).delay(0.8), value: screenAppeared)
+            dailyGoalSelector
         }
+    }
+
+    private var dailyGoalSelector: some View {
+        VStack(spacing: 14) {
+            Text("Set as your daily goals?")
+                .font(.system(.headline, design: .rounded, weight: .bold))
+                .foregroundStyle(Color.black)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 14) {
+                choicePill(label: "Yes", isSelected: dailyGoalChoice == "yes") {
+                    dailyGoalChoice = "yes"
+                }
+                choicePill(label: "No", isSelected: dailyGoalChoice == "no") {
+                    dailyGoalChoice = "no"
+                }
+            }
+        }
+        .padding(.top, 4)
+        .opacity(screenAppeared ? 1 : 0)
+        .offset(y: screenAppeared ? 0 : 12)
+        .animation(.easeOut(duration: 0.4).delay(0.6), value: screenAppeared)
+    }
+
+    private func choicePill(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Text(label)
+                .font(.system(.body, design: .rounded, weight: .semibold))
+                .foregroundStyle(isSelected ? .white : Color.black)
+                .frame(width: 110, height: 46)
+                .background(
+                    Capsule().fill(isSelected ? gold : Color.clear)
+                )
+                .overlay(
+                    Capsule().stroke(isSelected ? gold : Color.gray.opacity(0.35), lineWidth: 1.5)
+                )
+        }
+        .buttonStyle(BounceButtonStyle())
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 
     private var summaryCard: some View {
