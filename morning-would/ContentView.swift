@@ -105,10 +105,24 @@ struct ContentView: View {
     @State private var showProfileView = false
     @State private var showPushUpSession = false
     @State private var showCompeteView = false
+    // Direct-from-home sheets for the comp stats empty-state buttons.
+    // These let the user jump straight into Create / Join without going through
+    // the parent Compete view first.
+    @State private var showCreateCompSheet = false
+    @State private var showJoinCompSheet = false
+    // For the per-tile "View" tap on the comp stats page — opens the
+    // corresponding competition's detail sheet directly.
+    @State private var selectedCompIdForDetail: String? = nil
+    @State private var showCompDetail: Bool = false
     @State private var currentTime = Date() // For live countdown
     
     // Active competition data for main screen widget
     @State private var activeCompetition: [String: Any]? = nil
+    // Swipeable home card: 0 = Today's Goals, 1 = Competition stats
+    @State private var cardPageIndex: Int = 0
+    @State private var activeCompetitions: [[String: Any]] = []
+    @State private var activeCompLeaderboards: [String: [[String: Any]]] = [:]
+    @State private var activeCompsLoading: Bool = false
     @State private var compLeaderboard: [[String: Any]] = []
     
     // Tutorial
@@ -239,160 +253,45 @@ struct ContentView: View {
                         )
                         .padding(.top, 30)
                     
-                    // Active competition widget
-                    if let comp = activeCompetition {
-                        activeCompetitionWidget(comp)
-                    }
+                    // (Top active-competition widget removed — the swipe-right
+                    // comp stats page now serves this purpose with a richer view.)
 
                     VStack(spacing: 20) {
-                        // Goals Header
-                        Text(goalsHeaderText)
-                                .font(.system(.title3, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                            .padding(.horizontal)
-
-                        // Objectives Card(s)
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .fill(Color.white)
-                                    .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
-                                    .tutorialTarget("goals-card")
-
-                            VStack(spacing: 16) {
-                                // Show both objectives or single based on what's enabled
-                                if objectiveSettings.pushupsEnabled && objectiveSettings.runEnabled {
-                                    // BOTH objectives enabled - split view
-                                    HStack(spacing: 20) {
-                                        // Pushups column
-                                        VStack(spacing: 8) {
-                                            Image(systemName: "figure.strengthtraining.traditional")
-                                                .font(.title2)
-                                                .foregroundStyle(pushupObjectiveMet ? Color.green : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                                                Text("\(todayPushUpCount)")
-                                                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                                                    .foregroundStyle(Color.black)
-                                                Text("/\(pushupObjective)")
-                                                    .font(.system(size: 18, weight: .light, design: .rounded))
-                                                    .foregroundStyle(Color.black.opacity(0.4))
-                                            }
-                                            Text("pushups")
-                                                .font(.system(.caption, design: .rounded))
-                                                .foregroundStyle(Color.black.opacity(0.5))
-                                            Circle()
-                                                .fill(pushupObjectiveMet ? Color.green : Color.red.opacity(0.6))
-                                                .frame(width: 8, height: 8)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                        
-                                        // Divider
-                                        Rectangle()
-                                            .fill(Color.gray.opacity(0.2))
-                                            .frame(width: 1, height: 80)
-                                        
-                                        // Run column
-                                        VStack(spacing: 8) {
-                                            Image(systemName: "figure.run")
-                                                .font(.title2)
-                                                .foregroundStyle(runObjectiveMet ? Color.green : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                                                Text(String(format: "%.1f", todayRunDistance))
-                                                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                                                    .foregroundStyle(Color.black)
-                                                Text(String(format: "/%.1f", objectiveSettings.runDistance))
-                                                    .font(.system(size: 18, weight: .light, design: .rounded))
-                                                    .foregroundStyle(Color.black.opacity(0.4))
-                                            }
-                                            Text("miles")
-                                                .font(.system(.caption, design: .rounded))
-                                                .foregroundStyle(Color.black.opacity(0.5))
-                                            Circle()
-                                                .fill(runObjectiveMet ? Color.green : Color.red.opacity(0.6))
-                                                .frame(width: 8, height: 8)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                    }
-                                    .padding(.top, 8)
-                                } else if objectiveSettings.pushupsEnabled {
-                                    // Only pushups
-                                    HStack {
-                                        Text("\(todayPushUpCount)")
-                                            .font(.system(size: 72, weight: .bold, design: .rounded))
-                                            .foregroundStyle(Color.black)
-                                        Text("/ \(pushupObjective)")
-                                            .font(.system(size: 36, weight: .light, design: .rounded))
-                                            .foregroundStyle(Color.black.opacity(0.4))
-                                    }
-                                } else if objectiveSettings.runEnabled {
-                                    // Only run
-                                    HStack {
-                                        Text(String(format: "%.1f", todayRunDistance))
-                                            .font(.system(size: 72, weight: .bold, design: .rounded))
-                                            .foregroundStyle(Color.black)
-                                        Text(String(format: "/ %.1f mi", objectiveSettings.runDistance))
-                                            .font(.system(size: 36, weight: .light, design: .rounded))
-                                            .foregroundStyle(Color.black.opacity(0.4))
-                                    }
-                                } else {
-                                    // No objectives set
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "target")
-                                            .font(.largeTitle)
-                                            .foregroundStyle(Color.gray)
-                                        Text("No objectives set")
-                                            .font(.system(.headline, design: .rounded))
-                                            .foregroundStyle(Color.gray)
-                                        Text("Tap 'My Objective' to get started")
-                                            .font(.system(.caption, design: .rounded))
-                                            .foregroundStyle(Color.gray.opacity(0.7))
-                                    }
-                                    .padding(.vertical, 20)
-                                }
-
-                                // Status indicator (when objectives exist)
-                                if shouldShowObjective && hasAnyObjective {
-                                        HStack {
-                                            Circle()
-                                            .fill(allObjectivesMet ? Color.green : Color.red.opacity(0.8))
-                                                .frame(width: 10, height: 10)
-                                        Text(allObjectivesMet ? "All objectives met" : "Objectives not met")
-                                                .font(.system(.subheadline, design: .rounded))
-                                            .foregroundStyle(allObjectivesMet ? Color.green : Color.red.opacity(0.8))
-                                        }
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 20)
-                                            .fill((allObjectivesMet ? Color.green : Color.red).opacity(0.1))
-                                    )
-                                }
-
-                                // Timer section
-                                VStack(spacing: 4) {
-                                    Text(timeUntilDeadline)
-                                        .font(.system(.title3, design: .rounded, weight: .semibold))
-                                        .foregroundStyle(
-                                            !shouldShowObjective ? Color.gray :
-                                            (allObjectivesMet ? Color.green :
-                                            (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
-                                            Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
-                                        )
-                                    if shouldShowObjective && hasAnyObjective && objectiveSettings.scheduleIsSet {
-                                        let deadline = combineDateWithTodayTime(objectiveDeadline)
-                                        Text("Deadline: \(deadline, style: .time)")
-                                            .font(.system(.caption, design: .rounded))
-                                            .foregroundStyle(Color.black.opacity(0.5))
-                                    }
-                                }
-                                .tutorialTarget("timer")
-                            }
-                            .padding(24)
+                        // Page indicator dots — left dot is the default
+                        // Competitions page; right dot is the Today's Goals page.
+                        HStack(spacing: 8) {
+                            cardPageDot(active: cardPageIndex == 0)  // Competitions (default)
+                            cardPageDot(active: cardPageIndex == 1)  // Today's Goals
                         }
-                        .frame(maxWidth: 350)
+                        .frame(height: 24)
                         .padding(.horizontal)
+                        .animation(.easeInOut(duration: 0.2), value: cardPageIndex)
+                        .tutorialTarget("page-dots")
 
-                        // Navigation buttons - triangle layout
-                        VStack(spacing: 10) {
+                        // Swipeable card: Competitions (page 0, default) <-> Today's Goals (page 1)
+                        TabView(selection: $cardPageIndex) {
+                            competitionsCardPage
+                                .tag(0)
+                            goalsCardPage
+                                .tag(1)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(maxWidth: 350)
+                        .frame(height: 520)
+                        .padding(.horizontal)
+                        .onChange(of: cardPageIndex) { _, newValue in
+                            // Refresh comps when user swipes back to the default competitions page.
+                            if newValue == 0 { refreshAllActiveCompetitions() }
+                        }
+
+                    }
+
+                    Spacer()
+
+                    // Navigation buttons — moved to sit just above the STRAVA
+                    // logo at the bottom of the screen so the swipeable card
+                    // gets the full vertical real estate above them.
+                    VStack(spacing: 10) {
                         HStack(spacing: 15) {
                             Button(action: {
                                 showObjectiveSettings = true
@@ -414,7 +313,7 @@ struct ContentView: View {
                                         )
                                 )
                             }
-                                .tutorialTarget("objective-button")
+                            .tutorialTarget("objective-button")
 
                             Button(action: {
                                 showProfileView = true
@@ -441,36 +340,33 @@ struct ContentView: View {
                                         )
                                 )
                             }
-                                .tutorialTarget("profile-button")
-                            }
-                            
-                            // Compete button - centered below, completing the triangle
-                            Button(action: {
-                                showCompeteView = true
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "trophy.fill")
-                                    Text("Compete")
-                                }
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.4), lineWidth: 1)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.08))
-                                        )
-                                )
-                            }
-                            .tutorialTarget("compete-button")
+                            .tutorialTarget("profile-button")
                         }
+
+                        // Compete button — centered below, completing the triangle
+                        Button(action: {
+                            showCompeteView = true
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trophy.fill")
+                                Text("Compete")
+                            }
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.4), lineWidth: 1)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.08))
+                                    )
+                            )
+                        }
+                        .tutorialTarget("compete-button")
                     }
 
-                    Spacer()
-                    
                     // Powered by Strava
                     Image("powered_by_strava")
                         .resizable()
@@ -504,16 +400,37 @@ struct ContentView: View {
                     showProfileView = true
                 })
             }
+            .sheet(isPresented: $showCreateCompSheet) {
+                CreateCompetitionView(onCreated: { refreshAllActiveCompetitions() })
+            }
+            .sheet(isPresented: $showJoinCompSheet) {
+                JoinCompetitionView(onJoined: { refreshAllActiveCompetitions() })
+            }
+            .sheet(isPresented: $showCompDetail) {
+                if let compId = selectedCompIdForDetail {
+                    CompetitionDetailView(
+                        onOpenProfile: {
+                            showCompDetail = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                showProfileView = true
+                            }
+                        },
+                        competitionId: compId
+                    )
+                }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             checkAndResetDaily()
             refreshTodayProgress()
             refreshActiveCompetition()
+            refreshAllActiveCompetitions()
         }
         .onAppear {
             checkAndResetDaily()
             refreshTodayProgress()
             refreshActiveCompetition()
+            refreshAllActiveCompetitions()
             notificationManager.requestPermissions()
             notificationManager.scheduleReengagementNotifications()
             if shouldShowObjective && hasAnyObjective && !objectiveMet {
@@ -620,6 +537,690 @@ struct ContentView: View {
         }.resume()
     }
     
+    // MARK: - Swipeable Card: Page Indicator + Goals + Competitions
+
+    private func cardPageDot(active: Bool) -> some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        return Capsule()
+            .fill(active ? goldColor : Color.gray.opacity(0.3))
+            .frame(width: active ? 28 : 8, height: 8)
+    }
+
+    // ── Page 0: Today's Goals (the existing card content + a header inside) ──
+    private var goalsCardPage: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                )
+                .tutorialTarget("goals-card")
+
+            VStack(spacing: 16) {
+                // "Today's Goals" header — moved inside the card per the new design
+                Text(goalsHeaderText)
+                    .font(.system(.title3, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.black)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 16) {
+                    if objectiveSettings.pushupsEnabled && objectiveSettings.runEnabled {
+                        HStack(spacing: 20) {
+                            VStack(spacing: 8) {
+                                Image(systemName: "figure.strengthtraining.traditional")
+                                    .font(.title2)
+                                    .foregroundStyle(pushupObjectiveMet ? Color.green : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                HStack(alignment: .lastTextBaseline, spacing: 2) {
+                                    Text("\(todayPushUpCount)")
+                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .foregroundStyle(Color.black)
+                                    Text("/\(pushupObjective)")
+                                        .font(.system(size: 18, weight: .light, design: .rounded))
+                                        .foregroundStyle(Color.black.opacity(0.4))
+                                }
+                                Text("pushups")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.5))
+                                Circle()
+                                    .fill(pushupObjectiveMet ? Color.green : Color.red.opacity(0.6))
+                                    .frame(width: 8, height: 8)
+                            }
+                            .frame(maxWidth: .infinity)
+
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(width: 1, height: 80)
+
+                            VStack(spacing: 8) {
+                                Image(systemName: "figure.run")
+                                    .font(.title2)
+                                    .foregroundStyle(runObjectiveMet ? Color.green : Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                HStack(alignment: .lastTextBaseline, spacing: 2) {
+                                    Text(String(format: "%.1f", todayRunDistance))
+                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .foregroundStyle(Color.black)
+                                    Text(String(format: "/%.1f", objectiveSettings.runDistance))
+                                        .font(.system(size: 18, weight: .light, design: .rounded))
+                                        .foregroundStyle(Color.black.opacity(0.4))
+                                }
+                                Text("miles")
+                                    .font(.system(.caption, design: .rounded))
+                                    .foregroundStyle(Color.black.opacity(0.5))
+                                Circle()
+                                    .fill(runObjectiveMet ? Color.green : Color.red.opacity(0.6))
+                                    .frame(width: 8, height: 8)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .padding(.top, 8)
+                    } else if objectiveSettings.pushupsEnabled {
+                        HStack {
+                            Text("\(todayPushUpCount)")
+                                .font(.system(size: 72, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.black)
+                            Text("/ \(pushupObjective)")
+                                .font(.system(size: 36, weight: .light, design: .rounded))
+                                .foregroundStyle(Color.black.opacity(0.4))
+                        }
+                    } else if objectiveSettings.runEnabled {
+                        HStack {
+                            Text(String(format: "%.1f", todayRunDistance))
+                                .font(.system(size: 72, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color.black)
+                            Text(String(format: "/ %.1f mi", objectiveSettings.runDistance))
+                                .font(.system(size: 36, weight: .light, design: .rounded))
+                                .foregroundStyle(Color.black.opacity(0.4))
+                        }
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "target")
+                                .font(.largeTitle)
+                                .foregroundStyle(Color.gray)
+                            Text("No objectives set")
+                                .font(.system(.headline, design: .rounded))
+                                .foregroundStyle(Color.gray)
+                            Text("Tap 'My Goals' to get started")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.gray.opacity(0.7))
+                        }
+                        .padding(.vertical, 20)
+                    }
+
+                    if shouldShowObjective && hasAnyObjective {
+                        HStack {
+                            Circle()
+                                .fill(allObjectivesMet ? Color.green : Color.red.opacity(0.8))
+                                .frame(width: 10, height: 10)
+                            Text(allObjectivesMet ? "All objectives met" : "Objectives not met")
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundStyle(allObjectivesMet ? Color.green : Color.red.opacity(0.8))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill((allObjectivesMet ? Color.green : Color.red).opacity(0.1))
+                        )
+                    }
+
+                    VStack(spacing: 4) {
+                        Text(timeUntilDeadline)
+                            .font(.system(.title3, design: .rounded, weight: .semibold))
+                            .foregroundStyle(
+                                !shouldShowObjective ? Color.gray :
+                                (allObjectivesMet ? Color.green :
+                                (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
+                                Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
+                            )
+                        if shouldShowObjective && hasAnyObjective && objectiveSettings.scheduleIsSet {
+                            let deadline = combineDateWithTodayTime(objectiveDeadline)
+                            Text("Deadline: \(deadline, style: .time)")
+                                .font(.system(.caption, design: .rounded))
+                                .foregroundStyle(Color.black.opacity(0.5))
+                        }
+                    }
+                    .tutorialTarget("timer")
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    // ── Page 0: Competition stats (default) — empty state OR list of active comps ──
+    private var competitionsCardPage: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                )
+                .tutorialTarget("competitions-card")
+
+            VStack(spacing: 10) {
+                Text("Competitions")
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+
+                if !activeCompetitions.isEmpty {
+                    Text("Sorted by ending soonest")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                }
+
+                if activeCompetitions.isEmpty {
+                    competitionsEmptyState
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 10) {
+                            ForEach(Array(activeCompetitions.enumerated()), id: \.offset) { _, comp in
+                                compTile(comp: comp)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private var competitionsEmptyState: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        return VStack(spacing: 10) {
+            Spacer(minLength: 4)
+            Image(systemName: "trophy")
+                .font(.system(size: 38, weight: .light))
+                .foregroundStyle(goldColor)
+            Text("No Active Competitions")
+                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                .foregroundStyle(Color.black)
+            Text("Create one with friends or join with a code")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(Color.gray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+            Button(action: { showCreateCompSheet = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Create Competition")
+                }
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(goldColor))
+            }
+            Button(action: { showJoinCompSheet = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "ticket")
+                    Text("Join with Code")
+                }
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(goldColor)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(Capsule().stroke(goldColor, lineWidth: 1.5))
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // ── Comp tile dispatcher: routes to one of three variants by scoringType ──
+    @ViewBuilder
+    private func compTile(comp: [String: Any]) -> some View {
+        let scoring = comp["scoringType"] as? String ?? "consistency"
+        if scoring == "race" {
+            raceCompTile(comp: comp)
+        } else if scoring == "cumulative" {
+            cumulativeCompTile(comp: comp)
+        } else {
+            consistencyCompTile(comp: comp)
+        }
+    }
+
+    // Helper: leaderboard data + my entry for a given comp
+    private func leaderboardData(for comp: [String: Any]) -> (rows: [[String: Any]], myScore: Double, myRank: Int, leaderScore: Double, totalPlayers: Int) {
+        let compId = comp["id"] as? String ?? ""
+        let rows = activeCompLeaderboards[compId] ?? []
+        let myEntry = rows.first { ($0["userId"] as? String) == userId }
+        let myScore = (myEntry?["score"] as? Double) ?? Double((myEntry?["score"] as? Int) ?? 0)
+        let myRank = (myEntry?["rank"] as? Int) ?? 0
+        let leaderScore = (rows.first?["score"] as? Double) ?? Double((rows.first?["score"] as? Int) ?? 0)
+        return (rows, myScore, myRank, leaderScore, rows.count)
+    }
+
+    private func compNameUpper(_ comp: [String: Any]) -> String {
+        (comp["name"] as? String ?? "Competition").uppercased()
+    }
+
+    private func compPrize(_ comp: [String: Any]) -> Int {
+        if let n = comp["prizePool"] as? Int { return n }
+        if let n = comp["prizePool"] as? Double { return Int(n) }
+        return 0
+    }
+
+    private func ordinal(_ rank: Int) -> String {
+        guard rank > 0 else { return "—" }
+        let suffix: String
+        switch rank % 100 {
+        case 11, 12, 13: suffix = "th"
+        default:
+            switch rank % 10 {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
+        }
+        return "\(rank)\(suffix)"
+    }
+
+    private func tilePill(_ label: String, gold: Color) -> some View {
+        Text(label)
+            .font(.system(.caption2, design: .rounded, weight: .bold))
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(gold))
+    }
+
+    // ── Race variant: circular progress ring to a target distance ──
+    private func raceCompTile(comp: [String: Any]) -> some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let lb = leaderboardData(for: comp)
+        let target = (comp["targetValue"] as? Double) ?? Double(comp["targetValue"] as? Int ?? 0)
+        let progress = target > 0 ? min(1.0, lb.myScore / target) : 0
+        let behind = max(0, lb.leaderScore - lb.myScore)
+
+        return VStack(spacing: 8) {
+            HStack {
+                Text(compNameUpper(comp))
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+                Spacer()
+                tilePill("RACE", gold: goldColor)
+            }
+
+            ZStack {
+                Circle().stroke(Color.gray.opacity(0.15), lineWidth: 9).frame(width: 96, height: 96)
+                Circle().trim(from: 0, to: progress)
+                    .stroke(goldColor, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                    .frame(width: 96, height: 96)
+                    .rotationEffect(.degrees(-90))
+                VStack(spacing: 0) {
+                    Text(String(format: "%.1f mi", lb.myScore))
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    Text("of \(String(format: "%.1f", target))")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text("\(ordinal(lb.myRank)) of \(lb.totalPlayers)")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                if behind > 0 && lb.myRank > 1 {
+                    Text("· \(String(format: "%.1f", behind)) mi behind")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                }
+                Spacer()
+                Text("$\(compPrize(comp))")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(goldColor)
+            }
+
+            tileFooter(comp: comp, gold: goldColor)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.gray.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                )
+        )
+    }
+
+    // ── Cumulative variant: hero score + lead/behind line ──
+    private func cumulativeCompTile(comp: [String: Any]) -> some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let lb = leaderboardData(for: comp)
+        let unit = (comp["objectiveType"] as? String) == "run" ? "mi" : "reps"
+
+        return VStack(spacing: 10) {
+            HStack {
+                Text(compNameUpper(comp))
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+                Spacer()
+                tilePill("MAX MILES", gold: goldColor)
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text(String(format: lb.myScore == floor(lb.myScore) ? "%.0f" : "%.1f", lb.myScore))
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Text(unit)
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(goldColor)
+                Text("· your total")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+
+            leadOrBehindLine(
+                rows: lb.rows,
+                myScore: lb.myScore,
+                myRank: lb.myRank,
+                unitSingular: unit == "reps" ? "rep" : unit,
+                unitPlural: unit,
+                gold: goldColor
+            )
+
+            HStack(spacing: 6) {
+                Text("\(ordinal(lb.myRank)) of \(lb.totalPlayers)")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Spacer()
+                Text("$\(compPrize(comp))")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(goldColor)
+            }
+
+            tileFooter(comp: comp, gold: goldColor)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.gray.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                )
+        )
+    }
+
+    // ── Consistency variant: 7-column grid of completed/missed/upcoming days ──
+    private func consistencyCompTile(comp: [String: Any]) -> some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let red = Color(UIColor(red: 0.88, green: 0.21, blue: 0.23, alpha: 1))
+        let lb = leaderboardData(for: comp)
+        let totalDays = max(1, min(30, comp["durationDays"] as? Int ?? 7))
+        let completed = max(0, min(totalDays, Int(lb.myScore)))
+        // Days elapsed = days the comp has been running (so we know how many "should have been" done)
+        let elapsed: Int = {
+            if let dr = comp["daysRemaining"] as? Int { return max(0, min(totalDays, totalDays - dr)) }
+            return completed
+        }()
+        let missed = max(0, elapsed - completed)
+        let upcoming = max(0, totalDays - elapsed)
+
+        // Build the day cells in order: completed (gold ✓), missed (red ✕), upcoming (gray)
+        let cells: [DayCell] =
+            Array(repeating: DayCell.completed, count: completed)
+            + Array(repeating: DayCell.missed, count: missed)
+            + Array(repeating: DayCell.upcoming, count: upcoming)
+
+        let cols = 7
+        let rows = Int(ceil(Double(totalDays) / Double(cols)))
+
+        return VStack(spacing: 8) {
+            HStack {
+                Text(compNameUpper(comp))
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+                Spacer()
+                tilePill("DAYS COMPLETED", gold: goldColor)
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text("\(completed)")
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Text("/ \(totalDays)")
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(goldColor)
+                Text("· days completed")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+
+            leadOrBehindLine(
+                rows: lb.rows,
+                myScore: lb.myScore,
+                myRank: lb.myRank,
+                unitSingular: "day",
+                unitPlural: "days",
+                gold: goldColor
+            )
+
+            VStack(spacing: 4) {
+                ForEach(0..<rows, id: \.self) { r in
+                    HStack(spacing: 4) {
+                        ForEach(0..<cols, id: \.self) { c in
+                            let idx = r * cols + c
+                            if idx < totalDays && idx < cells.count {
+                                dayCellView(cells[idx], gold: goldColor, red: red)
+                            } else if idx < totalDays {
+                                dayCellView(.upcoming, gold: goldColor, red: red)
+                            } else {
+                                Color.clear.frame(width: 22, height: 22)
+                            }
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 10) {
+                legendChip(color: goldColor, symbol: "checkmark", label: "Done")
+                legendChip(color: red, symbol: "xmark", label: "Missed")
+                legendChip(color: Color.gray.opacity(0.3), symbol: nil, label: "Upcoming")
+            }
+
+            HStack(spacing: 6) {
+                Text("\(ordinal(lb.myRank)) of \(lb.totalPlayers)")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Spacer()
+                Text("$\(compPrize(comp))")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(goldColor)
+            }
+
+            tileFooter(comp: comp, gold: goldColor)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.gray.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                )
+        )
+    }
+
+    private enum DayCell { case completed, missed, upcoming }
+
+    private func dayCellView(_ kind: DayCell, gold: Color, red: Color) -> some View {
+        let size: CGFloat = 22
+        return Group {
+            switch kind {
+            case .completed:
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(gold)
+                    .overlay(Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white))
+                    .frame(width: size, height: size)
+            case .missed:
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(red)
+                    .overlay(Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white))
+                    .frame(width: size, height: size)
+            case .upcoming:
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.gray.opacity(0.18))
+                    .frame(width: size, height: size)
+            }
+        }
+    }
+
+    private func legendChip(color: Color, symbol: String?, label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(color)
+                .overlay(symbol.map { Image(systemName: $0).font(.system(size: 7, weight: .bold)).foregroundStyle(.white) })
+                .frame(width: 12, height: 12)
+            Text(label)
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.gray)
+        }
+    }
+
+    // ── Single-line "in the lead by X" / "X behind <name>" indicator ──
+    private func formatDiff(_ d: Double) -> String {
+        if abs(d - floor(d)) < 0.05 { return String(format: "%.0f", d) }
+        return String(format: "%.1f", d)
+    }
+
+    @ViewBuilder
+    private func leadOrBehindLine(rows: [[String: Any]], myScore: Double, myRank: Int, unitSingular: String, unitPlural: String, gold: Color) -> some View {
+        let leader = rows.first
+        let leaderScore = (leader?["score"] as? Double) ?? Double((leader?["score"] as? Int) ?? 0)
+        let leaderName = (leader?["fullName"] as? String) ?? (leader?["name"] as? String) ?? "leader"
+
+        if rows.count <= 1 || myRank == 0 {
+            Text(rows.isEmpty ? "Be the first to log" : "Solo lead")
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(Color.gray)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if myRank == 1 {
+            let second = rows.dropFirst().first
+            let secondScore = (second?["score"] as? Double) ?? Double((second?["score"] as? Int) ?? 0)
+            let lead = max(0, myScore - secondScore)
+            if lead < 0.05 {
+                Text("Tied for the lead")
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color.gray)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                let u = abs(lead - 1.0) < 0.05 ? unitSingular : unitPlural
+                Text("In the lead by \(formatDiff(lead)) \(u)")
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            let behind = max(0, leaderScore - myScore)
+            let u = abs(behind - 1.0) < 0.05 ? unitSingular : unitPlural
+            Text("\(formatDiff(behind)) \(u) behind \(leaderName)")
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(Color.gray)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
+
+    private func tileFooter(comp: [String: Any], gold: Color) -> some View {
+        let isRace = (comp["scoringType"] as? String) == "race"
+        let daysLeft = comp["daysRemaining"] as? Int ?? 0
+        let label: String = {
+            if isRace { return "First to finish" }
+            if daysLeft <= 0 { return "Ending today" }
+            if daysLeft == 1 { return "Ends in 1 day" }
+            return "Ends in \(daysLeft) days"
+        }()
+        return HStack {
+            Text(label)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(gold)
+            Spacer()
+            Button(action: {
+                if let compId = comp["id"] as? String {
+                    selectedCompIdForDetail = compId
+                    showCompDetail = true
+                }
+            }) {
+                HStack(spacing: 2) {
+                    Text("View")
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                }
+                .font(.system(.caption2, design: .rounded))
+                .foregroundStyle(Color.gray)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // ── Fetch all active competitions + their leaderboards for the swipe page ──
+    private func refreshAllActiveCompetitions() {
+        guard !userId.isEmpty else { return }
+        guard !activeCompsLoading else { return }
+        activeCompsLoading = true
+
+        guard let url = URL(string: "https://api.runmatch.io/compete/user/\(userId)") else {
+            activeCompsLoading = false
+            return
+        }
+        var req = URLRequest(url: url)
+        AuthToken.applyTo(&req)
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let comps = json["competitions"] as? [[String: Any]] else {
+                DispatchQueue.main.async { self.activeCompsLoading = false }
+                return
+            }
+
+            // Active only, sorted by daysRemaining ascending (closest to ending first)
+            let actives = comps
+                .filter { ($0["status"] as? String) == "active" }
+                .sorted { (a, b) in
+                    let aD = a["daysRemaining"] as? Int ?? Int.max
+                    let bD = b["daysRemaining"] as? Int ?? Int.max
+                    return aD < bD
+                }
+
+            DispatchQueue.main.async {
+                self.activeCompetitions = actives
+            }
+
+            // Fetch leaderboard for each active comp in parallel
+            let group = DispatchGroup()
+            var loaded: [String: [[String: Any]]] = [:]
+            for comp in actives {
+                guard let compId = comp["id"] as? String,
+                      let lbUrl = URL(string: "https://api.runmatch.io/compete/\(compId)/leaderboard") else { continue }
+                group.enter()
+                var lbReq = URLRequest(url: lbUrl)
+                AuthToken.applyTo(&lbReq)
+                URLSession.shared.dataTask(with: lbReq) { lbData, _, _ in
+                    defer { group.leave() }
+                    guard let lbData = lbData,
+                          let lbJson = try? JSONSerialization.jsonObject(with: lbData) as? [String: Any],
+                          let rows = lbJson["leaderboard"] as? [[String: Any]] else { return }
+                    DispatchQueue.main.async {
+                        loaded[compId] = rows
+                    }
+                }.resume()
+            }
+            group.notify(queue: .main) {
+                self.activeCompLeaderboards.merge(loaded) { _, new in new }
+                self.activeCompsLoading = false
+            }
+        }.resume()
+    }
+
     // MARK: - Active Competition Widget
     
     private func activeCompetitionWidget(_ comp: [String: Any]) -> some View {
@@ -6488,7 +7089,7 @@ struct CreateCompetitionView: View {
                 .padding(.vertical, 8)
             } else {
                 Picker("Duration", selection: $durationDays) {
-                    ForEach(1...90, id: \.self) { day in
+                    ForEach(1...30, id: \.self) { day in
                         Text("\(day) \(day == 1 ? "day" : "days")")
                             .foregroundStyle(Color.black)
                             .tag(day)
@@ -6496,6 +7097,11 @@ struct CreateCompetitionView: View {
                 }
                 .pickerStyle(.wheel)
                 .frame(height: 120)
+                .onAppear {
+                    // Defensive clamp: if a previously-saved value exceeds the
+                    // new 30-day cap, snap it back into range.
+                    if durationDays > 30 { durationDays = 30 }
+                }
             }
         } header: {
             Text("Duration")
