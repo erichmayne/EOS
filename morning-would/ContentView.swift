@@ -86,12 +86,35 @@ struct ContentView: View {
     @AppStorage("hasCompletedTodayPushUps") private var hasCompletedTodayPushUps: Bool = false
     @AppStorage("todayPushUpCount") private var todayPushUpCount: Int = 0
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
-    @AppStorage("objectiveDeadline") private var objectiveDeadline: Date = {
+    // Stored as TimeInterval (Double) so @AppStorage works on iOS 17+.
+    // The wrapped Date computed property below keeps every existing call site
+    // (read, write, comparison, etc.) working unchanged.
+    @AppStorage("objectiveDeadline") private var objectiveDeadlineEpoch: Double = {
         let components = DateComponents(hour: 22, minute: 0)
-        return Calendar.current.nextDate(after: Date(), matching: components, matchingPolicy: .nextTime) ?? Date()
+        return (Calendar.current.nextDate(after: Date(), matching: components, matchingPolicy: .nextTime) ?? Date()).timeIntervalSince1970
     }()
+    private var objectiveDeadline: Date {
+        get { Date(timeIntervalSince1970: objectiveDeadlineEpoch) }
+        nonmutating set { objectiveDeadlineEpoch = newValue.timeIntervalSince1970 }
+    }
+    private var objectiveDeadlineBinding: Binding<Date> {
+        Binding(
+            get: { Date(timeIntervalSince1970: self.objectiveDeadlineEpoch) },
+            set: { self.objectiveDeadlineEpoch = $0.timeIntervalSince1970 }
+        )
+    }
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
-    @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
+    @AppStorage("settingsLockedUntil") private var settingsLockedUntilEpoch: Double = Date.distantPast.timeIntervalSince1970
+    private var settingsLockedUntil: Date {
+        get { Date(timeIntervalSince1970: settingsLockedUntilEpoch) }
+        nonmutating set { settingsLockedUntilEpoch = newValue.timeIntervalSince1970 }
+    }
+    private var settingsLockedUntilBinding: Binding<Date> {
+        Binding(
+            get: { Date(timeIntervalSince1970: self.settingsLockedUntilEpoch) },
+            set: { self.settingsLockedUntilEpoch = $0.timeIntervalSince1970 }
+        )
+    }
     @AppStorage("profileUsername") private var profileUsername: String = ""
     @AppStorage("profileEmail") private var profileEmail: String = ""
     @AppStorage("profileCompleted") private var profileCompleted: Bool = false
@@ -105,11 +128,22 @@ struct ContentView: View {
     @State private var showProfileView = false
     @State private var showPushUpSession = false
     @State private var showCompeteView = false
+    @State private var showSocialSheet = false
     // Direct-from-home sheets for the comp stats empty-state buttons.
-    // These let the user jump straight into Create / Join without going through
-    // the parent Compete view first.
     @State private var showCreateCompSheet = false
     @State private var showJoinCompSheet = false
+    // Inline join flow
+    @AppStorage("stravaConnected") private var stravaConnectedHome: Bool = false
+    @State private var showJoinCodeInput: Bool = false
+    @State private var joinCodeInput: String = ""
+    @State private var joinIsVerifying: Bool = false
+    @State private var joinIsJoining: Bool = false
+    @State private var joinPreviewData: [String: Any]? = nil
+    @State private var joinErrorMessage: String? = nil
+    @State private var joinSuccessFlag: Bool = false
+    @State private var joinShowAgreement: Bool = false
+    @State private var joinShowStravaRequired: Bool = false
+    @FocusState private var joinCodeFocused: Bool
     // For the per-tile "View" tap on the comp stats page — opens the
     // corresponding competition's detail sheet directly.
     @State private var selectedCompIdForDetail: String? = nil
@@ -239,19 +273,25 @@ struct ContentView: View {
       ZStack {
         NavigationView {
             ZStack {
-                Color.white.ignoresSafeArea()
+                HomeGlassBackground()
 
-                VStack(spacing: 20) {
-                    Text("RunMatch")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.black, Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))],
-                                startPoint: .leading,
-                                endPoint: .trailing
+                VStack(spacing: 16) {
+                    HStack(spacing: 8) {
+                        Image("RunMatchLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 44, height: 44)
+                        Text("RunMatch")
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.black, Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .padding(.top, 30)
+                    }
+                    .padding(.top, 16)
                     
                     // (Top active-competition widget removed — the swipe-right
                     // comp stats page now serves this purpose with a richer view.)
@@ -288,84 +328,45 @@ struct ContentView: View {
 
                     Spacer()
 
-                    // Navigation buttons — moved to sit just above the STRAVA
-                    // logo at the bottom of the screen so the swipeable card
-                    // gets the full vertical real estate above them.
-                    VStack(spacing: 10) {
-                        HStack(spacing: 15) {
-                            Button(action: {
-                                showObjectiveSettings = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "target")
-                                    Text("My Goals")
-                                }
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color.white)
-                                        )
-                                )
-                            }
-                            .tutorialTarget("objective-button")
-
-                            Button(action: {
-                                showProfileView = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "person.circle")
-                                    Text("Profile")
-                                    if !profileCompleted {
-                                        Circle()
-                                            .fill(Color.red)
-                                            .frame(width: 8, height: 8)
-                                    }
-                                }
-                                .font(.system(.subheadline, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.black.opacity(0.2), lineWidth: 1)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .fill(Color.white)
-                                        )
-                                )
-                            }
-                            .tutorialTarget("profile-button")
-                        }
-
-                        // Compete button — centered below, completing the triangle
-                        Button(action: {
-                            showCompeteView = true
-                        }) {
+                    HStack(spacing: 12) {
+                        Button(action: { showSocialSheet = true }) {
                             HStack(spacing: 6) {
-                                Image(systemName: "trophy.fill")
-                                Text("Compete")
+                                Image(systemName: "person.2.fill")
+                                Text("Social")
                             }
                             .font(.system(.subheadline, design: .rounded, weight: .medium))
-                            .foregroundStyle(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
-                            .padding(.horizontal, 24)
+                            .foregroundStyle(Color.black)
+                            .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.4), lineWidth: 1)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)).opacity(0.08))
-                                    )
+                                    .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white))
                             )
                         }
-                        .tutorialTarget("compete-button")
+                        .tutorialTarget("social-button")
+
+                        Button(action: { showProfileView = true }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "person.circle")
+                                Text("Profile")
+                                if !profileCompleted {
+                                    Circle().fill(Color.red).frame(width: 8, height: 8)
+                                }
+                            }
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .foregroundStyle(Color.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.black.opacity(0.2), lineWidth: 1)
+                                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white))
+                            )
+                        }
+                        .tutorialTarget("profile-button")
                     }
+                    .frame(maxWidth: 350)
 
                     // Powered by Strava
                     Image("powered_by_strava")
@@ -384,9 +385,9 @@ struct ContentView: View {
                 ObjectiveSettingsView(
                     settings: objectiveSettings,
                     objective: $pushupObjective,
-                    deadline: $objectiveDeadline,
+                    deadline: objectiveDeadlineBinding,
                     scheduleType: $scheduleType,
-                    settingsLockedUntil: $settingsLockedUntil,
+                    settingsLockedUntil: settingsLockedUntilBinding,
                     onSave: {
                         syncObjectivesToBackend()
                     }
@@ -418,6 +419,14 @@ struct ContentView: View {
                         competitionId: compId
                     )
                 }
+            }
+            .sheet(isPresented: $showSocialSheet) { SocialView() }
+            .alert("Competition Entry", isPresented: $joinShowAgreement) {
+                Button("I Agree — Join", role: .destructive) { joinFromInline() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                let buyIn = joinPreviewData?["buyInAmount"] as? Double ?? 0
+                Text("This competition has a $\(Int(buyIn)) entry. Your contribution is committed when the creator starts. No refunds once started.")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -546,23 +555,70 @@ struct ContentView: View {
             .frame(width: active ? 28 : 8, height: 8)
     }
 
-    // ── Page 0: Today's Goals (the existing card content + a header inside) ──
+    // ── Page 1: Today's Goals — "My Goals" pill + hero card + deadline ──
     private var goalsCardPage: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        return VStack(spacing: 12) {
+            // Full-width "My Goals" button at top.
+            Button(action: { showObjectiveSettings = true }) {
+                HStack {
+                    Image(systemName: "target")
+                        .foregroundStyle(goldColor)
+                    Text("My Goals")
+                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(goldColor)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white))
                 )
-                .tutorialTarget("goals-card")
+            }
+            .tutorialTarget("objective-button")
 
-            VStack(spacing: 16) {
-                // "Today's Goals" header — moved inside the card per the new design
-                Text(goalsHeaderText)
-                    .font(.system(.title3, design: .rounded, weight: .medium))
-                    .foregroundStyle(Color.black)
-                    .multilineTextAlignment(.center)
+            // Main goals card
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                    )
+                    .tutorialTarget("goals-card")
+
+                VStack(spacing: 14) {
+                    // Header
+                    Text(goalsHeaderText)
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                        .multilineTextAlignment(.center)
+
+                    // Big deadline countdown
+                    VStack(spacing: 4) {
+                        let deadlineDate = combineDateWithTodayTime(objectiveDeadline)
+                        let pastDeadline = deadlineDate.timeIntervalSince(currentTime) <= 0
+                        let countdownColor: Color = !shouldShowObjective ? Color.gray :
+                            (allObjectivesMet ? Color.green :
+                            (pastDeadline ? Color.red : goldColor))
+
+                        Text(timeUntilDeadline)
+                            .font(.system(size: 32, weight: .heavy, design: .rounded))
+                            .foregroundStyle(countdownColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                        if shouldShowObjective && hasAnyObjective && objectiveSettings.scheduleIsSet {
+                            Text("Deadline: \(deadlineDate, style: .time)")
+                                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.5))
+                        }
+                    }
+                    .tutorialTarget("timer")
 
                 VStack(spacing: 16) {
                     if objectiveSettings.pushupsEnabled && objectiveSettings.runEnabled {
@@ -664,66 +720,248 @@ struct ContentView: View {
                         )
                     }
 
-                    VStack(spacing: 4) {
-                        Text(timeUntilDeadline)
-                            .font(.system(.title3, design: .rounded, weight: .semibold))
-                            .foregroundStyle(
-                                !shouldShowObjective ? Color.gray :
-                                (allObjectivesMet ? Color.green :
-                                (combineDateWithTodayTime(objectiveDeadline).timeIntervalSince(currentTime) <= 0 ? Color.red :
-                                Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))))
-                            )
-                        if shouldShowObjective && hasAnyObjective && objectiveSettings.scheduleIsSet {
-                            let deadline = combineDateWithTodayTime(objectiveDeadline)
-                            Text("Deadline: \(deadline, style: .time)")
-                                .font(.system(.caption, design: .rounded))
-                                .foregroundStyle(Color.black.opacity(0.5))
-                        }
-                    }
-                    .tutorialTarget("timer")
                 }
             }
-            .padding(24)
+            .padding(20)
+        }
         }
     }
 
-    // ── Page 0: Competition stats (default) — empty state OR list of active comps ──
+    // ── Page 0: Competition stats (default) — action chips + comp tiles ──
     private var competitionsCardPage: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
-                )
-                .tutorialTarget("competitions-card")
-
-            VStack(spacing: 10) {
-                Text("Competitions")
-                    .font(.system(.headline, design: .rounded, weight: .bold))
-                    .foregroundStyle(Color.black)
-
-                if !activeCompetitions.isEmpty {
-                    Text("Sorted by ending soonest")
-                        .font(.system(.caption2, design: .rounded))
-                        .foregroundStyle(Color.gray)
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        return VStack(spacing: 12) {
+            // Action chip row: + New / Join / Past
+            HStack(spacing: 8) {
+                compActionChip(label: "New", systemImage: "plus", isPrimary: true, gold: goldColor) {
+                    showCreateCompSheet = true
                 }
-
-                if activeCompetitions.isEmpty {
-                    competitionsEmptyState
-                } else {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 10) {
-                            ForEach(Array(activeCompetitions.enumerated()), id: \.offset) { _, comp in
-                                compTile(comp: comp)
-                            }
+                compActionChip(
+                    label: "Join",
+                    systemImage: showJoinCodeInput ? "xmark" : "link",
+                    isPrimary: showJoinCodeInput,
+                    gold: goldColor
+                ) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        if showJoinCodeInput {
+                            showJoinCodeInput = false; joinCodeInput = ""
+                            joinPreviewData = nil; joinErrorMessage = nil
+                            joinSuccessFlag = false; joinShowStravaRequired = false
+                            joinCodeFocused = false
+                        } else {
+                            showJoinCodeInput = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { joinCodeFocused = true }
                         }
-                        .padding(.vertical, 2)
+                    }
+                }
+                compActionChip(label: "Past", systemImage: "clock.arrow.circlepath", isPrimary: false, gold: goldColor) {
+                    showCompeteView = true
+                }
+            }
+            .tutorialTarget("compete-button")
+
+            // Inline join input (slides down when toggled)
+            if showJoinCodeInput {
+                inlineJoinCodeBar(gold: goldColor)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                inlineJoinResultArea(gold: goldColor)
+                    .transition(.opacity)
+            }
+
+            // Comp tiles float directly — no bounding rectangle.
+            if activeCompetitions.isEmpty {
+                competitionsEmptyState
+                    .tutorialTarget("competitions-card")
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 10) {
+                        ForEach(Array(activeCompetitions.enumerated()), id: \.offset) { _, comp in
+                            compTile(comp: comp)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .tutorialTarget("competitions-card")
+            }
+        }
+    }
+
+    private func compActionChip(label: String, systemImage: String, isPrimary: Bool,
+                                 gold: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage).font(.system(size: 12, weight: .bold))
+                Text(label).font(.system(.caption, design: .rounded, weight: .bold))
+            }
+            .foregroundStyle(isPrimary ? Color.black : gold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                Capsule().fill(isPrimary ? gold : Color.white)
+            )
+            .overlay(Capsule().stroke(gold.opacity(0.5), lineWidth: isPrimary ? 0 : 1))
+        }
+    }
+
+    // MARK: Inline Join helpers
+
+    private func inlineJoinCodeBar(gold: Color) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "link").font(.system(size: 16, weight: .semibold)).foregroundStyle(gold)
+            TextField("", text: $joinCodeInput,
+                      prompt: Text("Enter 6-digit code").foregroundColor(.black.opacity(0.3)))
+                .font(.system(.subheadline, design: .monospaced, weight: .bold))
+                .foregroundStyle(Color.black).tint(Color.black)
+                .autocapitalization(.allCharacters).disableAutocorrection(true)
+                .focused($joinCodeFocused)
+                .onChange(of: joinCodeInput) { _, val in
+                    let c = String(val.uppercased().prefix(6))
+                    if c != joinCodeInput { joinCodeInput = c; return }
+                    joinPreviewData = nil; joinErrorMessage = nil
+                    joinSuccessFlag = false; joinShowStravaRequired = false
+                    if c.count == 6 { verifyInlineCode() }
+                }
+            if joinIsVerifying { ProgressView().scaleEffect(0.7) }
+            else if !joinCodeInput.isEmpty {
+                Button { joinCodeInput = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(.black.opacity(0.3))
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.black.opacity(0.15), lineWidth: 1)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white))
+        )
+    }
+
+    @ViewBuilder
+    private func inlineJoinResultArea(gold: Color) -> some View {
+        if joinSuccessFlag {
+            VStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 36)).foregroundStyle(Color.green)
+                Text("You're in!").font(.system(.headline, design: .rounded))
+                Text("The comp begins when the creator starts it.")
+                    .font(.system(.caption, design: .rounded)).foregroundStyle(.gray).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity).padding(16)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.black.opacity(0.08), lineWidth: 1)))
+        } else if let preview = joinPreviewData {
+            inlineJoinPreview(preview, gold: gold)
+        } else if let err = joinErrorMessage, joinCodeInput.count == 6 {
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                Text(err).font(.system(.caption, design: .rounded)).foregroundStyle(.red)
+                Spacer()
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.red.opacity(0.3), lineWidth: 1)))
+        }
+    }
+
+    private func inlineJoinPreview(_ data: [String: Any], gold: Color) -> some View {
+        let name = data["name"] as? String ?? ""
+        let creator = data["creatorName"] as? String ?? ""
+        let objType = data["objectiveType"] as? String ?? ""
+        let scoring = data["scoringType"] as? String ?? ""
+        let participants = data["participantCount"] as? Int ?? 0
+        let status = data["status"] as? String ?? ""
+        let buyIn = data["buyInAmount"] as? Double ?? 0
+        let seeded = data["seededAmount"] as? Double ?? 0
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: objType == "run" ? "figure.run" : "flame.fill").font(.title3).foregroundStyle(gold)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.system(.subheadline, design: .rounded, weight: .bold))
+                    Text("by \(creator)").font(.system(.caption2, design: .rounded)).foregroundStyle(.gray)
+                }
+            }
+            HStack(spacing: 10) {
+                Label(scoring.capitalized, systemImage: "chart.bar.fill")
+                Label("\(participants) joined", systemImage: "person.2.fill")
+            }.font(.system(.caption2, design: .rounded)).foregroundStyle(.black.opacity(0.5))
+
+            if status == "completed" {
+                Text("This competition has ended.").font(.system(.caption, design: .rounded)).foregroundStyle(.red)
+            } else {
+                if seeded > 0 && buyIn == 0 {
+                    Text("Free Entry · $\(Int(seeded)) sponsored prize")
+                        .font(.system(.caption, design: .rounded, weight: .medium)).foregroundStyle(gold)
+                        .padding(8).frame(maxWidth: .infinity).background(gold.opacity(0.1)).cornerRadius(8)
+                } else if buyIn > 0 {
+                    Text("$\(Int(buyIn)) buy-in — locked when competition starts")
+                        .font(.system(.caption, design: .rounded, weight: .medium)).foregroundStyle(.black.opacity(0.7))
+                        .padding(8).frame(maxWidth: .infinity).background(Color.orange.opacity(0.1)).cornerRadius(8)
+                }
+                if joinShowStravaRequired {
+                    Text("Connect Strava in Profile to join.").font(.system(.caption, design: .rounded)).foregroundStyle(.orange)
+                        .padding(8).background(Color.orange.opacity(0.1)).cornerRadius(8)
+                }
+                Button {
+                    if (objType == "run" || objType == "both") && !stravaConnectedHome {
+                        withAnimation { joinShowStravaRequired = true }; return
+                    }
+                    joinShowStravaRequired = false
+                    if buyIn > 0 { joinShowAgreement = true } else { joinFromInline() }
+                } label: {
+                    HStack {
+                        if joinIsJoining { ProgressView().scaleEffect(0.7).tint(.white) }
+                        else { Image(systemName: "person.badge.plus") }
+                        Text("Join Competition").font(.system(.subheadline, design: .rounded, weight: .bold))
+                    }
+                    .foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(gold))
+                }.buttonStyle(.plain).disabled(joinIsJoining || status == "completed")
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white)
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(gold.opacity(0.3), lineWidth: 1)))
+    }
+
+    private func verifyInlineCode() {
+        joinIsVerifying = true; joinErrorMessage = nil; joinPreviewData = nil
+        guard let url = URL(string: "https://api.runmatch.io/compete/verify/\(joinCodeInput)") else { joinIsVerifying = false; return }
+        var req = URLRequest(url: url); AuthToken.applyTo(&req)
+        URLSession.shared.dataTask(with: req) { data, response, _ in
+            DispatchQueue.main.async {
+                self.joinIsVerifying = false
+                guard let data = data, let http = response as? HTTPURLResponse else { self.joinErrorMessage = "Could not reach server"; return }
+                if http.statusCode == 404 { self.joinErrorMessage = "No competition found with that code"; return }
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.joinPreviewData = json }
+            }
+        }.resume()
+    }
+
+    private func joinFromInline() {
+        guard !userId.isEmpty, !joinCodeInput.isEmpty else { return }
+        joinIsJoining = true
+        guard let url = URL(string: "https://api.runmatch.io/compete/join") else { joinIsJoining = false; return }
+        var request = URLRequest(url: url); request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type"); AuthToken.applyTo(&request)
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["userId": userId, "code": joinCodeInput])
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            DispatchQueue.main.async {
+                self.joinIsJoining = false
+                guard let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["success"] as? Bool == true else {
+                    if let data = data, let e = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let msg = e["error"] as? String { self.joinErrorMessage = msg }
+                    else { self.joinErrorMessage = "Could not join" }; return
+                }
+                withAnimation { self.joinSuccessFlag = true; self.joinPreviewData = nil }
+                self.refreshAllActiveCompetitions()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.showJoinCodeInput = false; self.joinCodeInput = ""; self.joinSuccessFlag = false
                     }
                 }
             }
-            .padding(16)
-        }
+        }.resume()
     }
 
     private var competitionsEmptyState: some View {
@@ -881,10 +1119,10 @@ struct ContentView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.gray.opacity(0.05))
+                .fill(Color.white)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
                 )
         )
     }
@@ -941,10 +1179,10 @@ struct ContentView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.gray.opacity(0.05))
+                .fill(Color.white)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
                 )
         )
     }
@@ -1042,10 +1280,10 @@ struct ContentView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.gray.opacity(0.05))
+                .fill(Color.white)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(goldColor.opacity(0.5), lineWidth: 1)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
                 )
         )
     }
@@ -3576,12 +3814,20 @@ struct ProfileView: View {
     
     // Objective settings (synced with SettingsView via @AppStorage)
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
-    @AppStorage("objectiveDeadline") private var objectiveDeadline: Date = {
+    @AppStorage("objectiveDeadline") private var objectiveDeadlineEpoch: Double = {
         let components = DateComponents(hour: 22, minute: 0)
-        return Calendar.current.date(from: components) ?? Date()
+        return (Calendar.current.date(from: components) ?? Date()).timeIntervalSince1970
     }()
+    private var objectiveDeadline: Date {
+        get { Date(timeIntervalSince1970: objectiveDeadlineEpoch) }
+        nonmutating set { objectiveDeadlineEpoch = newValue.timeIntervalSince1970 }
+    }
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
-    @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
+    @AppStorage("settingsLockedUntil") private var settingsLockedUntilEpoch: Double = Date.distantPast.timeIntervalSince1970
+    private var settingsLockedUntil: Date {
+        get { Date(timeIntervalSince1970: settingsLockedUntilEpoch) }
+        nonmutating set { settingsLockedUntilEpoch = newValue.timeIntervalSince1970 }
+    }
     @AppStorage("stravaConnected") private var stravaConnected: Bool = false
     @AppStorage("stravaAthleteName") private var stravaAthleteName: String = ""
     @AppStorage("objectiveType") private var objectiveType: String = "pushups"
@@ -9706,16 +9952,24 @@ struct SignInView: View {
     @AppStorage("committedRecipientId") private var committedRecipientId: String = ""
     @AppStorage("committedDestination") private var committedDestination: String = "charity"
     
-    // Lock status
-    @AppStorage("settingsLockedUntil") private var settingsLockedUntil: Date = Date.distantPast
-    
+    // Lock status (TimeInterval-backed for iOS 17 compatibility).
+    @AppStorage("settingsLockedUntil") private var settingsLockedUntilEpoch: Double = Date.distantPast.timeIntervalSince1970
+    private var settingsLockedUntil: Date {
+        get { Date(timeIntervalSince1970: settingsLockedUntilEpoch) }
+        nonmutating set { settingsLockedUntilEpoch = newValue.timeIntervalSince1970 }
+    }
+
     // Objective settings
     @AppStorage("pushupObjective") private var pushupObjective: Int = 10
     @AppStorage("scheduleType") private var scheduleType: String = "Daily"
-    @AppStorage("objectiveDeadline") private var objectiveDeadline: Date = {
+    @AppStorage("objectiveDeadline") private var objectiveDeadlineEpoch: Double = {
         let components = DateComponents(hour: 22, minute: 0)
-        return Calendar.current.date(from: components) ?? Date()
+        return (Calendar.current.date(from: components) ?? Date()).timeIntervalSince1970
     }()
+    private var objectiveDeadline: Date {
+        get { Date(timeIntervalSince1970: objectiveDeadlineEpoch) }
+        nonmutating set { objectiveDeadlineEpoch = newValue.timeIntervalSince1970 }
+    }
     @AppStorage("objectiveType") private var objectiveType: String = "pushups"
     
     // Multi-objective settings
