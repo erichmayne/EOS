@@ -503,6 +503,15 @@ app.post("/users/profile", async (req, res) => {
       }
       userRow = data;
       notifySlack(`🆕 *New User Signed Up*\n• Name: ${data.full_name || 'Unknown'}\n• Email: ${normalizedEmail}`);
+
+      // Auto-create the $10 seeded starter race comp for this new user.
+      // Fire-and-forget: a failure here shouldn't block signup. The user just
+      // won't see their starter on the home page — we can backfill later.
+      try {
+        await createStarterCompetition(userRow.id);
+      } catch (starterErr) {
+        console.error("createStarterCompetition failed for new user:", starterErr);
+      }
     } else {
       // Only update password if provided
       if (password && password.trim()) {
@@ -550,6 +559,12 @@ app.post("/users/profile", async (req, res) => {
       destination_committed: userRow.destination_committed,
       committed_destination: userRow.committed_destination,
       stripeCustomerId: userRow.stripe_customer_id,
+      // Starter bonus fields (iOS uses these to drive the celebration sheet,
+      // pending-bonus indicator, and unlock celebration).
+      starterBonusAmount: parseFloat(userRow.starter_bonus_amount || 0),
+      starterBonusUnlocked: !!userRow.starter_bonus_unlocked,
+      compEarningsTotal: parseFloat(userRow.comp_earnings_total || 0),
+      starterCompId: userRow.starter_comp_id || null,
     });
   } catch (err) {
     console.error("Profile endpoint error:", err);
@@ -772,7 +787,15 @@ app.post('/recipient-signup', async (req, res) => {
       console.error('Failed to create recipient user:', userError);
       return res.status(500).json({ error: 'Failed to create account', detail: userError.message });
     }
-    
+
+    // Auto-create the $10 seeded starter race comp for this new account too.
+    // Fire-and-forget — failure shouldn't block invite acceptance.
+    try {
+      await createStarterCompetition(newUser.id);
+    } catch (starterErr) {
+      console.error('createStarterCompetition failed for invited user:', starterErr);
+    }
+
     // Update invite status to accepted (DB constraint requires specific values: pending, accepted)
     const { error: inviteUpdateError } = await supabase
       .from('recipient_invites')
@@ -2322,24 +2345,32 @@ app.post("/objectives/check-missed", requireCronSecret, async (req, res) => {
 app.get("/users/:userId/balance", optionalAuth, async (req, res) => {
     try {
         const { userId } = req.params;
-        
+
         const { data: user, error } = await supabase
             .from("users")
-            .select("balance_cents, settings_locked_until")
+            .select("balance_cents, settings_locked_until, strava_connection_id, " +
+                    "starter_bonus_amount, starter_bonus_unlocked, comp_earnings_total, starter_comp_id")
             .eq("id", userId)
             .single();
-        
+
         if (error || !user) {
             return res.status(404).json({ error: "User not found" });
         }
-        
+
         res.json({
             balanceCents: user.balance_cents || 0,
             balanceDollars: (user.balance_cents || 0) / 100,
             settings_locked_until: user.settings_locked_until,
-            stravaConnected: !!user.strava_connection_id
+            stravaConnected: !!user.strava_connection_id,
+            // Starter bonus surface — drives the iOS pending-bonus indicator
+            // and the unlock-celebration trigger on poll.
+            starterBonusAmount: parseFloat(user.starter_bonus_amount || 0),
+            starterBonusUnlocked: !!user.starter_bonus_unlocked,
+            compEarningsTotal: parseFloat(user.comp_earnings_total || 0),
+            starterCompId: user.starter_comp_id || null,
+            starterEarningsThreshold: 50
         });
-        
+
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -3023,9 +3054,10 @@ app.post('/strava/webhook', async (req, res) => {
         }
         
         const distanceMiles = distanceMeters / 1609.34; // meters to miles
+        const activityMovingTime = parseInt(activity.moving_time) || 0;
         const goalMiles = runObjective ? runObjective.target_value : 0; // 0 if only in competition (no individual goal)
         
-        console.log(`🏃 Run detected: ${distanceMiles.toFixed(2)} miles (goal: ${goalMiles} miles)`);
+        console.log(`🏃 Run detected: ${distanceMiles.toFixed(2)} miles, ${activityMovingTime}s moving time (goal: ${goalMiles} miles)`);
         
         // Use user's timezone to determine "today"
         const today = getTodayForTimezone(user.timezone);
@@ -3036,7 +3068,7 @@ app.post('/strava/webhook', async (req, res) => {
         // Note: completed_count stores raw miles (e.g. 5.23) — the app reads this directly as todayRunDistance
         const { data: existingRunSession } = await supabase
             .from('objective_sessions')
-            .select('id, completed_count')
+            .select('id, completed_count, moving_time_seconds')
             .eq('user_id', user.id)
             .eq('session_date', today)
             .eq('objective_type', 'run')
@@ -3044,13 +3076,15 @@ app.post('/strava/webhook', async (req, res) => {
         
         let sessionError;
         if (existingRunSession) {
-            // Accumulate distance from multiple runs in the same day
+            // Accumulate distance and moving time from multiple runs in the same day
             const newCompleted = parseFloat((existingRunSession.completed_count || 0)) + runMiles;
             const newRounded = parseFloat(newCompleted.toFixed(2));
+            const newMovingTime = (existingRunSession.moving_time_seconds || 0) + activityMovingTime;
             const { error } = await supabase
                 .from('objective_sessions')
                 .update({
                     completed_count: newRounded,
+                    moving_time_seconds: newMovingTime,
                     status: goalMiles > 0 && newRounded >= goalMiles ? 'completed' : (goalMiles === 0 ? 'completed' : 'pending')
                 })
                 .eq('id', existingRunSession.id);
@@ -3065,6 +3099,7 @@ app.post('/strava/webhook', async (req, res) => {
                     objective_type: 'run',
                     target_count: goalMiles,
                     completed_count: runMiles,
+                    moving_time_seconds: activityMovingTime,
                     status: isComplete ? 'completed' : 'pending',
                     deadline: user.objective_deadline || '23:59:00',
                     payout_amount: user.missed_goal_payout || 0,
@@ -3127,12 +3162,14 @@ app.post('/strava/webhook', async (req, res) => {
                     const seededCents = Math.round((parseFloat(comp.seeded_amount) || 0) * 100);
                     const poolCents = Math.round(buyIn * 100) * (allParticipants?.length || 0) + seededCents;
                     
-                    // Award pool to winner
+                    // Award pool to winner — applyCompPayout handles starter-bonus
+                    // lock + unlock-at-$50 logic.
+                    let racePayoutResult = { lockedToBonus: false, unlocked: false };
                     if (poolCents > 0) {
-                        const { data: winnerUser } = await supabase.from('users').select('balance_cents').eq('id', user.id).single();
-                        const newBal = (winnerUser?.balance_cents || 0) + poolCents;
-                        await supabase.from('users').update({ balance_cents: newBal }).eq('id', user.id);
-                        console.log(`💰 Race payout: $${(poolCents/100).toFixed(2)} to ${user.id}${seededCents > 0 ? ` (includes $${(seededCents/100).toFixed(2)} seeded)` : ''}`);
+                        racePayoutResult = await applyCompPayout(user.id, poolCents, comp);
+                        if (seededCents > 0) {
+                            console.log(`   (race pool included $${(seededCents/100).toFixed(2)} seeded)`);
+                        }
                     }
                     
                     // Mark competition completed
@@ -4002,6 +4039,56 @@ app.get("/objectives/today/:userId", optionalAuth, async (req, res) => {
     }
 });
 
+// Past 7 days objective history — one entry per day, collapsed across
+// objective types. A day is "completed" if ALL sessions for that day are
+// completed; "missed" if any are missed and none are still pending;
+// "pending" if today's session is still in progress.
+app.get("/objectives/history/:userId", optionalAuth, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const days = parseInt(req.query.days) || 7;
+
+        const { data: userData } = await supabase.from("users").select("timezone").eq("id", userId).single();
+        const tz = userData?.timezone || "America/Los_Angeles";
+        const today = getTodayForTimezone(tz);
+
+        // Build date range: today - (days-1) ... today
+        const dates = [];
+        for (let i = days - 1; i >= 0; i--) {
+            const d = new Date(today + "T00:00:00");
+            d.setDate(d.getDate() - i);
+            dates.push(d.toISOString().split("T")[0]);
+        }
+
+        const { data: sessions, error } = await supabase
+            .from("objective_sessions")
+            .select("session_date, status")
+            .eq("user_id", userId)
+            .in("session_date", dates);
+
+        if (error) return res.status(400).json({ error: error.message });
+
+        // Group by date → derive a single status per day
+        const byDate = {};
+        for (const s of (sessions || [])) {
+            if (!byDate[s.session_date]) byDate[s.session_date] = [];
+            byDate[s.session_date].push(s.status);
+        }
+
+        const result = dates.map(date => {
+            const statuses = byDate[date] || [];
+            if (statuses.length === 0) return { date, status: "none" };
+            if (statuses.every(s => s === "completed")) return { date, status: "completed" };
+            if (statuses.some(s => s === "missed")) return { date, status: "missed" };
+            return { date, status: "pending" };
+        });
+
+        res.json({ days: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Mark objective as completed
 app.post("/objectives/complete/:userId", optionalAuth, async (req, res) => {
     try {
@@ -4815,6 +4902,159 @@ app.post("/admin/charity-payout/:charityName", requireCronSecret, async (req, re
 // -----------------------------------------------------------------------------
 
 // Create a competition (LOBBY — no money deducted, status = pending)
+// ─────────────────────────────────────────────────────────────────────────────
+// Starter competition: a 1-mile race comp seeded with $10, auto-created for
+// every new user. Solo (max_participants = 1), so it bypasses the regular
+// 2-runner minimum at /compete/start. Strava-required check still applies.
+//
+// Idempotent: if the user already has a starter_comp_id, no-op.
+// Returns the comp row (or null on no-op / failure).
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Centralized comp payout: handles the starter-bonus lock + the $50 unlock.
+//
+//   If the comp is the starter and the winner is its creator → the prize lands
+//   in users.starter_bonus_amount (NOT balance). Acts as the "locked" $10.
+//
+//   For any other comp win → balance increases + comp_earnings_total increases.
+//   When comp_earnings_total crosses $50, the locked starter bonus transfers
+//   to balance and starter_bonus_unlocked flips true (one-shot).
+//
+// Returns { lockedToBonus, unlocked, newEarningsTotal } so callers can
+// surface celebration / push-notification triggers downstream.
+// ─────────────────────────────────────────────────────────────────────────────
+async function applyCompPayout(userId, payoutCents, comp) {
+    const result = { lockedToBonus: false, unlocked: false, newEarningsTotal: 0 };
+    if (!userId || payoutCents <= 0) return result;
+
+    const { data: user } = await supabase
+        .from('users')
+        .select('balance_cents, starter_bonus_amount, starter_bonus_unlocked, comp_earnings_total')
+        .eq('id', userId)
+        .single();
+    if (!user) return result;
+
+    const isStarter  = !!comp?.is_starter;
+    const isCreator  = comp?.creator_user_id === userId;
+    const payoutDollars = payoutCents / 100;
+
+    // 1) Starter comp win → route prize to starter_bonus_amount, NOT balance
+    if (isStarter && isCreator) {
+        await supabase
+            .from('users')
+            .update({ starter_bonus_amount: payoutDollars })
+            .eq('id', userId);
+        console.log(`🎯 STARTER WIN: $${payoutDollars} locked as starter_bonus_amount for ${userId}`);
+        result.lockedToBonus = true;
+        return result;
+    }
+
+    // 2) Any other comp win → credit balance + track toward unlock
+    const currentEarnings = parseFloat(user.comp_earnings_total || 0);
+    const newEarningsTotal = currentEarnings + payoutDollars;
+    const lockedBonus = parseFloat(user.starter_bonus_amount || 0);
+
+    let updateFields = {
+        balance_cents: (user.balance_cents || 0) + payoutCents,
+        comp_earnings_total: newEarningsTotal
+    };
+
+    // Unlock threshold met? Transfer the locked $10 into balance.
+    if (!user.starter_bonus_unlocked && lockedBonus > 0 && newEarningsTotal >= 50) {
+        const lockedCents = Math.round(lockedBonus * 100);
+        updateFields.balance_cents += lockedCents;
+        updateFields.starter_bonus_amount = 0;
+        updateFields.starter_bonus_unlocked = true;
+        result.unlocked = true;
+    }
+
+    await supabase.from('users').update(updateFields).eq('id', userId);
+    console.log(
+        `💰 COMP PAYOUT: $${payoutDollars.toFixed(2)} to ${userId} ` +
+        `(earnings → $${newEarningsTotal.toFixed(2)})` +
+        (result.unlocked ? ' [STARTER BONUS UNLOCKED 🎉]' : '')
+    );
+
+    result.newEarningsTotal = newEarningsTotal;
+    return result;
+}
+
+async function createStarterCompetition(userId) {
+    if (!userId) return null;
+
+    // Idempotency check — bail if this user already has a starter
+    const { data: existingUser } = await supabase
+        .from('users')
+        .select('starter_comp_id, starter_bonus_unlocked')
+        .eq('id', userId)
+        .single();
+
+    if (existingUser?.starter_comp_id) return null;
+
+    // Generate a 6-char invite code (kept private; user just starts it)
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let inviteCode = '';
+    for (let i = 0; i < 6; i++) inviteCode += chars.charAt(Math.floor(Math.random() * chars.length));
+
+    const today = new Date();
+    const startDate = today.toISOString().split('T')[0];
+
+    const { data: comp, error: compErr } = await supabase
+        .from('competitions')
+        .insert({
+            creator_user_id: userId,
+            name: 'Your First Mile',
+            objective_type: 'run',
+            scoring_type: 'race',
+            start_date: startDate,
+            end_date: null,            // race comps have no fixed end
+            status: 'active',           // auto-started so the user just needs to run
+            invite_code: inviteCode,
+            target_value: 1.0,          // 1 mile
+            pushup_target: 0,
+            run_target: 1.0,
+            buy_in_amount: 0,
+            seeded_amount: 10,          // platform-funded $10 prize
+            duration_days: null,
+            is_starter: true,
+            max_participants: 1,
+            started_at: today.toISOString()
+        })
+        .select()
+        .single();
+
+    if (compErr || !comp) {
+        console.error('createStarterCompetition: insert failed', compErr);
+        return null;
+    }
+
+    // Auto-join the user as the only participant (no buy-in lock — it's free)
+    await supabase
+        .from('competition_participants')
+        .insert({
+            competition_id: comp.id,
+            user_id: userId,
+            status: 'active',
+            buy_in_locked: false,
+            buy_in_amount: 0
+        });
+
+    // Stamp the comp id on the user so we can find it again + flag the bonus
+    // as locked until they hit the $50 earnings threshold from other comps.
+    await supabase
+        .from('users')
+        .update({
+            starter_comp_id: comp.id,
+            starter_bonus_unlocked: false,
+            starter_bonus_amount: 0,
+            comp_earnings_total: 0
+        })
+        .eq('id', userId);
+
+    console.log(`🎯 Starter competition created for user ${userId}: code ${inviteCode}`);
+    return comp;
+}
+
 app.post('/compete/create', optionalAuth, async (req, res) => {
     try {
         const { userId, name, objectiveType, scoringType, durationDays, buyInAmount, targetValue, pushupTarget, runTarget, seededAmount } = req.body;
@@ -5322,6 +5562,7 @@ app.get('/compete/user/:userId', optionalAuth, async (req, res) => {
             seededAmount: parseFloat(comp.seeded_amount) || 0,
             durationDays: comp.duration_days,
             isRace: comp.scoring_type === 'race',
+            isStarter: !!comp.is_starter,
             creatorUserId: comp.creator_user_id,
             creatorName: comp.creator?.full_name || 'Unknown',
             participantCount: countByComp[comp.id] || 0,
@@ -5369,10 +5610,12 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
         const userIds = (participants || []).map(p => p.user_id);
         let allSessionsQuery = supabase
             .from('objective_sessions')
-            .select('user_id, status, completed_count, target_count, session_date, objective_type')
+            .select('user_id, status, completed_count, target_count, session_date, objective_type, moving_time_seconds')
             .in('user_id', userIds)
-            .gte('session_date', competition.start_date)
-            .lte('session_date', competition.end_date);
+            .gte('session_date', competition.start_date);
+        if (competition.end_date) {
+            allSessionsQuery = allSessionsQuery.lte('session_date', competition.end_date);
+        }
         
         if (competition.objective_type !== 'both') {
             allSessionsQuery = allSessionsQuery.eq('objective_type', competition.objective_type);
@@ -5391,6 +5634,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
             let score = 0;
             let daysCompleted = 0;
             let totalCount = 0;
+            let totalMovingTime = 0;
             let currentStreak = 0;
             
             const allSessions = sessionsByUser[p.user_id] || [];
@@ -5421,6 +5665,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                     byDate[s.session_date][s.objective_type] = { ...s, _adjustedCount: count };
                     const pts = s.objective_type === 'run' ? count * 100 : count;
                     totalCount += pts;
+                    if (s.objective_type === 'run') totalMovingTime += (s.moving_time_seconds || 0);
                 }
                 const sortedDates = Object.keys(byDate).sort();
                 for (const date of sortedDates) {
@@ -5442,6 +5687,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                         if (s.objective_type === 'run') count = Math.max(0, count - bRun);
                     }
                     totalCount += count;
+                    if (s.objective_type === 'run') totalMovingTime += (s.moving_time_seconds || 0);
                     if (meetsCompTarget(s, count)) {
                         daysCompleted++;
                         currentStreak++;
@@ -5482,6 +5728,7 @@ app.get('/compete/:competitionId/leaderboard', async (req, res) => {
                 score: Math.round(score * 100) / 100,
                 daysCompleted,
                 totalCount: Math.round(totalCount * 100) / 100,
+                totalMovingTimeSeconds: totalMovingTime,
                 streak: currentStreak,
                 todayProgress
             };
@@ -5698,23 +5945,21 @@ app.post('/compete/check-completed', requireCronSecret, async (req, res) => {
             
             if (totalPoolCents > 0 && winners.length > 0) {
                 const splitCents = Math.floor(totalPoolCents / winners.length);
-                
+
                 for (const winner of winners) {
-                    const { data: winnerUser } = await supabase
-                        .from('users').select('balance_cents').eq('id', winner.userId).single();
-                    const newBalance = (winnerUser?.balance_cents || 0) + splitCents;
-                    await supabase.from('users').update({ balance_cents: newBalance }).eq('id', winner.userId);
-                    
+                    // applyCompPayout handles starter-bonus lock + $50 unlock.
+                    await applyCompPayout(winner.userId, splitCents, comp);
+
                     await supabase.from('competition_payouts').insert({
                         competition_id: comp.id,
                         winner_user_id: winner.userId,
                         pool_amount: splitCents / 100,
                         participant_count: participants.length
                     });
-                    
+
                     console.log(`🏆 PAYOUT: $${(splitCents/100).toFixed(2)} to ${winner.name} (${winner.userId}) for "${comp.name}"${winners.length > 1 ? ` (split ${winners.length} ways)` : ''}${seededCents > 0 ? ` (includes $${(seededCents/100).toFixed(2)} seeded)` : ''}`);
                 }
-                
+
                 payoutDone = true;
             } else if (totalPoolCents > 0 && winners.length === 0) {
                 // Nobody scored — refund buy-ins only (seeded money is not refunded)

@@ -1,7 +1,7 @@
 import SwiftUI
 import StripePaymentSheet
 
-// MARK: - Onboarding Flow (v2)
+// MARK: - Onboarding Flow (v3 — Friends & Competition Focus)
 
 struct OnboardingView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -19,24 +19,14 @@ struct OnboardingView: View {
     @State private var currentPage = 0
     @State private var navigateForward = true
 
-    @State private var selectedObjective = "run"
-    @State private var fitnessLevel = ""
-    @State private var obstacles: Set<String> = []
-    @State private var morningStruggle = ""
-    @State private var motivationDriver = ""
-    @State private var hasFriends = ""
-    @State private var competitiveness = ""
-    @State private var runTarget = 1.0
-    @State private var deadlineHour = 18
-
-    // "yes" = save the recommended goal/deadline as their daily personal
-    // objective; "nil" = user hasn't picked yet (Start/Skip stay locked).
-    // "no" = blank-slate home screen (no objectives, no deadline).
-    @State private var dailyGoalChoice: String? = nil
+    // Interactive state for new screens
+    @State private var selectedMatchType: String = ""
+    @State private var selectedBuyIn: Double = 10
+    @State private var wantsDailyStakes: String? = nil
+    @State private var joinCodeText: String = ""
 
     @State private var showCreateAccountSheet = false
     @State private var showSignInSheet = false
-    @State private var accountAction = ""
     @State private var showCreateCompetition = false
     @State private var isCheckingStrava = false
     @State private var stravaJustLinked = false
@@ -49,16 +39,11 @@ struct OnboardingView: View {
     @State private var continueScale: CGFloat = 1.0
     @State private var stravaRingScale: CGFloat = 0
     @State private var stravaRingOpacity: Double = 0.6
+    @State private var potAnimating = false
 
-    private let totalPages = 15
+    private let totalPages = 11
     private let gold = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
     private let stravaOrange = Color(red: 0.988, green: 0.322, blue: 0.0)
-
-    private var needsMorningHelp: Bool {
-        morningStruggle == "every" || morningStruggle == "some"
-    }
-
-    private var wantsRun: Bool { true }
 
     // MARK: - Body
 
@@ -100,9 +85,7 @@ struct OnboardingView: View {
                         .padding(.horizontal, 24)
                         .padding(.bottom, 20)
                 } else {
-                    finalButtons
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 20)
+                    Spacer().frame(height: 20)
                 }
             }
         }
@@ -131,14 +114,8 @@ struct OnboardingView: View {
         }) {
             CreateCompetitionView(onCreated: { })
         }
-        .onChange(of: isSignedIn) { _, _ in
-            // Daily-goal settings are no longer auto-written at account
-            // creation. They're written once the user makes the explicit
-            // Yes/No choice on the final onboarding screen — see
-            // `finishOnboarding` and `handleCompetitionCTA`.
-        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && currentPage == 13 && !userId.isEmpty && !stravaConnected {
+            if phase == .active && currentPage == 9 && !userId.isEmpty && !stravaConnected {
                 checkStravaStatus()
             }
         }
@@ -168,12 +145,10 @@ struct OnboardingView: View {
     private var continueButton: some View {
         Button(action: advancePage) {
             ZStack {
-                // Background track
                 RoundedRectangle(cornerRadius: 14)
                     .fill(canContinue ? gold : Color.gray.opacity(0.3))
 
-                // Gold fill animation for Strava delay
-                if currentPage == 13 && !stravaConnected && !stravaDelayComplete {
+                if currentPage == 9 && !stravaConnected && !stravaDelayComplete {
                     GeometryReader { geo in
                         RoundedRectangle(cornerRadius: 14)
                             .fill(gold)
@@ -203,51 +178,20 @@ struct OnboardingView: View {
         }
     }
 
-    private var finalButtons: some View {
-        VStack(spacing: 14) {
-            Button(action: handleCompetitionCTA) {
-                HStack(spacing: 8) {
-                    Image(systemName: "trophy.fill")
-                    Text("Start Your First Competition")
-                }
-                .font(.system(.headline, design: .rounded))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(dailyGoalChoice == nil ? Color.gray.opacity(0.3) : gold)
-                )
-            }
-            .disabled(dailyGoalChoice == nil)
-
-            Button(action: finishOnboarding) {
-                Text("Skip for now")
-                    .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(dailyGoalChoice == nil ? Color.gray.opacity(0.4) : Color.gray)
-            }
-            .disabled(dailyGoalChoice == nil)
-        }
-        .animation(.easeInOut(duration: 0.2), value: dailyGoalChoice)
-    }
-
     // MARK: - Validation
 
     private var canContinue: Bool {
         switch currentPage {
-        case 0: return true
-        case 1: return !fitnessLevel.isEmpty
-        case 2: return true
-        case 3: return !obstacles.isEmpty
-        case 4: return !morningStruggle.isEmpty
-        case 5: return !motivationDriver.isEmpty
-        case 6: return true
-        case 7: return !hasFriends.isEmpty
-        case 8: return !competitiveness.isEmpty
-        case 9: return true
-        case 10, 11: return true
-        case 12: return isSignedIn
-        case 13: return stravaConnected || stravaDelayComplete
+        case 0: return true                                  // Welcome
+        case 1: return true                                  // Friends hook
+        case 2: return true                                  // How it works
+        case 3: return true                                   // Pick format (browse only)
+        case 4: return true                                  // Set stakes
+        case 5: return true                                  // $10 on us
+        case 6: return true                                  // Strava explainer
+        case 7: return wantsDailyStakes != nil                // Daily stakes choice
+        case 8: return isSignedIn                             // Account
+        case 9: return stravaConnected || stravaDelayComplete // Strava connect
         default: return true
         }
     }
@@ -285,9 +229,8 @@ struct OnboardingView: View {
                 }
             }
         }
-        // Start Strava delay timer when landing on that page
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            if self.currentPage == 13 && !self.stravaConnected {
+            if self.currentPage == 9 && !self.stravaConnected {
                 self.startStravaDelay()
             }
         }
@@ -310,8 +253,7 @@ struct OnboardingView: View {
     private func writeObjectiveSettings() {
         let defaults = UserDefaults.standard
 
-        if dailyGoalChoice == "no" {
-            // Blank-slate path: no daily objectives, no deadline, no schedule.
+        if wantsDailyStakes != "yes" {
             defaults.set(false, forKey: "pushupsEnabled")
             defaults.set(false, forKey: "pushupsIsSet")
             defaults.set(false, forKey: "runEnabled")
@@ -324,49 +266,40 @@ struct OnboardingView: View {
             return
         }
 
-        // "yes" path (default behavior): personalized run goal + deadline.
         defaults.set(false, forKey: "pushupsEnabled")
         defaults.set(false, forKey: "pushupsIsSet")
         defaults.set(true, forKey: "runEnabled")
         defaults.set(true, forKey: "runIsSet")
         defaults.set(0, forKey: "pushupObjective")
-        defaults.set(runTarget, forKey: "runDistance")
+        defaults.set(2.0, forKey: "runDistance")
         defaults.set("Daily", forKey: "scheduleType")
         defaults.set(true, forKey: "scheduleIsSet")
 
-        let comps = DateComponents(hour: deadlineHour, minute: 0)
+        let comps = DateComponents(hour: 18, minute: 0)
         if let date = Calendar.current.nextDate(after: Date(), matching: comps, matchingPolicy: .nextTime) {
-            defaults.set(date, forKey: "objectiveDeadline")
+            defaults.set(date.timeIntervalSince1970, forKey: "objectiveDeadline")
         }
     }
 
     private func syncObjectivesToBackend() {
         guard !userId.isEmpty else { return }
 
-        let choice = dailyGoalChoice
         let body: [String: Any]
-        if choice == "no" {
-            // Blank slate: explicitly disable everything on the server too so
-            // no daily session ever gets created for this user.
+        if wantsDailyStakes != "yes" {
             body = [
-                "pushups_enabled": false,
-                "pushups_count": 0,
-                "run_enabled": false,
-                "run_distance": 0,
+                "pushups_enabled": false, "pushups_count": 0,
+                "run_enabled": false, "run_distance": 0,
                 "objective_schedule": "daily",
                 "objective_deadline": NSNull(),
                 "timezone": TimeZone.current.identifier
             ]
         } else {
-            // "yes" path: personalized run goal + deadline from onboarding.
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            let deadlineDate = Calendar.current.date(from: DateComponents(hour: deadlineHour, minute: 0)) ?? Date()
+            let deadlineDate = Calendar.current.date(from: DateComponents(hour: 18, minute: 0)) ?? Date()
             body = [
-                "pushups_enabled": false,
-                "pushups_count": 0,
-                "run_enabled": true,
-                "run_distance": runTarget,
+                "pushups_enabled": false, "pushups_count": 0,
+                "run_enabled": true, "run_distance": 2.0,
                 "objective_schedule": "daily",
                 "objective_deadline": formatter.string(from: deadlineDate),
                 "timezone": TimeZone.current.identifier
@@ -374,32 +307,25 @@ struct OnboardingView: View {
         }
 
         guard let url = URL(string: "https://api.runmatch.io/objectives/settings/\(userId)") else { return }
-
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         AuthToken.applyTo(&request)
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
         URLSession.shared.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                print("✅ Onboarding objectives synced (\(choice ?? "default"))")
+                print("✅ Onboarding objectives synced")
             }
         }.resume()
     }
 
     private func finishOnboarding() {
-        // Both Skip and Start now flow through here AFTER the user has
-        // explicitly picked Yes/No on the daily-goal selector, so we always
-        // write+sync settings (the body of those functions branches on
-        // dailyGoalChoice).
         writeObjectiveSettings()
         syncObjectivesToBackend()
         hasCompletedOnboarding = true
     }
 
-    private func handleCompetitionCTA() {
-        // Persist the daily-goal choice before opening the competition sheet.
+    private func handleCreateMatch() {
         writeObjectiveSettings()
         syncObjectivesToBackend()
         showCreateCompetition = true
@@ -417,7 +343,6 @@ struct OnboardingView: View {
     private func checkStravaStatus() {
         guard !userId.isEmpty else { return }
         guard let url = URL(string: "https://api.runmatch.io/strava/status/\(userId)") else { return }
-
         isCheckingStrava = true
         var _req = URLRequest(url: url)
         AuthToken.applyTo(&_req)
@@ -426,7 +351,6 @@ struct OnboardingView: View {
                 isCheckingStrava = false
                 guard let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-
                 let connected = json["connected"] as? Bool ?? false
                 if connected && !stravaConnected {
                     stravaConnected = true
@@ -447,20 +371,16 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 switch page {
                 case 0:  welcomeScreen
-                case 1:  fitnessLevelScreen
-                case 2:  reaffirmation1
-                case 3:  obstaclesScreen
-                case 4:  morningScreen
-                case 5:  motivationScreen
-                case 6:  reaffirmation2
-                case 7:  friendsScreen
-                case 8:  competitivenessScreen
-                case 9:  reaffirmation3
-                case 10: targetScreen
-                case 11: deadlineScreen
-                case 12: accountScreen
-                case 13: stravaScreen
-                case 14: finalScreen
+                case 1:  friendsHookScreen
+                case 2:  howItWorksScreen
+                case 3:  pickFormatScreen
+                case 4:  setStakesScreen
+                case 5:  freeMatchScreen
+                case 6:  stravaExplainerScreen
+                case 7:  dailyStakesScreen
+                case 8:  accountScreen
+                case 9:  stravaConnectScreen
+                case 10: challengeFriendsScreen
                 default: EmptyView()
                 }
             }
@@ -470,11 +390,10 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Screen 0: Welcome
+    // MARK: - Screen 0: Welcome (kept from original)
 
     private var welcomeScreen: some View {
         ZStack {
-            // Ambient gold glow behind logo
             Circle()
                 .fill(gold.opacity(0.08))
                 .frame(width: 240, height: 240)
@@ -530,536 +449,582 @@ struct OnboardingView: View {
         .offset(x: cardStagger[safe: index] == true ? 0 : 20)
     }
 
-    // MARK: - Screen 1: Fitness Level
+    // MARK: - Screen 1: "Your friends are betting they can outrun you."
 
-    private var fitnessLevelScreen: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            ZStack(alignment: .leading) {
-                // Ambient heartbeat line
-                HeartbeatLine(gold: gold)
-                    .opacity(screenAppeared ? 0.25 : 0)
-                    .animation(.easeIn(duration: 0.8), value: screenAppeared)
+    private var friendsHookScreen: some View {
+        VStack(spacing: 28) {
+            Spacer().frame(height: 16)
 
-                screenHeader(title: "How would you describe your fitness level?", subtitle: "This helps us set the right starting point.")
+            VStack(spacing: 6) {
+                Text("Your friends are betting")
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Text("they can outrun you.")
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .foregroundStyle(gold)
+            }
+            .multilineTextAlignment(.center)
+            .opacity(screenAppeared ? 1 : 0)
+            .offset(y: screenAppeared ? 0 : 10)
+            .animation(.easeOut(duration: 0.5), value: screenAppeared)
+
+            VStack(spacing: 6) {
+                chatBubble(name: "Jordan", message: "You're going down this week 💪", isMe: false, index: 0)
+                chatBubble(name: "Sarah", message: "I'll put $25 on it", isMe: false, index: 1)
+                chatBubble(name: nil, message: "You're on 😤", isMe: true, index: 2)
+                chatBubble(name: "Mike", message: "Bet. Put it on RunMatch 🏆", isMe: false, index: 3)
             }
 
-            VStack(spacing: 12) {
-                animatedCard(index: 0) {
-                    optionCard(title: "Just getting started", icon: "leaf", isSelected: fitnessLevel == "beginner") {
-                        fitnessLevel = "beginner"; runTarget = 0.5
-                    }
-                }
-                animatedCard(index: 1) {
-                    optionCard(title: "Somewhat active", icon: "figure.walk", isSelected: fitnessLevel == "somewhat") {
-                        fitnessLevel = "somewhat"; runTarget = 1.0
-                    }
-                }
-                animatedCard(index: 2) {
-                    optionCard(title: "Consistently active", icon: "figure.run", isSelected: fitnessLevel == "consistent") {
-                        fitnessLevel = "consistent"; runTarget = 2.0
-                    }
-                }
-                animatedCard(index: 3) {
-                    optionCard(title: "Athlete", icon: "bolt.fill", isSelected: fitnessLevel == "athlete") {
-                        fitnessLevel = "athlete"; runTarget = 4.0
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Screen 2: Reaffirmation 1
-
-    private var reaffirmation1: some View {
-        VStack(spacing: 32) {
-            Spacer().frame(height: 20)
-
-            Text("People with specific goals are 2-3x more likely to follow through")
-                .font(.system(.title2, design: .rounded, weight: .bold))
-                .foregroundStyle(Color.black)
-                .multilineTextAlignment(.center)
-                .opacity(screenAppeared ? 1 : 0)
-                .offset(y: screenAppeared ? 0 : 10)
-                .animation(.easeOut(duration: 0.5), value: screenAppeared)
-
-            HStack(alignment: .bottom, spacing: 32) {
-                VStack(spacing: 8) {
-                    ZStack(alignment: .top) {
-                        RoundedRectangle(cornerRadius: 8).fill(gold)
-                            .frame(width: 64, height: screenAppeared ? 160 : 0)
-                            .animation(.spring(response: 0.8, dampingFraction: 0.6).delay(0.3), value: screenAppeared)
-                        // Floating "2-3x" label
-                        Text("2-3x")
-                            .font(.system(.caption, design: .rounded, weight: .bold))
-                            .foregroundStyle(gold)
-                            .offset(y: screenAppeared ? -24 : 0)
-                            .opacity(screenAppeared ? 1 : 0)
-                            .animation(.easeOut(duration: 0.6).delay(1.0), value: screenAppeared)
-                    }
-                    Text("Specific\nGoal").font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(Color.black).multilineTextAlignment(.center)
-                }
-                VStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.25))
-                        .frame(width: 64, height: screenAppeared ? 60 : 0)
-                        .animation(.spring(response: 0.8, dampingFraction: 0.6).delay(0.5), value: screenAppeared)
-                    Text("Vague\nIntention").font(.system(.caption, design: .rounded, weight: .medium))
-                        .foregroundStyle(Color.gray).multilineTextAlignment(.center)
-                }
-            }
-
-            Text("You've already taken the first step.\nRunMatch will help you lock it in.")
+            Text("Challenge friends to running matches.\nWinner takes the pot.")
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(Color.gray)
                 .multilineTextAlignment(.center)
                 .opacity(screenAppeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.5).delay(0.8), value: screenAppeared)
+                .animation(.easeOut(duration: 0.5).delay(0.7), value: screenAppeared)
         }
     }
 
-    // MARK: - Screen 4: Obstacles
+    private func chatBubble(name: String?, message: String, isMe: Bool, index: Int) -> some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            if isMe { Spacer(minLength: 60) }
+            if !isMe {
+                Circle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 28, height: 28)
+                    .overlay(
+                        Text(String((name ?? "?").prefix(1)))
+                            .font(.system(.caption2, design: .rounded, weight: .bold))
+                            .foregroundStyle(Color.gray)
+                    )
+            }
+            VStack(alignment: isMe ? .trailing : .leading, spacing: 2) {
+                if let name, !isMe {
+                    Text(name)
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(Color.gray)
+                        .padding(.leading, 4)
+                }
+                Text(message)
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(isMe ? .white : Color.black)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(isMe ? gold : Color(UIColor.systemGray6))
+                    )
+            }
+            if !isMe { Spacer(minLength: 60) }
+        }
+        .opacity(cardStagger[safe: index] == true ? 1 : 0)
+        .offset(y: cardStagger[safe: index] == true ? 0 : 10)
+    }
 
-    private var obstaclesScreen: some View {
+    // MARK: - Screen 2: "Here's how it works."
+
+    @State private var loopRotation: Double = 0
+
+    private var howItWorksScreen: some View {
+        VStack(spacing: 28) {
+            screenHeader(title: "Here's how it works.", subtitle: nil)
+
+            Spacer().frame(height: 8)
+
+            ZStack {
+                // Connecting ring
+                Circle()
+                    .stroke(gold.opacity(0.15), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .frame(width: 200, height: 200)
+                    .opacity(screenAppeared ? 1 : 0)
+                    .animation(.easeIn(duration: 0.6), value: screenAppeared)
+
+                // Rotating arc
+                Circle()
+                    .trim(from: 0, to: 0.12)
+                    .stroke(gold.opacity(0.6), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .frame(width: 200, height: 200)
+                    .rotationEffect(.degrees(loopRotation))
+
+                // Three nodes positioned on the circle
+                loopNode(icon: "trophy.fill", label: "Match", angle: -90, index: 0)
+                loopNode(icon: "figure.run", label: "Run", angle: 30, index: 1)
+                loopNode(icon: "dollarsign.circle.fill", label: "Win", angle: 150, index: 2)
+
+                // Curved arrows between nodes
+                ForEach([(-90.0, 30.0), (30.0, 150.0), (150.0, 270.0)], id: \.0) { from, to in
+                    Circle()
+                        .trim(from: CGFloat((from + 100) / 360), to: CGFloat((to - 10) / 360))
+                        .stroke(gold.opacity(screenAppeared ? 0.25 : 0), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [6, 4]))
+                        .frame(width: 200, height: 200)
+                        .animation(.easeOut(duration: 0.8).delay(0.5), value: screenAppeared)
+                }
+            }
+            .frame(height: 260)
+            .onAppear {
+                withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
+                    loopRotation = 360
+                }
+            }
+
+            // Labels below
+            VStack(spacing: 14) {
+                loopLabel(number: "1", text: "Start a match & set the stakes", index: 0)
+                loopLabel(number: "2", text: "Everyone runs — tracked by Strava", index: 1)
+                loopLabel(number: "3", text: "Winner takes the pot", index: 2)
+            }
+        }
+    }
+
+    private func loopNode(icon: String, label: String, angle: Double, index: Int) -> some View {
+        let r: CGFloat = 100
+        let rad = angle * .pi / 180
+        let x = cos(rad) * r
+        let y = sin(rad) * r
+        return VStack(spacing: 4) {
+            ZStack {
+                Circle().fill(gold).frame(width: 52, height: 52)
+                    .shadow(color: gold.opacity(0.3), radius: 8, y: 3)
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(label)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
+                .foregroundStyle(Color.black)
+        }
+        .offset(x: x, y: y)
+        .scaleEffect(cardStagger[safe: index] == true ? 1 : 0.3)
+        .opacity(cardStagger[safe: index] == true ? 1 : 0)
+    }
+
+    private func loopLabel(number: String, text: String, index: Int) -> some View {
+        HStack(spacing: 12) {
+            Text(number)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(gold))
+            Text(text)
+                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                .foregroundStyle(Color.black)
+            Spacer()
+        }
+        .opacity(cardStagger[safe: index] == true ? 1 : 0)
+        .offset(x: cardStagger[safe: index] == true ? 0 : 15)
+    }
+
+    // MARK: - Screen 3: "Pick your format."
+
+    @State private var dropIn: [Bool] = [false, false, false]
+
+    private var pickFormatScreen: some View {
         VStack(alignment: .leading, spacing: 28) {
-            screenHeader(title: "What's kept you from being consistent?", subtitle: "Select all that apply.")
+            screenHeader(title: "Pick your competition.", subtitle: "Three ways to compete.")
 
-            VStack(spacing: 12) {
-                animatedCard(index: 0) {
-                    multiSelectCard(title: "Lack of motivation", icon: "battery.25percent",
-                                    isSelected: obstacles.contains("motivation")) { toggleObstacle("motivation") }
-                }
-                animatedCard(index: 1) {
-                    multiSelectCard(title: "No accountability", icon: "person.slash",
-                                    isSelected: obstacles.contains("accountability")) { toggleObstacle("accountability") }
-                }
-                animatedCard(index: 2) {
-                    multiSelectCard(title: "Busy schedule", icon: "clock",
-                                    isSelected: obstacles.contains("schedule")) { toggleObstacle("schedule") }
-                }
-                animatedCard(index: 3) {
-                    multiSelectCard(title: "Get bored running alone", icon: "person",
-                                    isSelected: obstacles.contains("bored")) { toggleObstacle("bored") }
-                }
-                animatedCard(index: 4) {
-                    multiSelectCard(title: "Start strong, then fall off", icon: "chart.line.downtrend.xyaxis",
-                                    isSelected: obstacles.contains("falloff")) { toggleObstacle("falloff") }
-                }
+            VStack(spacing: 18) {
+                matchTypeCard(type: "race", icon: "flag.checkered", title: "Race",
+                              desc: "First to hit the distance wins", example: "First to 10 miles wins $100")
+                    .opacity(dropIn[0] ? 1 : 0)
+                    .offset(y: dropIn[0] ? 0 : -60)
+                    .scaleEffect(dropIn[0] ? 1 : 0.85)
+
+                matchTypeCard(type: "cumulative", icon: "chart.bar.fill", title: "Most Miles",
+                              desc: "Highest total in the timeframe wins", example: "Most miles in 7 days takes the $75 pot")
+                    .opacity(dropIn[1] ? 1 : 0)
+                    .offset(y: dropIn[1] ? 0 : -60)
+                    .scaleEffect(dropIn[1] ? 1 : 0.85)
+
+                matchTypeCard(type: "consistency", icon: "flame.fill", title: "Streak",
+                              desc: "Hit your daily target every single day", example: "Miss a day and you're out")
+                    .opacity(dropIn[2] ? 1 : 0)
+                    .offset(y: dropIn[2] ? 0 : -60)
+                    .scaleEffect(dropIn[2] ? 1 : 0.85)
+            }
+        }
+        .onAppear { triggerDropCascade() }
+    }
+
+    private func triggerDropCascade() {
+        dropIn = [false, false, false]
+        for i in 0..<3 {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.65).delay(0.4 + Double(i) * 0.18)) {
+                dropIn[i] = true
             }
         }
     }
 
-    private func toggleObstacle(_ key: String) {
-        if obstacles.contains(key) { obstacles.remove(key) } else { obstacles.insert(key) }
+    private func matchTypeCard(type: String, icon: String, title: String, desc: String, example: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(gold)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(.body, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    Text(desc)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                }
+                Spacer()
+            }
+            Text("\"\(example)\"")
+                .font(.system(.caption, design: .rounded, weight: .medium))
+                .foregroundStyle(gold.opacity(0.8))
+                .italic()
+                .padding(.leading, 42)
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(gold.opacity(0.35), lineWidth: 1.5)
+        )
     }
 
-    // MARK: - Screen 5: Morning
+    // MARK: - Screen 4: "Set the stakes."
 
-    private var morningScreen: some View {
-        ZStack(alignment: .top) {
-            // Sunrise gradient ambient
-            LinearGradient(
-                colors: [
-                    Color(red: 0.15, green: 0.1, blue: 0.3).opacity(screenAppeared ? 0.08 : 0),
-                    Color(red: 0.95, green: 0.6, blue: 0.2).opacity(screenAppeared ? 0.1 : 0),
-                    Color.clear
-                ],
-                startPoint: .bottom,
-                endPoint: .top
+    @State private var runnerCount: Int = 0
+    @State private var stakesTimer: Timer? = nil
+
+    private var setStakesScreen: some View {
+        VStack(spacing: 28) {
+            screenHeader(title: "Set the stakes.", subtitle: "Everyone puts in. Winner takes all.")
+
+            Spacer().frame(height: 8)
+
+            // Runner cascade — figures fade in one by one
+            HStack(spacing: 8) {
+                ForEach(0..<6, id: \.self) { i in
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(i < runnerCount ? gold : Color.gray.opacity(0.12))
+                        .scaleEffect(i < runnerCount ? 1.0 : 0.7)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(Double(i) * 0.05), value: runnerCount)
+                }
+            }
+            .frame(height: 44)
+            .onAppear { startRunnerCascade() }
+            .onDisappear { stakesTimer?.invalidate(); stakesTimer = nil }
+
+            // Live math equation
+            VStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Text("$50")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.black)
+                    Text("×")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                    Text("\(max(1, runnerCount))")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.black)
+                        .contentTransition(.numericText())
+                    Text("=")
+                        .font(.system(.body, design: .rounded))
+                        .foregroundStyle(Color.gray)
+                    Text("$\(max(1, runnerCount) * 50)")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundStyle(gold)
+                        .contentTransition(.numericText())
+                }
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: runnerCount)
+
+                Text("pot")
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.gray)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(gold.opacity(0.06))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(gold.opacity(0.25), lineWidth: 1))
             )
-            .frame(height: 200)
-            .blur(radius: 30)
-            .animation(.easeIn(duration: 1.5), value: screenAppeared)
 
-            VStack(alignment: .leading, spacing: 28) {
-                screenHeader(title: "Do you struggle getting out of bed?", subtitle: "RunMatch was built to get runners out the door in the morning.")
+            Text("The more friends, the bigger the prize.")
+                .font(.system(.caption, design: .rounded, weight: .medium))
+                .foregroundStyle(Color.gray)
+                .opacity(screenAppeared ? 1 : 0)
+                .animation(.easeOut(duration: 0.4).delay(0.8), value: screenAppeared)
+        }
+    }
 
-                VStack(spacing: 12) {
-                    animatedCard(index: 0) {
-                        optionCard(title: "Every single morning", icon: "moon.zzz", isSelected: morningStruggle == "every") {
-                            morningStruggle = "every"; deadlineHour = 7
-                        }
-                    }
-                    animatedCard(index: 1) {
-                        optionCard(title: "Some days are rough", icon: "cloud.sun", isSelected: morningStruggle == "some") {
-                            morningStruggle = "some"; deadlineHour = 7
-                        }
-                    }
-                    animatedCard(index: 2) {
-                        optionCard(title: "Nah, I'm a morning person", icon: "sun.max.fill", isSelected: morningStruggle == "nah") {
-                            morningStruggle = "nah"; deadlineHour = 18
-                        }
+    private func startRunnerCascade() {
+        runnerCount = 0
+        stakesTimer?.invalidate()
+        var count = 0
+        stakesTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { timer in
+            count += 1
+            withAnimation { runnerCount = count }
+            if count >= 6 {
+                timer.invalidate()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation { self.runnerCount = 0 }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        self.startRunnerCascade()
                     }
                 }
             }
         }
     }
 
-    // MARK: - Screen 6: Motivation
+    // MARK: - Screen 5: "Your first $10 is on us."
 
-    private var motivationScreen: some View {
-        ZStack {
-            // Floating motivational icons
-            FloatingBubbles(gold: gold, appeared: screenAppeared)
-
-            VStack(alignment: .leading, spacing: 28) {
-                screenHeader(title: "What would keep you on track?", subtitle: "Pick what resonates most.")
-
-                VStack(spacing: 12) {
-                    animatedCard(index: 0) {
-                        optionCard(title: "Putting money on the line", icon: "dollarsign.circle", isSelected: motivationDriver == "money") {
-                            motivationDriver = "money"
-                        }
-                    }
-                    animatedCard(index: 1) {
-                        optionCard(title: "Competing with friends", icon: "trophy", isSelected: motivationDriver == "friends") {
-                            motivationDriver = "friends"
-                        }
-                    }
-                    animatedCard(index: 2) {
-                        optionCard(title: "A daily routine with a deadline", icon: "alarm", isSelected: motivationDriver == "routine") {
-                            motivationDriver = "routine"
-                        }
-                    }
-                    animatedCard(index: 3) {
-                        optionCard(title: "All of the above", icon: "star.fill", isSelected: motivationDriver == "all") {
-                            motivationDriver = "all"
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Screen 7: Reaffirmation 2
-
-    private var reaffirmation2: some View {
+    private var freeMatchScreen: some View {
         VStack(spacing: 32) {
             Spacer().frame(height: 20)
 
-            Text("Putting stakes on your goals works")
-                .font(.system(.title2, design: .rounded, weight: .bold))
-                .foregroundStyle(Color.black)
-                .multilineTextAlignment(.center)
+            Image(systemName: "gift.fill")
+                .font(.system(size: 52))
+                .foregroundStyle(gold)
+                .scaleEffect(screenAppeared ? 1 : 0.5)
                 .opacity(screenAppeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.5), value: screenAppeared)
+                .animation(.spring(response: 0.6, dampingFraction: 0.6), value: screenAppeared)
 
-            trendChartVisual
-
-            VStack(spacing: 6) {
-                Text("Up to 3x higher completion rate")
-                    .font(.system(.headline, design: .rounded))
-                    .foregroundStyle(gold)
-                Text("when financial accountability is involved.")
+            VStack(spacing: 8) {
+                Text("Your first $10 is on us.")
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Text("No buy-in. No catch.")
                     .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(Color.gray)
             }
             .multilineTextAlignment(.center)
             .opacity(screenAppeared ? 1 : 0)
-            .animation(.easeOut(duration: 0.5).delay(1.2), value: screenAppeared)
+            .offset(y: screenAppeared ? 0 : 8)
+            .animation(.easeOut(duration: 0.4).delay(0.2), value: screenAppeared)
+
+            // Starter comp card
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Your First Mile")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                            .foregroundStyle(.white)
+                        Text("Race · 1 mile · Free entry")
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    Spacer()
+                    Text("$10")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(gold)
+                    .shadow(color: gold.opacity(0.3), radius: 12, y: 6)
+            )
+            .opacity(screenAppeared ? 1 : 0)
+            .offset(y: screenAppeared ? 0 : 15)
+            .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.4), value: screenAppeared)
+
+            Text("Run 1 mile. Win $10. It's that simple.")
+                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                .foregroundStyle(gold)
+                .multilineTextAlignment(.center)
+                .opacity(screenAppeared ? 1 : 0)
+                .animation(.easeOut(duration: 0.4).delay(0.6), value: screenAppeared)
         }
     }
 
-    private var trendChartVisual: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    // MARK: - Screen 6: "Every mile tracked automatically."
+
+    @State private var stravaBubbles: [Bool] = [false, false, false]
+
+    private var stravaExplainerScreen: some View {
+        VStack(spacing: 28) {
+            screenHeader(title: "Every mile tracked automatically.", subtitle: "Link Strava and your GPS runs sync to all competitions. No manual logging.")
+
+            Spacer().frame(height: 4)
+
+            // Gold bubble cascade left to right
             HStack(spacing: 16) {
-                HStack(spacing: 4) {
-                    Circle().fill(gold).frame(width: 8, height: 8)
-                    Text("With stakes").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.black)
-                }
-                HStack(spacing: 4) {
-                    Circle().fill(Color.gray.opacity(0.4)).frame(width: 8, height: 8)
-                    Text("Willpower alone").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.gray)
-                }
+                stravaBubbleNode(icon: "play.fill", label: "Start on\nStrava", index: 0)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(gold.opacity(stravaBubbles[0] ? 0.5 : 0))
+                    .animation(.easeOut(duration: 0.3).delay(0.5), value: stravaBubbles[0])
+                stravaBubbleNode(icon: "figure.run", label: "Run your\nroute", index: 1)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(gold.opacity(stravaBubbles[1] ? 0.5 : 0))
+                    .animation(.easeOut(duration: 0.3).delay(0.7), value: stravaBubbles[1])
+                stravaBubbleNode(icon: "checkmark", label: "Miles sync\nto matches", index: 2)
             }
 
+            // Steps text
+            VStack(spacing: 10) {
+                stravaLine(number: "1", text: "Start a run on Strava", index: 0)
+                stravaLine(number: "2", text: "Run your route", index: 1)
+                stravaLine(number: "3", text: "Miles sync to all competitions", index: 2)
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(gold)
+                Text("All runs must be started and stopped on Strava to count")
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(gold)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(gold.opacity(0.08)))
+            .opacity(screenAppeared ? 1 : 0)
+            .animation(.easeOut(duration: 0.4).delay(0.8), value: screenAppeared)
+        }
+        .onAppear { triggerStravaCascade() }
+    }
+
+    private func triggerStravaCascade() {
+        stravaBubbles = [false, false, false]
+        for i in 0..<3 {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.3 + Double(i) * 0.25)) {
+                stravaBubbles[i] = true
+            }
+        }
+    }
+
+    private func stravaBubbleNode(icon: String, label: String, index: Int) -> some View {
+        VStack(spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.06)).frame(height: 180)
-
-                AnimatedTrendChart(gold: gold, appeared: screenAppeared)
-                    .frame(height: 180)
-
-                // Pulsing dot positioned at end of gold line: point (1.0, 0.10) with 16pt inset
-                GeometryReader { geo in
-                    let w = geo.size.width, h = geo.size.height, inset: CGFloat = 16
-                    let dotX = inset + 1.0 * (w - 2 * inset)
-                    let dotY = inset + 0.10 * (h - 2 * inset)
-                    Circle()
-                        .fill(gold)
-                        .frame(width: 10, height: 10)
-                        .shadow(color: gold.opacity(0.6), radius: 6)
-                        .scaleEffect(screenAppeared ? 1.3 : 0)
-                        .opacity(screenAppeared ? 1 : 0)
-                        .animation(.easeOut(duration: 0.4).delay(1.3), value: screenAppeared)
-                        .position(x: dotX, y: dotY)
-                }
-                .frame(height: 180)
+                Circle()
+                    .fill(gold)
+                    .frame(width: 60, height: 60)
+                    .shadow(color: gold.opacity(0.3), radius: 8, y: 3)
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.white)
             }
-
-            HStack {
-                Text("Week 1").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.gray)
-                Spacer()
-                Text("Week 8").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.gray)
-            }
-            .padding(.horizontal, 16)
-        }
-    }
-
-    // MARK: - Screen 8: Friends
-
-    private var friendsScreen: some View {
-        ZStack(alignment: .top) {
-            RunningBuddies(gold: gold, appeared: screenAppeared)
-                .frame(height: 40)
-                .padding(.top, -8)
-
-            VStack(alignment: .leading, spacing: 28) {
-                screenHeader(title: "Do you have friends who run?", subtitle: nil)
-
-                VStack(spacing: 12) {
-                    animatedCard(index: 0) {
-                        optionCard(title: "Yeah, a few", icon: "person.2", isSelected: hasFriends == "few") { hasFriends = "few" }
-                    }
-                    animatedCard(index: 1) {
-                        optionCard(title: "I've got a whole crew", icon: "person.3.fill", isSelected: hasFriends == "crew") { hasFriends = "crew" }
-                    }
-                    animatedCard(index: 2) {
-                        optionCard(title: "Not really, I go solo", icon: "person", isSelected: hasFriends == "solo") { hasFriends = "solo" }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Screen 9: Competitiveness
-
-    private var competitivenessScreen: some View {
-        ZStack {
-            FlameParticles(gold: gold, appeared: screenAppeared)
-
-            VStack(alignment: .leading, spacing: 28) {
-                screenHeader(title: "How competitive are you?", subtitle: "Be honest.")
-
-                VStack(spacing: 12) {
-                    animatedCard(index: 0) {
-                        optionCard(title: "Very — I hate losing", icon: "flame.fill", isSelected: competitiveness == "very") { competitiveness = "very" }
-                    }
-                    animatedCard(index: 1) {
-                        optionCard(title: "Somewhat — friendly competition is fun", icon: "hands.clap", isSelected: competitiveness == "somewhat") { competitiveness = "somewhat" }
-                    }
-                    animatedCard(index: 2) {
-                        optionCard(title: "Not at all — I'm here for me", icon: "heart.fill", isSelected: competitiveness == "not") { competitiveness = "not" }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Screen 10: Reaffirmation 3
-
-    private var reaffirmation3: some View {
-        VStack(spacing: 32) {
-            Spacer().frame(height: 20)
-
-            Text("Friends who compete together stay consistent 4x longer")
-                .font(.system(.title2, design: .rounded, weight: .bold))
+            Text(label)
+                .font(.system(.caption2, design: .rounded, weight: .bold))
                 .foregroundStyle(Color.black)
                 .multilineTextAlignment(.center)
-                .opacity(screenAppeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.5), value: screenAppeared)
-
-            HStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16).fill(Color.gray.opacity(0.08)).frame(height: 140)
-                    VStack(spacing: 8) {
-                        Image(systemName: "person").font(.title).foregroundStyle(Color.gray)
-                        Text("Solo").font(.system(.subheadline, design: .rounded, weight: .semibold)).foregroundStyle(Color.gray)
-                        Text("Week 3: gave up").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.red.opacity(0.7))
-                    }
-                }
-                .opacity(screenAppeared ? 1 : 0)
-                .offset(x: screenAppeared ? 0 : -20)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.2), value: screenAppeared)
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16).fill(gold.opacity(0.1))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(gold.opacity(0.3), lineWidth: 1))
-                        .overlay(
-                            ShimmerOverlay(gold: gold, appeared: screenAppeared)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                        )
-                        .frame(height: 140)
-                    VStack(spacing: 8) {
-                        Image(systemName: "person.2.fill").font(.title).foregroundStyle(gold)
-                        Text("In a Competition").font(.system(.subheadline, design: .rounded, weight: .semibold)).foregroundStyle(Color.black)
-                        Text("Week 8: still going").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.green)
-                    }
-                }
-                .opacity(screenAppeared ? 1 : 0)
-                .offset(x: screenAppeared ? 0 : 20)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.4), value: screenAppeared)
-            }
-
-            Text("RunMatch competitions put real stakes on the line.\nWinner takes the pot.")
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(Color.gray)
-                .multilineTextAlignment(.center)
-                .opacity(screenAppeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.5).delay(0.6), value: screenAppeared)
+                .lineLimit(2)
         }
+        .scaleEffect(stravaBubbles[safe: index] == true ? 1 : 0.3)
+        .opacity(stravaBubbles[safe: index] == true ? 1 : 0)
     }
 
-    // MARK: - Screen 11: Target
+    private func stravaLine(number: String, text: String, index: Int) -> some View {
+        HStack(spacing: 12) {
+            Text(number)
+                .font(.system(.caption, design: .rounded, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(gold))
+            Text(text)
+                .font(.system(.subheadline, design: .rounded, weight: .medium))
+                .foregroundStyle(Color.black)
+            Spacer()
+        }
+        .opacity(cardStagger[safe: index] == true ? 1 : 0)
+        .offset(x: cardStagger[safe: index] == true ? 0 : 15)
+    }
 
-    private var targetScreen: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            screenHeader(title: "Set your daily run distance", subtitle: "You can adjust this anytime.")
+    // MARK: - Screen 7: "Make it personal." (Daily Stakes)
 
-            VStack(spacing: 20) {
-                // Big distance display
-                VStack(spacing: 4) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "figure.run").font(.title3).foregroundStyle(gold)
-                        Text("Run Distance").font(.system(.headline, design: .rounded)).foregroundStyle(Color.black)
+    private var dailyStakesScreen: some View {
+        VStack(spacing: 24) {
+            screenHeader(title: "Make accountability cost.", subtitle: "Optional — put real money behind your daily goals.")
+
+            // Two-panel visual: HIT vs MISS
+            HStack(spacing: 12) {
+                // HIT panel
+                VStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(Color.green.opacity(0.12)).frame(width: 48, height: 48)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(Color.green)
                     }
-                    Text(String(format: "%.1f mi", runTarget))
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                    Text("Hit your goal")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
                         .foregroundStyle(Color.black)
-                        .contentTransition(.numericText())
-                        .animation(.snappy, value: runTarget)
+                    Text("Keep your\nmoney")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.green)
+                        .multilineTextAlignment(.center)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.green.opacity(0.06))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.green.opacity(0.2), lineWidth: 1))
+                )
 
-                // Draggable slider
-                VStack(spacing: 8) {
-                    RunDistanceSlider(value: $runTarget, range: 0.5...10.0, step: 0.5, gold: gold)
-                        .frame(height: 44)
-
-                    HStack {
-                        Text("0.5 mi").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.gray)
-                        Spacer()
-                        Text("10.0 mi").font(.system(.caption2, design: .rounded)).foregroundStyle(Color.gray)
-                    }
-                }
-
-                // Hovering runner icon
-                HoveringRunner(gold: gold)
-                    .frame(height: 70)
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16).fill(Color.gray.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray.opacity(0.12), lineWidth: 1))
-            )
-        }
-    }
-
-    private func stepperCard<Controls: View>(label: String, icon: String, display: String, @ViewBuilder controls: () -> Controls) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon).font(.title3).foregroundStyle(gold)
-                Text(label).font(.system(.headline, design: .rounded)).foregroundStyle(Color.black)
-            }
-            HStack {
-                Text(display)
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.black)
-                Spacer()
-                controls()
-            }
-            .padding(20)
-            .background(
-                RoundedRectangle(cornerRadius: 16).fill(Color.gray.opacity(0.06))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray.opacity(0.12), lineWidth: 1))
-            )
-        }
-    }
-
-    private func stepButton(systemName: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.title3.weight(.medium))
-                .foregroundStyle(Color.black)
-                .frame(width: 48, height: 48)
-                .background(Circle().fill(Color.gray.opacity(0.12)))
-        }
-    }
-
-    // MARK: - Screen 12: Deadline
-
-    private var deadlineScreen: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            HStack(spacing: 16) {
-                ClockFace(hour: deadlineHour, gold: gold)
-                    .frame(width: 56, height: 56)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    if needsMorningHelp {
-                        Text("Set an early deadline to get moving")
-                            .font(.system(.title2, design: .rounded, weight: .bold))
-                            .foregroundStyle(Color.black)
-                        Text("The earlier the deadline, the harder it is to hit snooze.")
-                            .font(.system(.subheadline, design: .rounded))
-                            .foregroundStyle(Color.gray)
-                    } else {
-                        Text("When's your deadline each day?")
-                            .font(.system(.title2, design: .rounded, weight: .bold))
-                            .foregroundStyle(Color.black)
-                        Text("Miss it, and your stakes are on the line.")
-                            .font(.system(.subheadline, design: .rounded))
-                            .foregroundStyle(Color.gray)
-                    }
-                }
-            }
-
-            if needsMorningHelp {
+                // MISS panel
                 VStack(spacing: 12) {
-                    animatedCard(index: 0) { deadlineOption(label: "6:00 AM", hour: 6) }
-                    animatedCard(index: 1) { deadlineOption(label: "7:00 AM", hour: 7, recommended: true) }
-                    animatedCard(index: 2) { deadlineOption(label: "8:00 AM", hour: 8) }
-                    animatedCard(index: 3) { deadlineOption(label: "9:00 AM", hour: 9) }
-                }
-            } else {
-                VStack(spacing: 12) {
-                    animatedCard(index: 0) { deadlineOption(label: "9:00 AM", hour: 9, subtitle: "Morning person") }
-                    animatedCard(index: 1) { deadlineOption(label: "12:00 PM", hour: 12, subtitle: "Midday") }
-                    animatedCard(index: 2) { deadlineOption(label: "6:00 PM", hour: 18, subtitle: "After work") }
-                    animatedCard(index: 3) { deadlineOption(label: "10:00 PM", hour: 22, subtitle: "Night owl") }
-                }
-            }
-        }
-    }
-
-    private func deadlineOption(label: String, hour: Int, subtitle: String? = nil, recommended: Bool = false) -> some View {
-        Button { deadlineHour = hour } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(label).font(.system(.body, design: .rounded, weight: .medium))
-                            .foregroundStyle(deadlineHour == hour ? .white : Color.black)
-                        if recommended {
-                            Text("Recommended")
-                                .font(.system(.caption2, design: .rounded, weight: .semibold))
-                                .foregroundStyle(deadlineHour == hour ? .white : gold)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Capsule().fill(deadlineHour == hour ? Color.white.opacity(0.25) : gold.opacity(0.15)))
-                        }
+                    ZStack {
+                        Circle().fill(Color.red.opacity(0.12)).frame(width: 48, height: 48)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(Color.red)
                     }
-                    if let subtitle { Text(subtitle).font(.system(.caption, design: .rounded)).foregroundStyle(deadlineHour == hour ? .white.opacity(0.8) : Color.gray) }
+                    Text("Miss your goal")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.black)
+                    Text("$5 goes to\nyour friend")
+                        .font(.system(.caption2, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color.red)
+                        .multilineTextAlignment(.center)
                 }
-                Spacer()
-                if deadlineHour == hour { Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(.white) }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.red.opacity(0.04))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.red.opacity(0.15), lineWidth: 1))
+                )
             }
-            .padding(16)
-            .background(RoundedRectangle(cornerRadius: 14).fill(deadlineHour == hour ? gold : Color.gray.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(deadlineHour == hour ? gold : Color.gray.opacity(0.15), lineWidth: 1))
+            .opacity(screenAppeared ? 1 : 0)
+            .offset(y: screenAppeared ? 0 : 10)
+            .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.2), value: screenAppeared)
+
+            // Example goal line
+            HStack(spacing: 10) {
+                Image(systemName: "figure.run")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(gold)
+                Text("Example: 2.0 miles by 7:00 AM — $5 at stake")
+                    .font(.system(.caption, design: .rounded, weight: .medium))
+                    .foregroundStyle(Color.gray)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.gray.opacity(0.06)))
+
+            VStack(spacing: 12) {
+                animatedCard(index: 0) {
+                    optionCard(title: "I want daily accountability", icon: "flame.fill",
+                               isSelected: wantsDailyStakes == "yes") { wantsDailyStakes = "yes" }
+                }
+                animatedCard(index: 1) {
+                    optionCard(title: "Just competitions for now", icon: "trophy",
+                               isSelected: wantsDailyStakes == "no") { wantsDailyStakes = "no" }
+                }
+            }
+
+            Text("You can always change this later.")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(Color.gray)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
-        .buttonStyle(.plain)
     }
 
-    // MARK: - Screen 13: Account
+    // MARK: - Screen 8: Account
 
     private var accountScreen: some View {
         ZStack {
-            // Ambient shield glow
             Image(systemName: "shield.fill")
                 .font(.system(size: 200))
                 .foregroundStyle(gold.opacity(screenAppeared ? 0.04 : 0))
@@ -1075,7 +1040,6 @@ struct OnboardingView: View {
                         .font(.system(size: 56))
                         .foregroundStyle(Color.green)
                         .transition(.scale.combined(with: .opacity))
-
                     Text("Welcome, \(profileUsername.components(separatedBy: " ").first ?? profileUsername)!")
                         .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(Color.black)
@@ -1091,10 +1055,7 @@ struct OnboardingView: View {
                     screenHeader(title: "Create your account", subtitle: "Compete with friends, track progress, and put real stakes on your goals.")
 
                     VStack(spacing: 12) {
-                        Button {
-                            accountAction = "create"
-                            showCreateAccountSheet = true
-                        } label: {
+                        Button { showCreateAccountSheet = true } label: {
                             Text("Create Account")
                                 .font(.system(.headline, design: .rounded))
                                 .foregroundStyle(.white)
@@ -1106,18 +1067,14 @@ struct OnboardingView: View {
                         .offset(y: screenAppeared ? 0 : 10)
                         .animation(.easeOut(duration: 0.4).delay(0.2), value: screenAppeared)
 
-                        Button {
-                            accountAction = "signin"
-                            showSignInSheet = true
-                        } label: {
+                        Button { showSignInSheet = true } label: {
                             Text("Sign In")
                                 .font(.system(.headline, design: .rounded))
                                 .foregroundStyle(Color.black)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1)
                                 )
                         }
                         .opacity(screenAppeared ? 1 : 0)
@@ -1130,11 +1087,10 @@ struct OnboardingView: View {
         .animation(.easeInOut(duration: 0.3), value: isSignedIn)
     }
 
-    // MARK: - Screen 14: Strava
+    // MARK: - Screen 9: Connect Strava
 
-    private var stravaScreen: some View {
+    private var stravaConnectScreen: some View {
         ZStack {
-            // Motion lines behind runner
             if !stravaConnected && !stravaJustLinked {
                 StravaMotionLines(appeared: screenAppeared)
                     .offset(y: -80)
@@ -1146,12 +1102,10 @@ struct OnboardingView: View {
                 if stravaConnected || stravaJustLinked {
                     VStack(spacing: 16) {
                         ZStack {
-                            // Expanding ring
                             Circle()
                                 .stroke(Color.green.opacity(stravaRingOpacity), lineWidth: 3)
                                 .frame(width: 80, height: 80)
                                 .scaleEffect(stravaRingScale)
-
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 56))
                                 .foregroundStyle(Color.green)
@@ -1163,11 +1117,9 @@ struct OnboardingView: View {
                                 withAnimation(.easeOut(duration: 0.8)) { stravaRingScale = 2.5; stravaRingOpacity = 0 }
                             }
                         }
-
                         Text("Strava Connected!")
                             .font(.system(.title2, design: .rounded, weight: .bold))
                             .foregroundStyle(Color.black)
-
                         if !stravaAthleteName.isEmpty {
                             Text(stravaAthleteName)
                                 .font(.system(.subheadline, design: .rounded))
@@ -1187,34 +1139,10 @@ struct OnboardingView: View {
                         .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(Color.black)
 
-                    Text("Strava tracks your runs automatically so every mile counts toward your goals and competitions. Link now or add it later in Profile.")
+                    Text("This is how your miles count toward matches and goals. Link now or add it later in Profile.")
                         .font(.system(.subheadline, design: .rounded))
                         .foregroundStyle(Color.gray)
                         .multilineTextAlignment(.center)
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "info.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(Color.black.opacity(0.4))
-                                .padding(.top, 2)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("All runs must be started and ended on Strava. Completed runs are automatically logged toward your RunMatch goals and competitions.")
-                                    .font(.system(.caption, design: .rounded))
-                                    .foregroundStyle(Color.black.opacity(0.5))
-                                Text("You won't be able to track runs without Strava linked.")
-                                    .font(.system(.caption, design: .rounded, weight: .bold))
-                                    .foregroundStyle(Color.black.opacity(0.7))
-                            }
-                        }
-                    }
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.gray.opacity(0.08))
-                    )
 
                     Button(action: connectStrava) {
                         HStack(spacing: 8) {
@@ -1240,14 +1168,13 @@ struct OnboardingView: View {
         .animation(.spring(response: 0.5, dampingFraction: 0.7), value: stravaConnected)
     }
 
-    // MARK: - Screen 15: Final
+    // MARK: - Screen 10: "Challenge your friends." (Final — styled like Start Your First Competition)
 
-    private var finalScreen: some View {
-        VStack(spacing: 28) {
-            Spacer().frame(height: 12)
+    private var challengeFriendsScreen: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 8)
 
             ZStack {
-                // Trophy shimmer
                 Image(systemName: "trophy.fill")
                     .font(.system(size: 80))
                     .foregroundStyle(gold.opacity(0.08))
@@ -1263,7 +1190,7 @@ struct OnboardingView: View {
                     .animation(.spring(response: 0.6, dampingFraction: 0.6), value: screenAppeared)
             }
 
-            Text("You're ready to compete")
+            Text("Challenge your friends.")
                 .font(.system(.title, design: .rounded, weight: .bold))
                 .foregroundStyle(Color.black)
                 .multilineTextAlignment(.center)
@@ -1271,99 +1198,73 @@ struct OnboardingView: View {
                 .offset(y: screenAppeared ? 0 : 8)
                 .animation(.easeOut(duration: 0.4).delay(0.2), value: screenAppeared)
 
-            summaryCard
-
-            dailyGoalSelector
-        }
-    }
-
-    private var dailyGoalSelector: some View {
-        VStack(spacing: 14) {
-            Text("Set as your daily goals?")
-                .font(.system(.headline, design: .rounded, weight: .bold))
-                .foregroundStyle(Color.black)
-                .multilineTextAlignment(.center)
-
-            HStack(spacing: 14) {
-                choicePill(label: "Yes", isSelected: dailyGoalChoice == "yes") {
-                    dailyGoalChoice = "yes"
+            // Action buttons
+            VStack(spacing: 12) {
+                Button(action: handleCreateMatch) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Create a Match")
+                    }
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(gold)
+                            .shadow(color: gold.opacity(0.3), radius: 8, y: 4)
+                    )
                 }
-                choicePill(label: "No", isSelected: dailyGoalChoice == "no") {
-                    dailyGoalChoice = "no"
+                .opacity(screenAppeared ? 1 : 0)
+                .offset(y: screenAppeared ? 0 : 10)
+                .animation(.easeOut(duration: 0.4).delay(0.3), value: screenAppeared)
+
+                Button(action: finishOnboarding) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "ticket.fill")
+                        Text("Join with a Code")
+                    }
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(Color.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
                 }
+                .opacity(screenAppeared ? 1 : 0)
+                .offset(y: screenAppeared ? 0 : 10)
+                .animation(.easeOut(duration: 0.4).delay(0.4), value: screenAppeared)
+
+                Button(action: finishOnboarding) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "figure.run")
+                        Text("Run My Free $10 Race")
+                    }
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(gold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(gold.opacity(0.08))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(gold.opacity(0.3), lineWidth: 1))
+                    )
+                }
+                .opacity(screenAppeared ? 1 : 0)
+                .offset(y: screenAppeared ? 0 : 10)
+                .animation(.easeOut(duration: 0.4).delay(0.5), value: screenAppeared)
             }
+
+            Button(action: finishOnboarding) {
+                Text("Skip — I'll explore first")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(Color.gray)
+            }
+            .padding(.top, 4)
+            .opacity(screenAppeared ? 1 : 0)
+            .animation(.easeOut(duration: 0.3).delay(0.7), value: screenAppeared)
         }
-        .padding(.top, 4)
-        .opacity(screenAppeared ? 1 : 0)
-        .offset(y: screenAppeared ? 0 : 12)
-        .animation(.easeOut(duration: 0.4).delay(0.6), value: screenAppeared)
-    }
-
-    private func choicePill(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            action()
-        } label: {
-            Text(label)
-                .font(.system(.body, design: .rounded, weight: .semibold))
-                .foregroundStyle(isSelected ? .white : Color.black)
-                .frame(width: 110, height: 46)
-                .background(
-                    Capsule().fill(isSelected ? gold : Color.clear)
-                )
-                .overlay(
-                    Capsule().stroke(isSelected ? gold : Color.gray.opacity(0.35), lineWidth: 1.5)
-                )
-        }
-        .buttonStyle(BounceButtonStyle())
-        .animation(.easeInOut(duration: 0.2), value: isSelected)
-    }
-
-    private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            summaryRow(icon: "target", label: "Goal", value: summaryGoalText, index: 0)
-            Divider()
-            summaryRow(icon: "clock", label: "Deadline", value: summaryDeadlineText, index: 1)
-            Divider()
-            summaryRow(icon: "calendar", label: "Schedule", value: "Daily", index: 2)
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 16).fill(Color.gray.opacity(0.06))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.gray.opacity(0.12), lineWidth: 1))
-        )
-        .opacity(screenAppeared ? 1 : 0)
-        .offset(y: screenAppeared ? 0 : 15)
-        .animation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.4), value: screenAppeared)
-    }
-
-    private func summaryRow(icon: String, label: String, value: String, index: Int = 0) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.body).foregroundStyle(gold).frame(width: 24)
-            Text(label).font(.system(.subheadline, design: .rounded)).foregroundStyle(Color.gray)
-            Spacer()
-            Text(value).font(.system(.subheadline, design: .rounded, weight: .semibold)).foregroundStyle(Color.black)
-        }
-        .opacity(cardStagger[safe: index] == true ? 1 : 0)
-        .offset(x: cardStagger[safe: index] == true ? 0 : 15)
-    }
-
-    private var summaryGoalText: String {
-        return String(format: "%.1f mile run", runTarget)
-    }
-
-    private var summaryDeadlineText: String {
-        if deadlineHour < 12 { return "\(deadlineHour):00 AM" }
-        if deadlineHour == 12 { return "12:00 PM" }
-        return "\(deadlineHour - 12):00 PM"
-    }
-
-    // MARK: - Animated Card Wrapper
-
-    private func animatedCard<Content: View>(index: Int, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .opacity(cardStagger[safe: index] == true ? 1 : 0)
-            .offset(y: cardStagger[safe: index] == true ? 0 : 12)
     }
 
     // MARK: - Reusable Components
@@ -1373,12 +1274,23 @@ struct OnboardingView: View {
             Text(title)
                 .font(.system(.title2, design: .rounded, weight: .bold))
                 .foregroundStyle(Color.black)
+                .opacity(screenAppeared ? 1 : 0)
+                .offset(y: screenAppeared ? 0 : 8)
+                .animation(.easeOut(duration: 0.4), value: screenAppeared)
             if let subtitle {
                 Text(subtitle)
                     .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(Color.gray)
+                    .opacity(screenAppeared ? 1 : 0)
+                    .animation(.easeOut(duration: 0.4).delay(0.1), value: screenAppeared)
             }
         }
+    }
+
+    private func animatedCard<Content: View>(index: Int, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .opacity(cardStagger[safe: index] == true ? 1 : 0)
+            .offset(y: cardStagger[safe: index] == true ? 0 : 12)
     }
 
     private func optionCard(title: String, icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
@@ -1394,24 +1306,6 @@ struct OnboardingView: View {
             }
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 14).fill(isSelected ? gold : Color.gray.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(isSelected ? gold : Color.gray.opacity(0.15), lineWidth: 1))
-        }
-        .buttonStyle(BounceButtonStyle())
-    }
-
-    private func multiSelectCard(title: String, icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon).font(.title3).foregroundStyle(isSelected ? gold : Color.gray).frame(width: 28)
-                Text(title).font(.system(.body, design: .rounded, weight: .medium)).foregroundStyle(Color.black)
-                Spacer()
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square").font(.title3).foregroundStyle(isSelected ? gold : Color.gray.opacity(0.3))
-            }
-            .padding(16)
-            .background(RoundedRectangle(cornerRadius: 14).fill(isSelected ? gold.opacity(0.08) : Color.gray.opacity(0.06)))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(isSelected ? gold : Color.gray.opacity(0.15), lineWidth: 1))
         }
         .buttonStyle(BounceButtonStyle())
@@ -1436,329 +1330,6 @@ struct BounceButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Heartbeat Line (Fitness Level)
-
-struct HeartbeatLine: View {
-    let gold: Color
-
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { context, size in
-                let h = size.height, w = size.width
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                let phase = CGFloat(t.truncatingRemainder(dividingBy: 2.0) / 2.0)
-                var path = Path()
-                let segments: Int = 200
-                for i in 0...segments {
-                    let x = CGFloat(i) / CGFloat(segments) * w
-                    let norm = (x / w + phase).truncatingRemainder(dividingBy: 1.0)
-                    let y: CGFloat
-                    if norm > 0.4 && norm < 0.45 {
-                        y = h * 0.5 - h * 0.35 * sin((norm - 0.4) / 0.05 * .pi)
-                    } else if norm > 0.45 && norm < 0.5 {
-                        y = h * 0.5 + h * 0.2 * sin((norm - 0.45) / 0.05 * .pi)
-                    } else {
-                        y = h * 0.5
-                    }
-                    if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                    else { path.addLine(to: CGPoint(x: x, y: y)) }
-                }
-                context.stroke(path, with: .color(gold), lineWidth: 1.5)
-            }
-        }
-        .frame(height: 40)
-    }
-}
-
-// MARK: - Floating Bubbles (Motivation)
-
-struct FloatingBubbles: View {
-    let gold: Color
-    let appeared: Bool
-    @State private var animate = false
-
-    private let icons = ["dollarsign.circle", "trophy.fill", "star.fill", "alarm"]
-    private let positions: [(x: CGFloat, y: CGFloat)] = [
-        (0.15, 0.2), (0.8, 0.15), (0.25, 0.7), (0.85, 0.65)
-    ]
-
-    var body: some View {
-        GeometryReader { geo in
-            ForEach(0..<4, id: \.self) { i in
-                Image(systemName: icons[i])
-                    .font(.system(size: 14))
-                    .foregroundStyle(gold.opacity(0.12))
-                    .position(
-                        x: positions[i].x * geo.size.width,
-                        y: positions[i].y * geo.size.height + (animate ? -15 : 15)
-                    )
-            }
-        }
-        .opacity(appeared ? 1 : 0)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
-                animate = true
-            }
-        }
-    }
-}
-
-// MARK: - Animated Trend Chart (Reaffirmation 2)
-
-struct TrendLineShape: Shape {
-    let points: [(CGFloat, CGFloat)]
-    let inset: CGFloat = 16
-
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height
-        var path = Path()
-        for (i, p) in points.enumerated() {
-            let pt = CGPoint(x: inset + p.0 * (w - 2 * inset), y: inset + p.1 * (h - 2 * inset))
-            if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
-        }
-        return path
-    }
-}
-
-struct AnimatedTrendChart: View {
-    let gold: Color
-    let appeared: Bool
-    @State private var goldTrim: CGFloat = 0
-    @State private var grayTrim: CGFloat = 0
-
-    private let goldPts: [(CGFloat, CGFloat)] = [(0,0.55),(0.15,0.50),(0.3,0.42),(0.5,0.32),(0.7,0.22),(0.85,0.15),(1.0,0.10)]
-    private let grayPts: [(CGFloat, CGFloat)] = [(0,0.50),(0.15,0.45),(0.3,0.48),(0.5,0.58),(0.7,0.68),(0.85,0.75),(1.0,0.82)]
-
-    var body: some View {
-        ZStack {
-            TrendLineShape(points: grayPts)
-                .trim(from: 0, to: grayTrim)
-                .stroke(Color.gray.opacity(0.35), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-
-            TrendLineShape(points: goldPts)
-                .trim(from: 0, to: goldTrim)
-                .stroke(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)), lineWidth: 3)
-        }
-        .onAppear { startDrawing() }
-        .onChange(of: appeared) { _, val in
-            if val { startDrawing() } else { goldTrim = 0; grayTrim = 0 }
-        }
-    }
-
-    private func startDrawing() {
-        goldTrim = 0
-        grayTrim = 0
-        withAnimation(.easeOut(duration: 1.2).delay(0.3)) { goldTrim = 1.0 }
-        withAnimation(.easeOut(duration: 1.2).delay(0.5)) { grayTrim = 1.0 }
-    }
-}
-
-// MARK: - Running Buddies (Friends)
-
-struct RunningBuddies: View {
-    let gold: Color
-    let appeared: Bool
-    @State private var offset: CGFloat = -60
-
-    var body: some View {
-        GeometryReader { geo in
-            HStack(spacing: 6) {
-                Image(systemName: "figure.run")
-                    .font(.system(size: 16))
-                    .foregroundStyle(gold.opacity(0.2))
-                Image(systemName: "figure.run")
-                    .font(.system(size: 14))
-                    .foregroundStyle(gold.opacity(0.12))
-            }
-            .offset(x: offset)
-            .onAppear {
-                guard appeared else { return }
-                startLoop(width: geo.size.width)
-            }
-            .onChange(of: appeared) { _, val in
-                if val { startLoop(width: geo.size.width) }
-            }
-        }
-    }
-
-    private func startLoop(width: CGFloat) {
-        offset = -60
-        withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) {
-            offset = width + 60
-        }
-    }
-}
-
-// MARK: - Flame Particles (Competitiveness)
-
-struct FlameParticles: View {
-    let gold: Color
-    let appeared: Bool
-    @State private var animate = false
-
-    private let particles: [(x: CGFloat, delay: Double, size: CGFloat)] = [
-        (0.2, 0, 6), (0.35, 0.4, 4), (0.5, 0.1, 5),
-        (0.65, 0.6, 4), (0.8, 0.3, 6), (0.45, 0.8, 3)
-    ]
-
-    var body: some View {
-        GeometryReader { geo in
-            ForEach(0..<particles.count, id: \.self) { i in
-                let p = particles[i]
-                Circle()
-                    .fill(
-                        i % 2 == 0
-                            ? gold.opacity(0.15)
-                            : Color.orange.opacity(0.12)
-                    )
-                    .frame(width: p.size, height: p.size)
-                    .position(
-                        x: p.x * geo.size.width,
-                        y: animate ? -10 : geo.size.height * 0.3
-                    )
-                    .opacity(animate ? 0 : 0.8)
-                    .animation(
-                        .easeOut(duration: 2.5)
-                        .repeatForever(autoreverses: false)
-                        .delay(p.delay),
-                        value: animate
-                    )
-            }
-        }
-        .opacity(appeared ? 1 : 0)
-        .onAppear {
-            if appeared { animate = true }
-        }
-        .onChange(of: appeared) { _, val in
-            if val { animate = true }
-        }
-    }
-}
-
-// MARK: - Shimmer Overlay (Reaffirmation 3)
-
-struct ShimmerOverlay: View {
-    let gold: Color
-    let appeared: Bool
-    @State private var shimmerOffset: CGFloat = -200
-
-    var body: some View {
-        Rectangle()
-            .fill(
-                LinearGradient(
-                    colors: [.clear, gold.opacity(0.15), .clear],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .frame(width: 80)
-            .offset(x: shimmerOffset)
-            .onAppear {
-                guard appeared else { return }
-                startShimmer()
-            }
-            .onChange(of: appeared) { _, val in
-                if val { startShimmer() }
-            }
-    }
-
-    private func startShimmer() {
-        shimmerOffset = -200
-        withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: false).delay(1)) {
-            shimmerOffset = 300
-        }
-    }
-}
-
-// MARK: - Run Distance Slider (Target)
-
-struct RunDistanceSlider: View {
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double
-    let gold: Color
-
-    @State private var isDragging = false
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let thumbSize: CGFloat = 28
-            let trackPadding: CGFloat = thumbSize / 2
-            let trackWidth = w - thumbSize
-            let fraction = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
-            let thumbX = trackPadding + fraction * trackWidth
-
-            ZStack(alignment: .leading) {
-                // Background track
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.15))
-                    .frame(height: 6)
-                    .padding(.horizontal, trackPadding)
-
-                // Filled track
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(gold)
-                    .frame(width: thumbX, height: 6)
-                    .padding(.leading, 0)
-
-                // Thumb
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: thumbSize, height: thumbSize)
-                    .shadow(color: gold.opacity(0.3), radius: isDragging ? 8 : 4)
-                    .overlay(Circle().stroke(gold, lineWidth: 2.5))
-                    .scaleEffect(isDragging ? 1.15 : 1.0)
-                    .position(x: thumbX, y: geo.size.height / 2)
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { drag in
-                                isDragging = true
-                                let x = drag.location.x
-                                let clamped = max(trackPadding, min(x, trackPadding + trackWidth))
-                                let frac = Double((clamped - trackPadding) / trackWidth)
-                                let raw = range.lowerBound + frac * (range.upperBound - range.lowerBound)
-                                let snapped = (raw / step).rounded() * step
-                                let newVal = max(range.lowerBound, min(snapped, range.upperBound))
-                                if newVal != value {
-                                    value = newVal
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                }
-                            }
-                            .onEnded { _ in
-                                isDragging = false
-                            }
-                    )
-            }
-            .animation(.spring(response: 0.2, dampingFraction: 0.8), value: isDragging)
-        }
-    }
-}
-
-// MARK: - Animated Runner (Target)
-
-struct HoveringRunner: View {
-    let gold: Color
-    @State private var hovering = false
-
-    var body: some View {
-        ZStack {
-            Ellipse()
-                .fill(Color.black.opacity(0.05))
-                .frame(width: 36, height: 6)
-                .offset(y: 26)
-                .blur(radius: 2)
-
-            Image(systemName: "figure.run")
-                .font(.system(size: 44))
-                .foregroundStyle(gold)
-                .offset(y: hovering ? -4 : 4)
-                .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: hovering)
-        }
-        .onAppear { hovering = true }
-    }
-}
-
 // MARK: - Clock Face (Deadline)
 
 struct ClockFace: View {
@@ -1768,10 +1339,7 @@ struct ClockFace: View {
 
     var body: some View {
         ZStack {
-            Circle()
-                .stroke(Color.gray.opacity(0.15), lineWidth: 2)
-
-            // Hour markers
+            Circle().stroke(Color.gray.opacity(0.15), lineWidth: 2)
             ForEach(0..<12, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 1)
                     .fill(Color.gray.opacity(0.3))
@@ -1779,27 +1347,19 @@ struct ClockFace: View {
                     .offset(y: -22)
                     .rotationEffect(.degrees(Double(i) * 30))
             }
-
-            // Second hand
             RoundedRectangle(cornerRadius: 0.5)
                 .fill(Color.red.opacity(0.5))
                 .frame(width: 1, height: 20)
                 .offset(y: -10)
                 .rotationEffect(.degrees(Double(secondTick) * 6))
                 .animation(.easeOut(duration: 0.15), value: secondTick)
-
-            // Hour hand
             RoundedRectangle(cornerRadius: 1)
                 .fill(gold)
                 .frame(width: 2.5, height: 14)
                 .offset(y: -7)
                 .rotationEffect(.degrees(Double(hour % 12) * 30))
                 .animation(.spring(response: 0.5, dampingFraction: 0.7), value: hour)
-
-            // Center dot
-            Circle()
-                .fill(gold)
-                .frame(width: 5, height: 5)
+            Circle().fill(gold).frame(width: 5, height: 5)
         }
         .onAppear { startTicking() }
     }
@@ -1808,6 +1368,19 @@ struct ClockFace: View {
         Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { _ in
             secondTick = (secondTick + 1) % 60
         }
+    }
+}
+
+// MARK: - Triangle Shape (Arrow Tip)
+
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 

@@ -127,6 +127,29 @@ struct EOSApp: App {
         UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)
         UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .selected)
         UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.black], for: .normal)
+
+        // ── One-time migration: prior versions stored Date values in UserDefaults
+        // for these keys (via @AppStorage<Date>, iOS 18+ only). The new build
+        // stores Double (TimeInterval) under the same keys so the storage works
+        // on iOS 17. Existing users coming from the App Store version need
+        // their stored Dates converted, otherwise reading as Double returns 0
+        // and they end up with a 1970-01-01 deadline.
+        Self.migrateLegacyDateAppStorage()
+    }
+
+    /// Idempotent. If the key holds a Date object, convert it to Double under
+    /// the same key. If it's already a Double or absent, no-op.
+    private static func migrateLegacyDateAppStorage() {
+        let keys = ["objectiveDeadline", "settingsLockedUntil"]
+        let defaults = UserDefaults.standard
+        for key in keys {
+            guard let stored = defaults.object(forKey: key) else { continue }
+            if let date = stored as? Date {
+                defaults.set(date.timeIntervalSince1970, forKey: key)
+                print("🔁 Migrated UserDefaults.\(key) from Date → Double")
+            }
+            // If it's already a Double / Int / NSNumber, nothing to do.
+        }
     }
 
     var body: some Scene {

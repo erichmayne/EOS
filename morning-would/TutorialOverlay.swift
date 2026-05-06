@@ -10,38 +10,26 @@ struct TutorialStep {
 }
 
 let appTutorialSteps: [TutorialStep] = [
-    TutorialStep(targetId: nil,
-                 title: "Welcome to RunMatch!",
-                 message: "Let us show you around. This quick tour walks you through everything you need.",
-                 icon: "hand.wave.fill"),
-    TutorialStep(targetId: "page-dots",
-                 title: "Swipe for Your Daily Goal",
-                 message: "Your live competitions show by default. Swipe right (or tap the right dot) to flip the card to your daily run goal and progress.",
-                 icon: "arrow.left.and.right"),
-    TutorialStep(targetId: "competitions-card",
-                 title: "Active Competitions",
-                 message: "Every comp you've joined shows up here, sorted by ending soonest. Tap a tile's View link to open its leaderboard.",
-                 icon: "trophy.fill"),
-    TutorialStep(targetId: "objective-button",
-                 title: "Configure Your Goals",
-                 message: "Set your daily run distance, pick your schedule, and choose your deadline.",
-                 icon: "gearshape"),
-    TutorialStep(targetId: "profile-button",
-                 title: "Your Profile",
-                 message: "Add balance, connect Strava for run tracking, and set your payout stakes.",
-                 icon: "person.circle"),
+    TutorialStep(targetId: "starter-comp",
+                 title: "First one's on us.",
+                 message: "Run 1 mile. Win $10. Your starter match is already live.",
+                 icon: "gift.fill"),
     TutorialStep(targetId: "compete-button",
-                 title: "Challenge Friends",
-                 message: "Create or join competitions with real money on the line. Winner takes the pot.",
+                 title: "Start a match or join one.",
+                 message: "Create a match with friends, join with a code, or browse past results.",
                  icon: "trophy.fill"),
+    TutorialStep(targetId: "page-dots",
+                 title: "Swipe for your personal daily goals.",
+                 message: "Competitions live here. Swipe right to see your daily run goal and streak.",
+                 icon: "arrow.left.and.right"),
     TutorialStep(targetId: "strava-badge",
-                 title: "Runs Track Automatically",
-                 message: "Once Strava is linked, every GPS-tracked run on Strava you complete automatically counts toward your goals and competitions in RunMatch. No manual logging needed.",
+                 title: "Runs track automatically.",
+                 message: "Link Strava and every GPS run counts toward your goals and matches. All runs must be started and stopped on Strava to count.",
                  icon: "figure.run"),
-    TutorialStep(targetId: nil,
-                 title: "You're All Set!",
-                 message: "Time to crush your first goal. Good luck!",
-                 icon: "star.fill"),
+    TutorialStep(targetId: "profile-button",
+                 title: "Wallet & profile.",
+                 message: "Add funds, connect Strava, manage stakes, and withdraw winnings.",
+                 icon: "person.circle"),
 ]
 
 // MARK: - Preference Key for Frame Capture
@@ -132,82 +120,103 @@ struct TutorialOverlay: View {
                 .onTapGesture { advance() }
 
             SpotlightCutout(targetRect: effectiveTargetRect)
-                .fill(Color.black.opacity(0.72), style: FillStyle(eoFill: true))
+                .fill(Color.black.opacity(0.55), style: FillStyle(eoFill: true))
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            if step.targetId != nil {
-                VStack {
-                    if showCardBelow {
-                        Spacer()
-                    }
+            // Position the tooltip card dynamically so it doesn't overlap
+            // the spotlighted element. If the target is in the top half,
+            // card goes below; if bottom half, card goes above.
+            VStack(spacing: 0) {
+                if showCardBelow {
+                    // Push card down past the spotlight
+                    Spacer().frame(minHeight: max(20, effectiveTargetRect.maxY + 16))
                     tooltipCard
-                    if !showCardBelow {
-                        Spacer()
-                    }
+                    Spacer(minLength: 20)
+                } else if step.targetId != nil {
+                    // Push card up above the spotlight
+                    Spacer(minLength: 20)
+                    tooltipCard
+                    Spacer().frame(minHeight: max(20, UIScreen.main.bounds.height - effectiveTargetRect.minY + 16))
+                } else {
+                    // No target — center
+                    Spacer()
+                    tooltipCard
+                    Spacer()
                 }
-                .padding(.vertical, 60)
-            } else {
-                tooltipCard
             }
         }
         .animation(.easeInOut(duration: 0.35), value: currentStep)
     }
 
     private var tooltipCard: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 4) {
-                ForEach(0..<steps.count, id: \.self) { i in
-                    Capsule()
-                        .fill(i == currentStep ? gold : Color.white.opacity(0.25))
-                        .frame(width: i == currentStep ? 16 : 6, height: 6)
+        VStack(spacing: 10) {
+            // Icon + step dots
+            HStack {
+                Image(systemName: step.icon)
+                    .font(.system(size: 24))
+                    .foregroundStyle(gold)
+                Spacer()
+                HStack(spacing: 4) {
+                    ForEach(0..<steps.count, id: \.self) { i in
+                        Capsule()
+                            .fill(i == currentStep ? gold : Color.black.opacity(0.15))
+                            .frame(width: i == currentStep ? 16 : 6, height: 5)
+                    }
                 }
             }
 
-            Image(systemName: step.icon)
-                .font(.system(size: 32))
-                .foregroundStyle(gold)
-                .padding(.top, 4)
-
+            // Title
             Text(step.title)
-                .font(.system(.title3, design: .rounded, weight: .bold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.black)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
+            // Message
             Text(step.message)
                 .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.white.opacity(0.75))
-                .multilineTextAlignment(.center)
+                .foregroundStyle(Color.black.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 24) {
-                Button("Skip tour") {
+            // Buttons
+            HStack(spacing: 12) {
+                Button("Skip") {
                     withAnimation(.easeOut(duration: 0.25)) { isActive = false }
                     onComplete()
                 }
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(.white.opacity(0.5))
+                .font(.system(.caption, design: .rounded, weight: .medium))
+                .foregroundStyle(Color.black.opacity(0.35))
+
+                Spacer()
 
                 Button(action: advance) {
-                    Text(currentStep == steps.count - 1 ? "Let's Go!" : "Next")
-                        .font(.system(.headline, design: .rounded))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 12)
-                        .background(Capsule().fill(gold))
+                    HStack(spacing: 5) {
+                        Text(currentStep == steps.count - 1 ? "Let's Go" : "Next")
+                            .font(.system(.subheadline, design: .rounded, weight: .bold))
+                        if currentStep < steps.count - 1 {
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                    }
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(gold))
                 }
             }
             .padding(.top, 4)
         }
-        .padding(24)
+        .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.black.opacity(0.85))
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.white)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(gold.opacity(0.2), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(gold.opacity(0.35), lineWidth: 1)
                 )
         )
+        .shadow(color: gold.opacity(0.25), radius: 20, y: 6)
         .padding(.horizontal, 32)
     }
 

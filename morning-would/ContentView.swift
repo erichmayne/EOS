@@ -132,6 +132,25 @@ struct ContentView: View {
     // Direct-from-home sheets for the comp stats empty-state buttons.
     @State private var showCreateCompSheet = false
     @State private var showJoinCompSheet = false
+    // ── Starter bonus state (mirrors backend /users/:id/balance fields) ──
+    @AppStorage("starterBonusAmount") private var starterBonusAmount: Double = 0
+    @AppStorage("starterBonusUnlocked") private var starterBonusUnlocked: Bool = true
+    @AppStorage("compEarningsTotal") private var compEarningsTotal: Double = 0
+    @AppStorage("starterCompId") private var starterCompId: String = ""
+    // One-shot flags so the celebration sheets fire exactly once per user
+    // per device. Namespaced by userId so a different account on the same
+    // device starts with a fresh slate.
+    private var seenStarterWinCelebration: Bool {
+        get { UserDefaults.standard.bool(forKey: "seenStarterWinCelebration_\(userId)") }
+        nonmutating set { UserDefaults.standard.set(newValue, forKey: "seenStarterWinCelebration_\(userId)") }
+    }
+    private var seenStarterUnlockCelebration: Bool {
+        get { UserDefaults.standard.bool(forKey: "seenStarterUnlockCelebration_\(userId)") }
+        nonmutating set { UserDefaults.standard.set(newValue, forKey: "seenStarterUnlockCelebration_\(userId)") }
+    }
+    @State private var showStarterWinSheet: Bool = false
+    @State private var showStarterUnlockSheet: Bool = false
+
     // Inline join flow
     @AppStorage("stravaConnected") private var stravaConnectedHome: Bool = false
     @State private var showJoinCodeInput: Bool = false
@@ -155,6 +174,21 @@ struct ContentView: View {
     // Swipeable home card: 0 = Today's Goals, 1 = Competition stats
     @State private var cardPageIndex: Int = 0
     @State private var activeCompetitions: [[String: Any]] = []
+    @State private var pendingCompetitions: [[String: Any]] = []   // comps user is in but not yet started
+    @State private var wonCompetitions: [[String: Any]] = []       // completed comps user won (shown until dismissed)
+    @State private var homeWinCardData: WinCardData? = nil
+    @State private var showHomeWinCard: Bool = false
+    @State private var isLoadingHomeWinCard: Bool = false
+    @AppStorage("dismissedWinCardIds") private var dismissedWinCardIdsRaw: String = ""
+    private var dismissedWinCardIds: Set<String> {
+        Set(dismissedWinCardIdsRaw.split(separator: ",").map(String.init))
+    }
+    private func dismissWinCard(_ compId: String) {
+        var ids = dismissedWinCardIds
+        ids.insert(compId)
+        dismissedWinCardIdsRaw = ids.joined(separator: ",")
+        wonCompetitions.removeAll { ($0["id"] as? String) == compId }
+    }
     @State private var activeCompLeaderboards: [String: [[String: Any]]] = [:]
     @State private var activeCompsLoading: Bool = false
     @State private var compLeaderboard: [[String: Any]] = []
@@ -224,6 +258,10 @@ struct ContentView: View {
     var timeUntilDeadline: String {
         if !shouldShowObjective {
             return "No objective today"
+        }
+
+        if !hasAnyObjective {
+            return "No goals set"
         }
 
         if objectiveMet {
@@ -368,14 +406,22 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: 350)
 
-                    // Powered by Strava
-                    Image("powered_by_strava")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 14)
-                        .opacity(0.7)
-                        .padding(.bottom, 8)
-                        .tutorialTarget("strava-badge")
+                    // Powered by Strava — tappable to connect/reconnect
+                    Button(action: {
+                        if !userId.isEmpty {
+                            if let url = URL(string: "https://api.runmatch.io/strava/connect/\(userId)") {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                    }) {
+                        Image("powered_by_strava")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 14)
+                            .padding(.bottom, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .tutorialTarget("strava-badge")
                 }
             }
             .sheet(isPresented: $showPushUpSession) {
@@ -421,6 +467,23 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showSocialSheet) { SocialView() }
+            .sheet(isPresented: $showHomeWinCard) {
+                if let data = homeWinCardData {
+                    WinCardSheet(data: data, isPresented: $showHomeWinCard)
+                }
+            }
+            .sheet(isPresented: $showPendingCompsSheet) {
+                PendingCompsListView(
+                    comps: pendingCompetitions,
+                    onSelectComp: { compId in
+                        showPendingCompsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            selectedCompIdForDetail = compId
+                            showCompDetail = true
+                        }
+                    }
+                )
+            }
             .alert("Competition Entry", isPresented: $joinShowAgreement) {
                 Button("I Agree — Join", role: .destructive) { joinFromInline() }
                 Button("Cancel", role: .cancel) { }
@@ -434,12 +497,14 @@ struct ContentView: View {
             refreshTodayProgress()
             refreshActiveCompetition()
             refreshAllActiveCompetitions()
+            refreshStarterBonusState()
         }
         .onAppear {
             checkAndResetDaily()
             refreshTodayProgress()
             refreshActiveCompetition()
             refreshAllActiveCompetitions()
+            refreshStarterBonusState()
             notificationManager.requestPermissions()
             notificationManager.scheduleReengagementNotifications()
             if shouldShowObjective && hasAnyObjective && !objectiveMet {
@@ -475,6 +540,26 @@ struct ContentView: View {
                 frames: tutorialFrames,
                 steps: appTutorialSteps,
                 onComplete: { hasCompletedTutorial = true }
+            )
+            .transition(.opacity)
+        }
+
+        // ── Starter-bonus celebration sheets (one-shot, gated by @AppStorage) ──
+        if showStarterWinSheet {
+            StarterBonusCelebrationSheet(
+                mode: .starterWin,
+                isPresented: $showStarterWinSheet,
+                onPrimary:   { showCreateCompSheet = true },
+                onSecondary: { showJoinCompSheet = true }
+            )
+            .transition(.opacity)
+        }
+        if showStarterUnlockSheet {
+            StarterBonusCelebrationSheet(
+                mode: .unlock,
+                isPresented: $showStarterUnlockSheet,
+                onPrimary:   { showProfileView = true },
+                onSecondary: { showCreateCompSheet = true }
             )
             .transition(.opacity)
         }
@@ -724,7 +809,140 @@ struct ContentView: View {
             }
             .padding(20)
         }
+
+            // Past 7 Days streak strip
+            past7DaysStrip
         }
+    }
+
+    // 7-day strip showing each of the last 7 days as a small circle:
+    // gold checkmark = objective met, red X = missed, outlined = today,
+    // gray = upcoming/no data. Weekday abbreviation below each.
+    // State for the 7-day strip — fetched from the backend.
+    // Each entry: (dateString, dayLabel, status) where status is
+    // "completed" / "missed" / "pending" / "none".
+    @State private var weekHistory: [(String, String, String)] = []
+
+    private var past7DaysStrip: some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let cal = Calendar.current
+        let today = Date()
+        let weekday = cal.component(.weekday, from: today)
+        let daysSinceMonday = (weekday + 5) % 7
+        let monday = cal.date(byAdding: .day, value: -daysSinceMonday, to: today) ?? today
+        let labels = ["M","T","W","T","F","S","S"]
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+
+        // If we have server data, use it. Otherwise build placeholder from calendar.
+        let days: [(String, String, String)] = {
+            if !weekHistory.isEmpty { return weekHistory }
+            return (0..<7).map { offset in
+                let date = cal.date(byAdding: .day, value: offset, to: monday) ?? today
+                let ds = fmt.string(from: date)
+                let isToday = cal.isDateInToday(date)
+                return (ds, labels[offset], isToday ? "pending" : "none")
+            }
+        }()
+
+        return VStack(spacing: 8) {
+            HStack {
+                Text("This Week")
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                Spacer()
+            }
+            HStack(spacing: 0) {
+                ForEach(0..<min(days.count, 7), id: \.self) { i in
+                    let (dateStr, label, status) = days[i]
+                    let isToday = dateStr == fmt.string(from: today)
+                    VStack(spacing: 4) {
+                        ZStack {
+                            if status == "completed" {
+                                Circle().fill(goldColor)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundStyle(.white)
+                            } else if status == "missed" {
+                                Circle().fill(Color.red.opacity(0.12))
+                                    .overlay(Circle().stroke(Color.red.opacity(0.4), lineWidth: 1))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(Color.red)
+                            } else if isToday {
+                                Circle()
+                                    .fill(goldColor.opacity(0.12))
+                                    .overlay(Circle().stroke(goldColor, lineWidth: 2))
+                                Text("Now")
+                                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                                    .foregroundStyle(goldColor)
+                            } else {
+                                Circle()
+                                    .fill(Color.black.opacity(0.04))
+                                    .overlay(Circle().stroke(Color.black.opacity(0.1), lineWidth: 1))
+                            }
+                        }
+                        .frame(width: 34, height: 34)
+                        Text(label)
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.45))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                )
+        )
+        .onAppear { fetchWeekHistory() }
+    }
+
+    private func fetchWeekHistory() {
+        guard !userId.isEmpty else { return }
+        guard let url = URL(string: "https://api.runmatch.io/objectives/history/\(userId)?days=7") else { return }
+        var req = URLRequest(url: url)
+        AuthToken.applyTo(&req)
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let entries = json["days"] as? [[String: Any]] else { return }
+
+            let cal = Calendar.current
+            let today = Date()
+            let weekday = cal.component(.weekday, from: today)
+            let daysSinceMonday = (weekday + 5) % 7
+            let monday = cal.date(byAdding: .day, value: -daysSinceMonday, to: today) ?? today
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd"
+            let labels = ["M","T","W","T","F","S","S"]
+
+            // Map server data by date for fast lookup
+            var statusByDate: [String: String] = [:]
+            for e in entries {
+                if let d = e["date"] as? String, let s = e["status"] as? String {
+                    statusByDate[d] = s
+                }
+            }
+
+            // Build Mon→Sun with server status merged in
+            let result = (0..<7).map { offset -> (String, String, String) in
+                let date = cal.date(byAdding: .day, value: offset, to: monday) ?? today
+                let ds = fmt.string(from: date)
+                let status = statusByDate[ds] ?? "none"
+                return (ds, labels[offset], status)
+            }
+
+            DispatchQueue.main.async {
+                self.weekHistory = result
+            }
+        }.resume()
     }
 
     // ── Page 0: Competition stats (default) — action chips + comp tiles ──
@@ -760,6 +978,16 @@ struct ContentView: View {
             }
             .tutorialTarget("compete-button")
 
+            // ── Waiting-to-start pill ──
+            // Appears only when the user has 1+ pending comps. Tap takes them
+            // straight to the lobby (single comp → its detail view; multiple
+            // → the all-comps page where every pending one lives in its
+            // section).
+            if !pendingCompetitions.isEmpty {
+                pendingCompsPill(gold: goldColor)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Inline join input (slides down when toggled)
             if showJoinCodeInput {
                 inlineJoinCodeBar(gold: goldColor)
@@ -768,15 +996,23 @@ struct ContentView: View {
                     .transition(.opacity)
             }
 
-            // Comp tiles float directly — no bounding rectangle.
-            if activeCompetitions.isEmpty {
+            // Won comps — persistent gold cards until user taps X.
+            ForEach(Array(wonCompetitions.enumerated()), id: \.offset) { _, comp in
+                wonCompTile(comp: comp)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
+
+            // Active comp tiles
+            if activeCompetitions.isEmpty && wonCompetitions.isEmpty {
                 competitionsEmptyState
                     .tutorialTarget("competitions-card")
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 10) {
                         ForEach(Array(activeCompetitions.enumerated()), id: \.offset) { _, comp in
+                            let isStarter = (comp["isStarter"] as? Bool) ?? false
                             compTile(comp: comp)
+                                .tutorialTarget(isStarter ? "starter-comp" : "")
                         }
                     }
                     .padding(.vertical, 2)
@@ -784,6 +1020,213 @@ struct ContentView: View {
                 .tutorialTarget("competitions-card")
             }
         }
+    }
+
+    // Compact pill that shows the count of pending comps + a chevron. Sized
+    // ~ half the action-chip-row width so it reads as a secondary affordance
+    // rather than competing with New / Join / Past.
+    private func pendingCompsPill(gold: Color) -> some View {
+        let count = pendingCompetitions.count
+
+        return Button(action: openPendingComps) {
+            HStack(spacing: 8) {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(gold)
+                Text("\(count) match\(count == 1 ? "" : "es") waiting to start")
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.7))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(gold)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color.white)
+                    .overlay(Capsule().stroke(gold.opacity(0.5), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+
+    @State private var showPendingCompsSheet: Bool = false
+
+    private func openPendingComps() {
+        if pendingCompetitions.count == 1,
+           let compId = pendingCompetitions.first?["id"] as? String {
+            selectedCompIdForDetail = compId
+            showCompDetail = true
+        } else {
+            showPendingCompsSheet = true
+        }
+    }
+
+    // ── Win card tile: gold accent, comp name, share button, dismissible X ──
+    private func wonCompTile(comp: [String: Any]) -> some View {
+        let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+        let name = comp["name"] as? String ?? "Competition"
+        let compId = comp["id"] as? String ?? ""
+        let participants = comp["participantCount"] as? Int ?? 0
+        let buyIn = comp["buyInAmount"] as? Double ?? 0
+        let seeded = comp["seededAmount"] as? Double ?? 0
+        let pool = buyIn * Double(participants) + seeded
+
+        return HStack(spacing: 12) {
+            // Left: trophy + comp info
+            Image(systemName: "crown.fill")
+                .font(.title2)
+                .foregroundStyle(goldColor)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("YOU WON")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.5)
+                    .foregroundStyle(goldColor)
+                Text(name)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .lineLimit(1)
+                if pool > 0 {
+                    Text("$\(Int(pool)) prize · \(participants) runners")
+                        .font(.system(.caption2, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.5))
+                }
+            }
+
+            Spacer()
+
+            // Share button — opens the win card export directly
+            Button(action: { openWinCard(for: comp) }) {
+                VStack(spacing: 4) {
+                    if isLoadingHomeWinCard {
+                        ProgressView().scaleEffect(0.7).tint(goldColor)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
+                    Text("Share")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                }
+                .foregroundStyle(goldColor)
+                .frame(width: 60, height: 56)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(goldColor.opacity(0.12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(goldColor.opacity(0.3), lineWidth: 1))
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Dismiss X
+            Button(action: { withAnimation { dismissWinCard(compId) } }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(Color.black.opacity(0.35))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(goldColor.opacity(0.6), lineWidth: 2)
+                )
+        )
+        .shadow(color: goldColor.opacity(0.15), radius: 8, y: 3)
+    }
+
+    // Opens the win card export sheet directly — fetches leaderboard, builds
+    // WinCardData, presents WinCardSheet. Bypasses the comp detail entirely.
+    private func openWinCard(for comp: [String: Any]) {
+        guard let compId = comp["id"] as? String,
+              let url = URL(string: "https://api.runmatch.io/compete/\(compId)/leaderboard") else { return }
+        isLoadingHomeWinCard = true
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 15
+        AuthToken.applyTo(&req)
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            DispatchQueue.main.async {
+                self.isLoadingHomeWinCard = false
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let competition = json["competition"] as? [String: Any],
+                      let leaderboard = json["leaderboard"] as? [[String: Any]] else { return }
+
+                let name = competition["name"] as? String ?? ""
+                let scoring = (competition["scoringType"] as? String) ?? (competition["scoring_type"] as? String) ?? ""
+                let duration = (competition["durationDays"] as? Int) ?? (competition["duration_days"] as? Int) ?? 0
+                let buyIn: Double = {
+                    for key in ["buyInAmount", "buy_in_amount"] {
+                        if let d = competition[key] as? Double { return d }
+                        if let i = competition[key] as? Int { return Double(i) }
+                        if let s = competition[key] as? String, let v = Double(s) { return v }
+                    }
+                    return 0
+                }()
+                let seeded: Double = {
+                    for key in ["seededAmount", "seeded_amount"] {
+                        if let d = competition[key] as? Double { return d }
+                        if let i = competition[key] as? Int { return Double(i) }
+                        if let s = competition[key] as? String, let v = Double(s) { return v }
+                    }
+                    return 0
+                }()
+                let participants = (competition["totalParticipants"] as? Int) ?? leaderboard.count
+                let pool = buyIn * Double(participants) + seeded
+                let winner = leaderboard.first
+                let winnerName = (winner?["fullName"] as? String) ?? (winner?["name"] as? String) ?? "Winner"
+                let winnerScore = (winner?["score"] as? Double) ?? Double((winner?["score"] as? Int) ?? 0)
+
+                let fmt = DateFormatter()
+                fmt.dateFormat = "MMMM yyyy"
+                let monthYear = fmt.string(from: Date())
+
+                var finishTime: String? = nil
+                if scoring == "race",
+                   let startedAt = (competition["startedAt"] as? String) ?? (competition["started_at"] as? String),
+                   let completedAt = (competition["completedAt"] as? String) ?? (competition["completed_at"] as? String) {
+                    let iso = ISO8601DateFormatter()
+                    iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    // Try with fractional seconds first, then without
+                    let s = iso.date(from: startedAt) ?? {
+                        let iso2 = ISO8601DateFormatter()
+                        return iso2.date(from: startedAt)
+                    }()
+                    let e = iso.date(from: completedAt) ?? {
+                        let iso2 = ISO8601DateFormatter()
+                        return iso2.date(from: completedAt)
+                    }()
+                    if let s = s, let e = e {
+                        let diff = max(0, Int(e.timeIntervalSince(s)))
+                        let d = diff / 86400, h = (diff % 86400) / 3600, m = (diff % 3600) / 60
+                        if d > 0 { finishTime = "\(d)d \(h)h \(m)m" }
+                        else if h > 0 { finishTime = "\(h)h \(m)m" }
+                        else { finishTime = "\(max(1, m))m" }
+                    }
+                }
+
+                let winnerMovingTime = (winner?["totalMovingTimeSeconds"] as? Int) ?? 0
+
+                self.homeWinCardData = WinCardData(
+                    winnerName: winnerName,
+                    competitionName: name,
+                    scoringType: scoring,
+                    distanceMiles: winnerScore,
+                    durationDays: duration,
+                    finishTime: finishTime,
+                    totalMovingTimeSeconds: winnerMovingTime,
+                    prizeAmount: pool,
+                    totalParticipants: participants,
+                    monthYear: monthYear
+                )
+                self.showHomeWinCard = true
+            }
+        }.resume()
     }
 
     private func compActionChip(label: String, systemImage: String, isPrimary: Bool,
@@ -898,8 +1341,24 @@ struct ContentView: View {
                         .padding(8).frame(maxWidth: .infinity).background(Color.orange.opacity(0.1)).cornerRadius(8)
                 }
                 if joinShowStravaRequired {
-                    Text("Connect Strava in Profile to join.").font(.system(.caption, design: .rounded)).foregroundStyle(.orange)
-                        .padding(8).background(Color.orange.opacity(0.1)).cornerRadius(8)
+                    Button(action: {
+                        if !userId.isEmpty, let url = URL(string: "https://api.runmatch.io/strava/connect/\(userId)") {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "link")
+                                .font(.caption2.weight(.bold))
+                            Text("Connect Strava to join")
+                                .font(.system(.caption, design: .rounded, weight: .semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(10)
+                        .background(Color(red: 0.988, green: 0.322, blue: 0.0))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
                 }
                 Button {
                     if (objType == "run" || objType == "both") && !stravaConnectedHome {
@@ -1035,9 +1494,13 @@ struct ContentView: View {
     }
 
     private func compPrize(_ comp: [String: Any]) -> Int {
-        if let n = comp["prizePool"] as? Int { return n }
-        if let n = comp["prizePool"] as? Double { return Int(n) }
-        return 0
+        if let n = comp["prizePool"] as? Int, n > 0 { return n }
+        if let n = comp["prizePool"] as? Double, n > 0 { return Int(n) }
+        let buyIn = (comp["buyInAmount"] as? Double) ?? Double(comp["buyInAmount"] as? Int ?? 0)
+        let seeded = (comp["seededAmount"] as? Double) ?? Double(comp["seededAmount"] as? Int ?? 0)
+        let participants = Double(comp["participantCount"] as? Int ?? 0)
+        let total = buyIn * participants + seeded
+        return Int(total)
     }
 
     private func ordinal(_ rank: Int) -> String {
@@ -1073,13 +1536,18 @@ struct ContentView: View {
         let progress = target > 0 ? min(1.0, lb.myScore / target) : 0
         let behind = max(0, lb.leaderScore - lb.myScore)
 
+        let isStarter = (comp["isStarter"] as? Bool) ?? false
+
         return VStack(spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
                 Text(compNameUpper(comp))
                     .font(.system(.caption, design: .rounded, weight: .bold))
                     .foregroundStyle(Color.black)
                     .lineLimit(1)
                 Spacer()
+                if isStarter {
+                    tilePill("STARTER", gold: goldColor)
+                }
                 tilePill("RACE", gold: goldColor)
             }
 
@@ -1110,7 +1578,7 @@ struct ContentView: View {
                 }
                 Spacer()
                 Text("$\(compPrize(comp))")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(goldColor)
             }
 
@@ -1170,7 +1638,7 @@ struct ContentView: View {
                     .foregroundStyle(Color.black)
                 Spacer()
                 Text("$\(compPrize(comp))")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(goldColor)
             }
 
@@ -1271,7 +1739,7 @@ struct ContentView: View {
                     .foregroundStyle(Color.black)
                 Spacer()
                 Text("$\(compPrize(comp))")
-                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(goldColor)
             }
 
@@ -1401,6 +1869,47 @@ struct ContentView: View {
     }
 
     // ── Fetch all active competitions + their leaderboards for the swipe page ──
+    // Pulls the latest starter-bonus state from the server. Detects
+    // transitions:
+    //   • amount went 0 → >0     → starter win (show celebration sheet)
+    //   • unlocked went false → true → bonus unlock (show celebration sheet)
+    // Fires each celebration exactly once via the seen* @AppStorage flags.
+    private func refreshStarterBonusState() {
+        guard !userId.isEmpty else { return }
+        guard let url = URL(string: "https://api.runmatch.io/users/\(userId)/balance") else { return }
+        var req = URLRequest(url: url)
+        AuthToken.applyTo(&req)
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            DispatchQueue.main.async {
+                let prevAmount = self.starterBonusAmount
+                let prevUnlocked = self.starterBonusUnlocked
+
+                let newAmount = (json["starterBonusAmount"] as? Double) ?? 0
+                let newUnlocked = (json["starterBonusUnlocked"] as? Bool) ?? true
+                let newEarnings = (json["compEarningsTotal"] as? Double) ?? 0
+                let newCompId = (json["starterCompId"] as? String) ?? ""
+
+                self.starterBonusAmount = newAmount
+                self.starterBonusUnlocked = newUnlocked
+                self.compEarningsTotal = newEarnings
+                self.starterCompId = newCompId
+
+                // Trigger 1 — Starter win: locked-bonus amount went from 0 to >0
+                if prevAmount == 0 && newAmount > 0 && !self.seenStarterWinCelebration {
+                    self.seenStarterWinCelebration = true
+                    self.showStarterWinSheet = true
+                }
+                // Trigger 2 — Unlock: unlocked flipped false → true with a real bonus
+                if !prevUnlocked && newUnlocked && !self.seenStarterUnlockCelebration {
+                    self.seenStarterUnlockCelebration = true
+                    self.showStarterUnlockSheet = true
+                }
+            }
+        }.resume()
+    }
+
     private func refreshAllActiveCompetitions() {
         guard !userId.isEmpty else { return }
         guard !activeCompsLoading else { return }
@@ -1429,8 +1938,23 @@ struct ContentView: View {
                     return aD < bD
                 }
 
+            // Pending = comps the user has joined or created that haven't been
+            // started yet. These power the "Matches waiting to start" pill.
+            let pending = comps.filter { ($0["status"] as? String) == "pending" }
+
+            // Won = completed comps where I'm the winner, not yet dismissed.
+            let myId = UserDefaults.standard.string(forKey: "userId") ?? ""
+            let dismissed = self.dismissedWinCardIds
+            let won = comps.filter { comp in
+                (comp["status"] as? String) == "completed"
+                && (comp["winnerUserId"] as? String) == myId
+                && !dismissed.contains(comp["id"] as? String ?? "")
+            }
+
             DispatchQueue.main.async {
                 self.activeCompetitions = actives
+                self.pendingCompetitions = pending
+                self.wonCompetitions = won
             }
 
             // Fetch leaderboard for each active comp in parallel
@@ -2295,21 +2819,31 @@ struct ObjectiveSettingsView: View {
             }
             
             if !stravaConnected {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                    Text("Connect Strava in Profile → Account to track runs")
-                        .font(.system(.caption2, design: .rounded))
+                Button(action: {
+                    if let uid = UserDefaults.standard.string(forKey: "userId"),
+                       let url = URL(string: "https://api.runmatch.io/strava/connect/\(uid)") {
+                        UIApplication.shared.open(url)
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "link")
+                            .font(.caption2.weight(.bold))
+                        Text("Connect Strava to track runs")
+                            .font(.system(.caption2, design: .rounded, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color(red: 0.988, green: 0.322, blue: 0.0))
+                    .cornerRadius(6)
                 }
-                .foregroundStyle(Color.orange)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(.plain)
             }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 4)
         .background(settings.runIsSet ? Color.green.opacity(0.05) : Color.clear)
         .cornerRadius(8)
-        .opacity(stravaConnected ? 1 : 0.7)
     }
     
     // Check if pushups target has been changed from saved value
@@ -2837,9 +3371,15 @@ struct ObjectiveSettingsView: View {
                 Text("Your settings will be locked and cannot be changed until \(nextDeadlineDescription). This keeps you committed to your goals.")
             }
             .alert("Strava Required", isPresented: $showStravaRequiredAlert) {
-                Button("OK", role: .cancel) { }
+                Button("Connect Strava") {
+                    if let uid = UserDefaults.standard.string(forKey: "userId"),
+                       let url = URL(string: "https://api.runmatch.io/strava/connect/\(uid)") {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Connect Strava in your Profile to track run objectives. Go to Profile → Account → Strava.")
+                Text("Connect Strava to track your run objectives.")
             }
             .alert("Remove Deadline?", isPresented: $showUnsetDeadlineConfirm) {
                 Button("Cancel", role: .cancel) { }
@@ -4296,6 +4836,12 @@ struct ProfileView: View {
     // MARK: - Combined Stakes & Balance Section
     
     @State private var isStakesExpanded: Bool = true
+
+    // Starter bonus state (read-only mirror of what ContentView writes).
+    // Drives the "$10 starter bonus pending" indicator under the balance row.
+    @AppStorage("starterBonusAmount") private var starterBonusAmount: Double = 0
+    @AppStorage("starterBonusUnlocked") private var starterBonusUnlocked: Bool = true
+    @AppStorage("compEarningsTotal") private var compEarningsTotal: Double = 0
     
     private var stakesAndBalanceSection: some View {
         let goldColor = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
@@ -4415,7 +4961,26 @@ struct ProfileView: View {
                         .disabled(addFundsAmount.isEmpty)
                     }
                 }
-                
+
+                // ── Starter bonus pending indicator ──
+                // Visible while the user has won their seeded $10 but hasn't
+                // crossed the $50 lifetime-comp-earnings unlock threshold.
+                if !starterBonusUnlocked && starterBonusAmount > 0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(goldColor)
+                        Text("$\(starterBonusAmount, specifier: "%.0f") starter bonus pending")
+                            .font(.system(.caption, design: .rounded, weight: .semibold))
+                            .foregroundStyle(Color.black.opacity(0.7))
+                        Spacer()
+                        Text("$\(compEarningsTotal, specifier: "%.0f") / $50 earned")
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(goldColor)
+                    }
+                    .padding(.vertical, 4)
+                }
+
                 Divider()
                 
                 // Daily Stakes label
@@ -5146,7 +5711,6 @@ struct ProfileView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(height: 14)
-                    .opacity(0.7)
                 Spacer()
             }
             .padding(.top, 2)
@@ -5606,13 +6170,17 @@ struct ProfileView: View {
 
         isSavingProfile = true
 
+        // NOTE: This profile-save endpoint historically blasted
+        // objective_type/count fields here, which would clobber the user's
+        // actual run objective every time they edited their name/email.
+        // Those fields belong to the objectives flow (saveObjectiveToBackend)
+        // and are explicitly omitted here so saving the profile leaves the
+        // existing objective settings untouched.
         let body: [String: Any] = [
             "fullName": trimmedName,
             "email": trimmedEmail,
             "phone": trimmedPhone,
             "password": trimmedPassword,
-            "objective_type": "pushups",
-            "objective_count": pushupObjective,
             "objective_schedule": scheduleType.lowercased(),
             "objective_deadline": formatDeadlineForBackend(objectiveDeadline),
             "missed_goal_payout": committedPayoutAmount > 0 ? committedPayoutAmount : missedGoalPayout,
@@ -5844,10 +6412,11 @@ struct ProfileView: View {
                 if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
                     self.stravaConnected = false
                     self.stravaAthleteName = ""
-                    // Reset to pushups if currently on run
-                    if self.objectiveType == "run" {
-                        self.objectiveType = "pushups"
-                    }
+                    // Don't auto-flip objective_type on Strava disconnect.
+                    // Pushups is no longer the default objective and we
+                    // shouldn't silently change the user's choice. Their run
+                    // objective will simply stop tracking until they
+                    // reconnect Strava.
                     print("✅ Strava disconnected")
                 }
             }
@@ -6451,42 +7020,29 @@ struct CompeteView: View {
                 if isLoading {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("Loading competitions...")
+                        Text("Loading past matches...")
                             .font(.system(.caption, design: .rounded))
                             .foregroundStyle(Color.gray)
                     }
                 } else {
-                    let hasActiveOrPending = competitions.contains { ($0["status"] as? String) == "active" || ($0["status"] as? String) == "pending" }
-                    if hasActiveOrPending {
-                        competeList
+                    let completed = competitions.filter { ($0["status"] as? String) == "completed" }
+                    if completed.isEmpty {
+                        pastCompsEmptyState
                     } else {
-                        competeEmptyState
+                        pastCompsList(completed)
                     }
                 }
             }
-            .navigationTitle("Compete")
+            .navigationTitle("Past Matches")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button(action: { showContestRules = true }) {
-                            Image(systemName: "doc.text")
-                                .font(.caption)
-                        }
-                        Menu {
-                            Button(action: { showCreateSheet = true }) {
-                                Label("Create Competition", systemImage: "plus.circle")
-                            }
-                            Button(action: { showJoinSheet = true }) {
-                                Label("Join with Code", systemImage: "ticket")
-                            }
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.body.weight(.semibold))
-                        }
+                    Button(action: { showContestRules = true }) {
+                        Image(systemName: "doc.text")
+                            .font(.caption)
                     }
                 }
             }
@@ -6581,6 +7137,35 @@ struct CompeteView: View {
         }
     }
     
+    private var pastCompsEmptyState: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 50))
+                .foregroundStyle(goldColor.opacity(0.5))
+            Text("No Past Matches")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+            Text("Completed competitions will show up here.")
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(Color.gray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+            Spacer()
+        }
+    }
+
+    private func pastCompsList(_ completed: [[String: Any]]) -> some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                ForEach(completed.indices, id: \.self) { i in
+                    competitionCard(completed[i])
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+        }
+    }
+
     private var competeEmptyState: some View {
         VStack(spacing: 24) {
             Image(systemName: "trophy.fill")
@@ -6922,26 +7507,54 @@ struct CompeteView: View {
                 }
                 .padding(14)
                 
-                if (isActive || isPending) && (buyIn > 0 || isSeededComp) {
+                if (buyIn > 0 || isSeededComp || poolTotal > 0 || isCompleted) {
                     Divider().padding(.horizontal, 14)
                     HStack(spacing: 6) {
-                        Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "dollarsign.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(goldColor)
-                        if isSeededComp && buyIn == 0 {
-                            Text("Free Entry")
-                                .font(.system(.caption2, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.green)
-                        } else {
-                            Text("$\(Int(buyIn)) buy-in")
+                        if isCompleted && iWon {
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(goldColor)
+                            Text("Won $\(Int(poolTotal))")
+                                .font(.system(.caption2, design: .rounded, weight: .bold))
+                                .foregroundStyle(goldColor)
+                            Text("·")
+                                .foregroundStyle(Color.gray.opacity(0.4))
+                            Text("\(participants) runners")
                                 .font(.system(.caption2, design: .rounded, weight: .medium))
                                 .foregroundStyle(Color.black.opacity(0.6))
+                        } else if isCompleted {
+                            Image(systemName: "flag.checkered")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.gray)
+                            Text("\(participants) runners")
+                                .font(.system(.caption2, design: .rounded, weight: .medium))
+                                .foregroundStyle(Color.black.opacity(0.6))
+                            if poolTotal > 0 {
+                                Text("·")
+                                    .foregroundStyle(Color.gray.opacity(0.4))
+                                Text("$\(Int(poolTotal)) pot")
+                                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black.opacity(0.5))
+                            }
+                        } else {
+                            Image(systemName: isSeededComp && buyIn == 0 ? "gift.fill" : "dollarsign.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(goldColor)
+                            if isSeededComp && buyIn == 0 {
+                                Text("Free Entry")
+                                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.green)
+                            } else {
+                                Text("$\(Int(buyIn)) buy-in")
+                                    .font(.system(.caption2, design: .rounded, weight: .medium))
+                                    .foregroundStyle(Color.black.opacity(0.6))
+                            }
+                            Text("·")
+                                .foregroundStyle(Color.gray.opacity(0.4))
+                            Text("$\(Int(poolTotal)) prize")
+                                .font(.system(.caption2, design: .rounded, weight: .bold))
+                                .foregroundStyle(goldColor)
                         }
-                        Text("·")
-                            .foregroundStyle(Color.gray.opacity(0.4))
-                        Text("$\(Int(poolTotal)) prize")
-                            .font(.system(.caption2, design: .rounded, weight: .bold))
-                            .foregroundStyle(goldColor)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -6954,11 +7567,11 @@ struct CompeteView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(
-                        iWon ? goldColor.opacity(0.5) : (isActive ? goldColor.opacity(0.15) : (isPending ? Color.orange.opacity(0.15) : Color.clear)),
-                        lineWidth: iWon ? 1.5 : 1
+                        iWon ? goldColor : (isActive ? goldColor.opacity(0.15) : (isPending ? Color.orange.opacity(0.15) : Color.black.opacity(0.06))),
+                        lineWidth: iWon ? 2 : 1
                     )
             )
-            .shadow(color: iWon ? goldColor.opacity(0.12) : Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
+            .shadow(color: iWon ? goldColor.opacity(0.2) : Color.black.opacity(0.06), radius: iWon ? 10 : 8, x: 0, y: 3)
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -6999,6 +7612,7 @@ struct CompeteView: View {
                 
                 let winnerName = winner["name"] as? String ?? "You"
                 let winnerScore = winner["score"] as? Double ?? 0
+                let winnerMovingTime = winner["totalMovingTimeSeconds"] as? Int ?? 0
                 
                 let formatter = DateFormatter()
                 formatter.dateFormat = "MMMM yyyy"
@@ -7011,6 +7625,7 @@ struct CompeteView: View {
                     distanceMiles: winnerScore,
                     durationDays: totalDays,
                     finishTime: nil,
+                    totalMovingTimeSeconds: winnerMovingTime,
                     prizeAmount: poolTotal,
                     totalParticipants: max(1, totalParticipants),
                     monthYear: monthYear
@@ -7942,16 +8557,24 @@ struct JoinCompetitionView: View {
                     }
                     
                     if showStravaRequired {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(Color.orange)
-                            Text("This competition has a running objective. Connect Strava in Profile → Account to join.")
-                                .font(.system(.caption, design: .rounded))
-                                .foregroundStyle(Color.orange)
+                        Button(action: {
+                            if let url = URL(string: "https://api.runmatch.io/strava/connect/\(userId)") {
+                                UIApplication.shared.open(url)
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "link")
+                                    .font(.caption.weight(.bold))
+                                Text("Connect Strava to join")
+                                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(10)
+                            .background(Color(red: 0.988, green: 0.322, blue: 0.0))
+                            .cornerRadius(8)
                         }
-                        .padding(10)
-                        .background(Color.orange.opacity(0.1))
-                        .cornerRadius(8)
+                        .buttonStyle(.plain)
                     }
                     
                     Button(action: {
@@ -8120,9 +8743,15 @@ struct CompetitionDetailView: View {
                 Text(insufficientNames)
             }
             .alert("Strava Required", isPresented: $showStravaRequiredForStart) {
-                Button("OK", role: .cancel) { }
+                Button("Connect Strava") {
+                    if let uid = UserDefaults.standard.string(forKey: "userId"),
+                       let url = URL(string: "https://api.runmatch.io/strava/connect/\(uid)") {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This competition includes running. Connect Strava before starting so runs can be tracked. Go to Profile → Account → Strava.")
+                Text("This competition includes running. Connect Strava so your runs can be tracked.")
             }
             .sheet(isPresented: $showPushUpSession, onDismiss: { loadLeaderboard() }) {
                 PushUpSessionView(todayPushUpCount: $todayPushUpCount, objective: 0, isInCompetition: true)
@@ -8585,7 +9214,6 @@ struct CompetitionDetailView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(height: 14)
-                        .opacity(0.5)
                     
                     Text("Apple does not sponsor, endorse, or administer RunMatch competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
@@ -8822,7 +9450,6 @@ struct CompetitionDetailView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(height: 14)
-                        .opacity(0.5)
                     
                     Text("Apple does not sponsor, endorse, or administer RunMatch competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
@@ -8854,6 +9481,7 @@ struct CompetitionDetailView: View {
         
         let winnerName = winner["name"] as? String ?? "You"
         let winnerScore = winner["score"] as? Double ?? 0
+        let winnerMovingTime = winner["totalMovingTimeSeconds"] as? Int ?? 0
         
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM yyyy"
@@ -8866,6 +9494,7 @@ struct CompetitionDetailView: View {
             distanceMiles: winnerScore,
             durationDays: totalDays,
             finishTime: nil,
+            totalMovingTimeSeconds: winnerMovingTime,
             prizeAmount: poolTotal,
             totalParticipants: max(1, totalParticipants),
             monthYear: monthYear
@@ -9537,24 +10166,24 @@ struct CompetitionDetailView: View {
                                 .scaledToFit()
                                 .frame(height: 12)
                             Rectangle()
-                                .fill(Color.orange.opacity(0.3))
+                                .fill(Color(red: 0.988, green: 0.322, blue: 0.0))
                                 .frame(width: 1, height: 16)
                             Text("Start & end all runs in Strava to be logged")
-                                .font(.system(.caption2, design: .rounded, weight: .medium))
-                                .foregroundStyle(Color.black.opacity(0.6))
+                                .font(.system(.caption2, design: .rounded, weight: .semibold))
+                                .foregroundStyle(.white)
                             Spacer()
                             Image(systemName: "arrow.up.right.square")
                                 .font(.caption)
-                                .foregroundStyle(Color.orange)
+                                .foregroundStyle(.white)
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.orange.opacity(0.06))
+                                .fill(Color(red: 0.988, green: 0.322, blue: 0.0).opacity(0.85))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.orange.opacity(0.15), lineWidth: 1)
+                                        .stroke(Color(red: 0.988, green: 0.322, blue: 0.0), lineWidth: 1)
                                 )
                         )
                     }
@@ -9786,7 +10415,6 @@ struct CompetitionDetailView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(height: 14)
-                        .opacity(0.5)
                     
                     Text("Apple does not sponsor, endorse, or administer RunMatch competitions. No prizes are provided by Apple.")
                         .font(.system(.caption2, design: .rounded))
@@ -10545,9 +11173,20 @@ struct WinCardData {
     let distanceMiles: Double
     let durationDays: Int
     let finishTime: String?     // race comps only
+    let totalMovingTimeSeconds: Int
     let prizeAmount: Double
     let totalParticipants: Int
     let monthYear: String
+
+    var formattedMovingTime: String {
+        let t = totalMovingTimeSeconds
+        if t <= 0 { return "—" }
+        let h = t / 3600
+        let m = (t % 3600) / 60
+        let s = t % 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m \(s)s"
+    }
 }
 
 /// The shareable win card. Typography and spacing scale from `cardWidth`
@@ -10569,16 +11208,20 @@ struct WinCardView: View {
     
     private var durationLabel: String {
         switch data.scoringType {
-        case "race": return "Finish Time"
+        case "race": return data.totalMovingTimeSeconds > 0 ? "Run Time" : "Finish Time"
         default: return "Duration"
         }
     }
     
     private var durationValue: String {
         switch data.scoringType {
-        case "race": return data.finishTime ?? "—"
+        case "race":
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return data.finishTime ?? "—"
         case "consistency": return "\(data.durationDays) days straight"
-        default: return "in \(data.durationDays) days"
+        default:
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return "in \(data.durationDays) days"
         }
     }
     
@@ -10792,11 +11435,19 @@ enum WinCardMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum OverlayStyle: String, CaseIterable, Identifiable {
+    case bottomBar = "Classic"
+    case leftStack = "Left"
+    case centerStack = "Center"
+    var id: String { rawValue }
+}
+
 struct WinCardSheet: View {
     let data: WinCardData
     @Binding var isPresented: Bool
     @State private var savedToPhotos = false
     @State private var mode: WinCardMode = .card
+    @State private var overlayStyle: OverlayStyle = .bottomBar
     @State private var pickedItem: PhotosPickerItem? = nil
     @State private var overlayPhoto: UIImage? = nil
     @State private var isLoadingPhoto: Bool = false
@@ -10807,13 +11458,26 @@ struct WinCardSheet: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Apple-style segmented control
-                    Picker("Mode", selection: $mode) {
+                    // Card / Overlay toggle — white text so it reads on the dark bg
+                    HStack(spacing: 0) {
                         ForEach(WinCardMode.allCases) { m in
-                            Text(m.rawValue).tag(m)
+                            Button(action: { mode = m }) {
+                                Text(m.rawValue)
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(mode == m ? Color.black : Color.white.opacity(0.9))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        mode == m
+                                            ? Capsule().fill(Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1)))
+                                            : Capsule().fill(Color.white.opacity(0.12))
+                                    )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .padding(3)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
                     .padding(.horizontal, 60)
                     .padding(.top, 8)
                     
@@ -10826,7 +11490,8 @@ struct WinCardSheet: View {
                             .shadow(color: Color.black.opacity(0.5), radius: 20, y: 8)
                     } else {
                         if let photo = overlayPhoto {
-                            WinCardOverlayView(data: data, photo: photo, cardWidth: cardWidth)
+                            overlayStylePicker
+                            overlayPreview(photo: photo, cardWidth: cardWidth)
                                 .shadow(color: Color.black.opacity(0.5), radius: 20, y: 8)
                         } else {
                             // Photo placeholder + picker
@@ -10946,19 +11611,65 @@ struct WinCardSheet: View {
         }
     }
     
+    private var overlayStylePicker: some View {
+        HStack(spacing: 0) {
+            ForEach(OverlayStyle.allCases) { style in
+                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { overlayStyle = style } }) {
+                    Text(style.rawValue)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
+                        .foregroundStyle(overlayStyle == style ? Color.black : Color.white.opacity(0.7))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            overlayStyle == style
+                                ? Capsule().fill(gold)
+                                : Capsule().fill(Color.white.opacity(0.08))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.white.opacity(0.08)))
+        .padding(.horizontal, 40)
+    }
+
+    @ViewBuilder
+    private func overlayPreview(photo: UIImage, cardWidth: CGFloat) -> some View {
+        switch overlayStyle {
+        case .bottomBar:
+            WinCardOverlayView(data: data, photo: photo, cardWidth: cardWidth)
+        case .leftStack:
+            WinCardOverlayLeftView(data: data, photo: photo, cardWidth: cardWidth)
+        case .centerStack:
+            WinCardOverlayCenterView(data: data, photo: photo, cardWidth: cardWidth)
+        }
+    }
+
     private var canExport: Bool {
         if mode == .card { return true }
         return overlayPhoto != nil
     }
-    
+
     @MainActor
     private func renderCurrent() -> UIImage? {
         let renderer: ImageRenderer<AnyView>
+        let exportWidth: CGFloat = 1080
+        let exportHeight: CGFloat = 1920
         if mode == .card {
-            renderer = ImageRenderer(content: AnyView(WinCardView(data: data, cardWidth: 1080).frame(width: 1080, height: 1920)))
+            renderer = ImageRenderer(content: AnyView(WinCardView(data: data, cardWidth: exportWidth).frame(width: exportWidth, height: exportHeight)))
         } else {
             guard let photo = overlayPhoto else { return nil }
-            renderer = ImageRenderer(content: AnyView(WinCardOverlayView(data: data, photo: photo, cardWidth: 1080).frame(width: 1080, height: 1920)))
+            let view: AnyView
+            switch overlayStyle {
+            case .bottomBar:
+                view = AnyView(WinCardOverlayView(data: data, photo: photo, cardWidth: exportWidth))
+            case .leftStack:
+                view = AnyView(WinCardOverlayLeftView(data: data, photo: photo, cardWidth: exportWidth))
+            case .centerStack:
+                view = AnyView(WinCardOverlayCenterView(data: data, photo: photo, cardWidth: exportWidth))
+            }
+            renderer = ImageRenderer(content: AnyView(view.frame(width: exportWidth, height: exportHeight)))
         }
         renderer.scale = 1.0
         return renderer.uiImage
@@ -11014,9 +11725,13 @@ struct WinCardOverlayView: View {
     
     private var durationValue: String {
         switch data.scoringType {
-        case "race": return data.finishTime ?? "—"
+        case "race":
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return data.finishTime ?? "—"
         case "consistency": return "\(data.durationDays) days"
-        default: return "\(data.durationDays) days"
+        default:
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return "\(data.durationDays) days"
         }
     }
     
@@ -11132,6 +11847,203 @@ struct WinCardOverlayView: View {
         }
         .frame(width: cardWidth, height: cardHeight)
         .clipShape(RoundedRectangle(cornerRadius: 24 * s))
+    }
+}
+
+/// Strava-style overlay: left-aligned floating text, no boxes.
+struct WinCardOverlayLeftView: View {
+    let data: WinCardData
+    let photo: UIImage
+    let cardWidth: CGFloat
+
+    private let gold = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    private var s: CGFloat { cardWidth / 360.0 }
+    private var cardHeight: CGFloat { cardWidth * (16.0 / 9.0) }
+
+    private var distanceText: String {
+        data.distanceMiles == floor(data.distanceMiles)
+            ? "\(Int(data.distanceMiles)) mi"
+            : String(format: "%.1f mi", data.distanceMiles)
+    }
+
+    private var durationValue: String {
+        switch data.scoringType {
+        case "race":
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return data.finishTime ?? "—"
+        case "consistency": return "\(data.durationDays) days"
+        default:
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return "\(data.durationDays) days"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: cardWidth, height: cardHeight)
+                .clipped()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("DISTANCE")
+                    .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                    .tracking(1.5 * s)
+                    .foregroundStyle(Color.white.opacity(0.7))
+                Text(distanceText)
+                    .font(.system(size: 38 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+
+                dividerLine
+
+                Text("WINNINGS")
+                    .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                    .tracking(1.5 * s)
+                    .foregroundStyle(gold)
+                Text("$\(Int(data.prizeAmount))")
+                    .font(.system(size: 44 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(gold)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+
+                dividerLine
+
+                Text("TIME")
+                    .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                    .tracking(1.5 * s)
+                    .foregroundStyle(Color.white.opacity(0.7))
+                Text(durationValue)
+                    .font(.system(size: 38 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+
+                HStack(spacing: 4 * s) {
+                    Image("RunMatchLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22 * s, height: 22 * s)
+                    HStack(spacing: 0) {
+                        Text("RUN").foregroundStyle(gold)
+                        Text("MATCH").foregroundStyle(Color.white)
+                    }
+                    .font(.system(size: 13 * s, weight: .semibold, design: .serif))
+                    .shadow(color: .black.opacity(0.5), radius: 4, y: 2)
+                }
+                .padding(.top, 14 * s)
+            }
+            .padding(.leading, 24 * s)
+            .padding(.bottom, 36 * s)
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 24 * s))
+    }
+
+    private var dividerLine: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.3))
+            .frame(width: 30 * s, height: 2 * s)
+            .padding(.vertical, 8 * s)
+    }
+}
+
+/// Strava-style overlay: center-aligned floating text, no boxes.
+struct WinCardOverlayCenterView: View {
+    let data: WinCardData
+    let photo: UIImage
+    let cardWidth: CGFloat
+
+    private let gold = Color(UIColor(red: 0.85, green: 0.65, blue: 0, alpha: 1))
+    private var s: CGFloat { cardWidth / 360.0 }
+    private var cardHeight: CGFloat { cardWidth * (16.0 / 9.0) }
+
+    private var distanceText: String {
+        data.distanceMiles == floor(data.distanceMiles)
+            ? "\(Int(data.distanceMiles)) mi"
+            : String(format: "%.1f mi", data.distanceMiles)
+    }
+
+    private var durationValue: String {
+        switch data.scoringType {
+        case "race":
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return data.finishTime ?? "—"
+        case "consistency": return "\(data.durationDays) days"
+        default:
+            if data.totalMovingTimeSeconds > 0 { return data.formattedMovingTime }
+            return "\(data.durationDays) days"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: cardWidth, height: cardHeight)
+                .clipped()
+
+            VStack(spacing: 0) {
+                Spacer()
+
+                Text("DISTANCE")
+                    .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                    .tracking(1.5 * s)
+                    .foregroundStyle(Color.white.opacity(0.7))
+                Text(distanceText)
+                    .font(.system(size: 38 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+
+                dividerLine
+
+                Text("WINNINGS")
+                    .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                    .tracking(1.5 * s)
+                    .foregroundStyle(gold)
+                Text("$\(Int(data.prizeAmount))")
+                    .font(.system(size: 46 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(gold)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+
+                dividerLine
+
+                Text("TIME")
+                    .font(.system(size: 12 * s, weight: .bold, design: .rounded))
+                    .tracking(1.5 * s)
+                    .foregroundStyle(Color.white.opacity(0.7))
+                Text(durationValue)
+                    .font(.system(size: 38 * s, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.white)
+                    .shadow(color: .black.opacity(0.6), radius: 6, y: 3)
+
+                HStack(spacing: 4 * s) {
+                    Image("RunMatchLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22 * s, height: 22 * s)
+                    HStack(spacing: 0) {
+                        Text("RUN").foregroundStyle(gold)
+                        Text("MATCH").foregroundStyle(Color.white)
+                    }
+                    .font(.system(size: 13 * s, weight: .semibold, design: .serif))
+                    .shadow(color: .black.opacity(0.5), radius: 4, y: 2)
+                }
+                .padding(.top, 14 * s)
+
+                Spacer()
+                    .frame(height: 60 * s)
+            }
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 24 * s))
+    }
+
+    private var dividerLine: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.3))
+            .frame(width: 30 * s, height: 2 * s)
+            .padding(.vertical, 8 * s)
     }
 }
 
